@@ -5,11 +5,12 @@ SHELL := /usr/bin/env bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
-# Override via `make release VERSION=0.2.0`.
-VERSION ?= 0.0.0-dev
+# Single source of truth: the VERSION file at repo root. Override on the CLI
+# for one-off builds (`make bundle VERSION=1.2.3`).
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.0.0-dev)
 ARCH    ?= arm64
 
-.PHONY: help build run debug release bundle clean test lint format logo ci-local
+.PHONY: help build run debug release bundle clean test lint format logo ci-local version tag
 
 help:  ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -48,3 +49,14 @@ ci-local:  ## Run what CI runs, locally, end-to-end.
 	swift build -c release
 	$(MAKE) bundle ARCH=arm64
 	$(MAKE) bundle ARCH=x86_64
+
+version:  ## Print the version the build scripts will use.
+	@echo $(VERSION)
+
+tag:  ## Tag HEAD with the current VERSION (strip -dev suffix). Push with `git push --tags`.
+	@v=$$(cat VERSION | sed 's/-dev.*//'); \
+	  if git rev-parse "v$$v" >/dev/null 2>&1; then \
+	    echo "tag v$$v already exists"; exit 1; \
+	  fi; \
+	  git tag -a "v$$v" -m "Kiln $$v"; \
+	  echo "tagged v$$v — push with: git push origin v$$v"
