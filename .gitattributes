@@ -1,0 +1,25 @@
+# Normalize line endings on check-in. LF everywhere.
+* text=auto eol=lf
+
+# Binary-safe: don't let git "fix" line endings in these.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.icns     binary
+*.pdf      binary
+*.p12      binary
+*.p8       binary
+*.zip      binary
+*.tar      binary
+*.tar.xz   binary
+
+# Linguist hints so GitHub's language stats reflect the Swift app, not
+# embedded web assets or release artifacts.
+appcast.xml                   linguist-generated=true
+dist/**                       linguist-generated=true
+Sources/Resources/**          linguist-vendored=true
+scripts/make-app-bundle.sh    linguist-language=Shell
+
+# Keep shell scripts executable on Windows checkouts too.
+scripts/*.sh   text eol=lf

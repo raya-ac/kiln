@@ -22,9 +22,10 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources",
-            resources: [
-                .process("Resources"),
-            ]
+            // AppIcon.icns is only used by scripts/make-app-bundle.sh when
+            // assembling Kiln.app — the Swift runtime never reads it, so
+            // exclude it from SPM's resource handling.
+            exclude: ["App/Resources/AppIcon.icns"]
         ),
     ]
 )

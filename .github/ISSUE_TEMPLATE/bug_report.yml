@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in Kiln is broken or behaves unexpectedly.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. If you think this is a
+        security vulnerability, please **stop** and read
+        [SECURITY.md](../../SECURITY.md) instead of filing here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug in a sentence or two, then walk through what you did.
+      placeholder: |
+        I clicked X, expected Y, got Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps someone else can follow to see the bug.
+      placeholder: |
+        1. Open Kiln
+        2. Go to Settings → Remote Control
+        3. Change the port to 9000
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Kiln version
+      description: From Kiln → About, or the git tag/commit if you built from source.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options:
+        - Apple Silicon (arm64)
+        - Intel (x86_64)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots (optional)
+      description: |
+        Paste anything useful — Console.app output filtered to `Kiln`,
+        screenshots, stack traces, network captures. Feel free to redact.
+      render: shell

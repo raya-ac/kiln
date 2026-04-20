@@ -1,0 +1,10 @@
+# GitHub uses this file to auto-request reviews on PRs.
+# Format: pattern  @owner [@owner …]
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default — everything I haven't named more specifically is mine.
+*                       @raya-ac
+
+# Release/CI infra — any change here should get a careful second pass.
+/.github/workflows/     @raya-ac
+/scripts/               @raya-ac

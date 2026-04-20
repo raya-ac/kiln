@@ -1,0 +1,38 @@
+# Keeps dependencies current without me having to remember. Swift Package
+# Manager support was added in 2024; it reads Package.resolved.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # GitHub Actions workflows — bumps action versions when new releases drop.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Swift package dependencies (MarkdownUI, SwiftTerm, Sparkle).
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+      - "swift"
+    # Keep majors separate so I can eyeball breaking changes;
+    # bundle minors + patches into one PR.
+    groups:
+      swift-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

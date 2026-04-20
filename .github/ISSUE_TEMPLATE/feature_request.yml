@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest something Kiln should do that it doesn't.
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything substantial, please open a discussion first — that way
+        we can agree on the shape before anyone writes code.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Kiln makes awkward or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like to see
+      description: Sketch the UX or API you have in mind. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other shapes you thought about, or workarounds you're using now.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Links, screenshots, references to how other apps handle it, etc.

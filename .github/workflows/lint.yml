@@ -1,0 +1,36 @@
+name: Lint
+
+# Runs swift-format in lint mode on every push/PR. Fails the check if the
+# formatter would have rewritten any Swift source.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  swift-format:
+    name: swift-format --lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode (26+)
+        run: |
+          if [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app
+          fi
+          xcodebuild -version
+
+      - name: swift-format lint
+        # Non-strict: prints diagnostics but doesn't fail the build. Flip to
+        # --strict once the existing code is clean (run `make format` once,
+        # eyeball the diff, then tighten this).
+        run: |
+          swift-format lint \
+            --configuration .swift-format \
+            --recursive \
+            Sources || true

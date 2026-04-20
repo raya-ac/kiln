@@ -1,0 +1,55 @@
+# Auto-drafts release notes from merged PRs. The release.yml workflow still
+# publishes the real release on tag push; this just gives us readable notes
+# instead of a raw commit list.
+# Docs: https://github.com/release-drafter/release-drafter
+
+name-template: "Kiln $RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "✨ Features"
+    labels: ["feature", "enhancement", "feat"]
+  - title: "🐛 Fixes"
+    labels: ["bug", "fix"]
+  - title: "🧹 Internals"
+    labels: ["refactor", "chore", "perf", "infra"]
+  - title: "📚 Docs"
+    labels: ["documentation", "docs"]
+  - title: "📦 Dependencies"
+    labels: ["dependencies"]
+    collapse-after: 5
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+
+version-resolver:
+  major:
+    labels: ["major", "breaking"]
+  minor:
+    labels: ["minor", "feature", "enhancement", "feat"]
+  patch:
+    labels: ["patch", "bug", "fix", "chore", "docs", "dependencies"]
+  default: patch
+
+autolabeler:
+  - label: "feat"
+    title: ['/^feat(\(.*\))?!?:/i']
+  - label: "fix"
+    title: ['/^fix(\(.*\))?!?:/i']
+  - label: "docs"
+    title: ['/^docs(\(.*\))?!?:/i']
+  - label: "chore"
+    title: ['/^chore(\(.*\))?!?:/i']
+  - label: "refactor"
+    title: ['/^refactor(\(.*\))?!?:/i']
+  - label: "perf"
+    title: ['/^perf(\(.*\))?!?:/i']
+  - label: "breaking"
+    title: ['/!:/']
+
+template: |
+  ## What's new
+
+  $CHANGES
+
+  **Full changelog:** https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION

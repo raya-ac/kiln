@@ -1,6 +1,18 @@
-# Kiln
+<p align="center">
+  <img src="assets/logo.png" alt="Kiln" width="160" height="160">
+</p>
 
-A native Mac app for [Claude Code](https://claude.com/claude-code).
+<h1 align="center">Kiln</h1>
+
+<p align="center">A native Mac app for <a href="https://claude.com/claude-code">Claude Code</a>.</p>
+
+<p align="center">
+  <a href="https://github.com/raya-ac/kiln/actions/workflows/ci.yml"><img src="https://github.com/raya-ac/kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/raya-ac/kiln/releases/latest"><img src="https://img.shields.io/github/v/release/raya-ac/kiln?display_name=tag&sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/raya-ac/kiln" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Swift-6.0-orange?logo=swift&logoColor=white" alt="Swift 6.0">
+</p>
 
 Kiln runs Claude Code as a proper desktop app instead of another terminal tab. Sessions live in a sidebar, approvals pop up as real dialogs, and the whole thing feels like the rest of your Mac. Built in SwiftUI. macOS 14 or later, Apple Silicon or Intel.
 
@@ -86,10 +98,26 @@ scripts/        make-app-bundle.sh + entitlements
 .github/        CI + release workflows
 ```
 
+## Development shortcuts
+
+Common commands are wrapped in a `Makefile`:
+
+```bash
+make           # lists everything
+make run       # debug build + open the binary
+make bundle VERSION=0.2.0 ARCH=arm64
+make lint      # swift-format --lint
+make format    # swift-format --in-place
+make logo      # re-render the brand mark
+make ci-local  # run everything CI runs, locally
+```
+
 ## Contributing
 
-It's a personal project but PRs are welcome. Build with `swift build`, run with `open .build/debug/Kiln` (or the release variant), and the CI workflow will catch the obvious stuff.
+It's a personal project but PRs are welcome. Build with `swift build`, run with `open .build/debug/Kiln` (or the release variant), and the CI workflow will catch the obvious stuff. See [CONTRIBUTING.md](CONTRIBUTING.md) for the shape of a good patch and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we behave in issues and PRs.
+
+Security issues: please don't file them as public issues — see [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-MIT.
+[MIT](LICENSE).
