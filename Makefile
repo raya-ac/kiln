@@ -10,7 +10,7 @@ SHELL := /usr/bin/env bash
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.0.0-dev)
 ARCH    ?= arm64
 
-.PHONY: help build run debug release bundle clean test lint format logo ci-local version tag monaco
+.PHONY: help build run debug release bundle clean test lint format logo ci-local version tag
 
 help:  ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -43,9 +43,6 @@ format:  ## swift-format --in-place (rewrites files).
 
 logo:  ## Re-render the brand mark from the SF Symbol source.
 	swift scripts/render-logo.swift
-
-monaco:  ## One-time fetch of Monaco editor runtime (~13 MB) into Sources/App/Resources/monaco/vs.
-	./scripts/fetch-monaco.sh
 
 ci-local:  ## Run what CI runs, locally, end-to-end.
 	$(MAKE) lint

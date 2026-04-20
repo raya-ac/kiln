@@ -25,14 +25,7 @@ let package = Package(
             // AppIcon.icns is only used by scripts/make-app-bundle.sh when
             // assembling Kiln.app — the Swift runtime never reads it, so
             // exclude it from SPM's resource handling.
-            exclude: ["App/Resources/AppIcon.icns"],
-            resources: [
-                // Monaco editor host page + runtime. `vs/` is fetched by
-                // scripts/fetch-monaco.sh (or `make monaco`) and is not
-                // checked in — only .gitkeep lives under monaco/ by default.
-                .copy("App/Resources/editor"),
-                .copy("App/Resources/monaco"),
-            ]
+            exclude: ["App/Resources/AppIcon.icns"]
         ),
         .testTarget(
             name: "KilnTests",

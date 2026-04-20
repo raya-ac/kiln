@@ -19,11 +19,6 @@ dist/
 .sparkle-tools/
 sparkle.tar.xz
 
-# Monaco editor runtime — ~13 MB, fetched by scripts/fetch-monaco.sh.
-# Only .gitkeep lives in git; `vs/` and the VERSION marker are local-only.
-Sources/App/Resources/monaco/vs/
-Sources/App/Resources/monaco/VERSION
-
 # Local secrets — EdDSA keys, PSK, etc. The public counterparts live in
 # Info.plist / the release workflow's secrets, never in-tree.
 *.pem
