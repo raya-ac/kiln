@@ -154,6 +154,8 @@ struct FileTreeView: View {
     // Paths with a pending Accept/Revert decision after Claude's tool chain
     // completed. Drives the banner in the editor header.
     @State private var pendingClaudeEdit: Set<String> = []
+    // Paths currently shown in diff-view mode. Toggled from the banner.
+    @State private var diffViewing: Set<String> = []
 
     private var currentWorkDir: String {
         let dir = store.activeSession?.workDir ?? NSHomeDirectory()
@@ -247,13 +249,24 @@ struct FileTreeView: View {
                     ClaudeEditBanner(
                         path: path,
                         hasSnapshot: preEditSnapshot[path] != nil,
+                        isDiffing: diffViewing.contains(path),
                         onAccept: { acceptClaudeEdit(path: path) },
-                        onRevert: { revertClaudeEdit(path: path) }
+                        onRevert: { revertClaudeEdit(path: path) },
+                        onToggleDiff: {
+                            if diffViewing.contains(path) {
+                                diffViewing.remove(path)
+                            } else {
+                                diffViewing.insert(path)
+                            }
+                        }
                     )
                 }
 
                 Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
+                if diffViewing.contains(path), let before = preEditSnapshot[path] {
+                    DiffView(before: before, after: openFiles[idx].content)
+                } else {
                 // Editor — binding mutates openFiles[idx].content directly
                 // so the dirty flag updates live and survives tab switches.
                 CodeEditorView(
@@ -275,6 +288,7 @@ struct FileTreeView: View {
                 // binding catches up.
                 .id(path)
                 .contextMenu { editorFileContextMenu(path: path) }
+                }
             } else {
                 // Workdir header
                 HStack(spacing: 6) {
@@ -1155,8 +1169,10 @@ struct FileRow: View {
 struct ClaudeEditBanner: View {
     let path: String
     let hasSnapshot: Bool
+    let isDiffing: Bool
     let onAccept: () -> Void
     let onRevert: () -> Void
+    let onToggleDiff: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1167,6 +1183,23 @@ struct ClaudeEditBanner: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.kilnText)
             Spacer()
+            Button(action: onToggleDiff) {
+                HStack(spacing: 3) {
+                    Image(systemName: isDiffing ? "doc.text" : "rectangle.split.2x1")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(isDiffing ? "Edit" : "Diff")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(Color.kilnTextSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.kilnSurfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasSnapshot)
+            .help(isDiffing ? "Return to editor" : "Show before/after diff")
+
             Button(action: onRevert) {
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.uturn.backward")
@@ -1203,6 +1236,133 @@ struct ClaudeEditBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color.kilnAccentMuted)
+    }
+}
+
+// MARK: - Diff view
+//
+// Line-level unified diff rendered as a scrollable list of colored rows.
+// LCS-based — simple, correct for the common cases, O(n·m) memory which
+// is fine for source files (hundreds of lines). For huge files this
+// would need Myers, but Claude's edits are typically small enough.
+
+enum DiffLineKind { case context, add, remove }
+
+struct DiffLine: Identifiable {
+    let id = UUID()
+    let kind: DiffLineKind
+    let text: String
+    let oldNumber: Int?
+    let newNumber: Int?
+}
+
+struct DiffView: View {
+    let before: String
+    let after: String
+
+    private var lines: [DiffLine] {
+        Self.diff(
+            before: before.components(separatedBy: "\n"),
+            after: after.components(separatedBy: "\n")
+        )
+    }
+
+    var body: some View {
+        ScrollView([.vertical, .horizontal]) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(lines) { line in
+                    DiffRow(line: line)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .background(Color.kilnBg)
+    }
+
+    /// Classic LCS back-tracked into a unified line list.  (Actual impl below.)
+    static func marker(_ k: DiffLineKind) -> String {
+        switch k { case .add: return "+"; case .remove: return "−"; case .context: return " " }
+    }
+    static func rowBackground(_ k: DiffLineKind) -> SwiftUI.Color {
+        switch k {
+        case .add:     return SwiftUI.Color.green.opacity(0.12)
+        case .remove:  return SwiftUI.Color.red.opacity(0.12)
+        case .context: return SwiftUI.Color.clear
+        }
+    }
+    static func rowTextColor(_ k: DiffLineKind) -> SwiftUI.Color {
+        switch k {
+        case .add:     return SwiftUI.Color.green.opacity(0.95)
+        case .remove:  return SwiftUI.Color.red.opacity(0.9)
+        case .context: return SwiftUI.Color.kilnText
+        }
+    }
+
+    static func diff(before: [String], after: [String]) -> [DiffLine] {
+        let n = before.count, m = after.count
+        // lcs[i][j] = length of LCS of before[i...] and after[j...]
+        var lcs = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            for j in stride(from: m - 1, through: 0, by: -1) {
+                if before[i] == after[j] {
+                    lcs[i][j] = lcs[i + 1][j + 1] + 1
+                } else {
+                    lcs[i][j] = max(lcs[i + 1][j], lcs[i][j + 1])
+                }
+            }
+        }
+        var out: [DiffLine] = []
+        var i = 0, j = 0, oldN = 1, newN = 1
+        while i < n && j < m {
+            if before[i] == after[j] {
+                out.append(DiffLine(kind: .context, text: before[i], oldNumber: oldN, newNumber: newN))
+                i += 1; j += 1; oldN += 1; newN += 1
+            } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+                out.append(DiffLine(kind: .remove, text: before[i], oldNumber: oldN, newNumber: nil))
+                i += 1; oldN += 1
+            } else {
+                out.append(DiffLine(kind: .add, text: after[j], oldNumber: nil, newNumber: newN))
+                j += 1; newN += 1
+            }
+        }
+        while i < n {
+            out.append(DiffLine(kind: .remove, text: before[i], oldNumber: oldN, newNumber: nil))
+            i += 1; oldN += 1
+        }
+        while j < m {
+            out.append(DiffLine(kind: .add, text: after[j], oldNumber: nil, newNumber: newN))
+            j += 1; newN += 1
+        }
+        return out
+    }
+}
+
+struct DiffRow: View {
+    let line: DiffLine
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text(line.oldNumber.map(String.init) ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .frame(width: 40, alignment: .trailing)
+                .padding(.trailing, 6)
+            Text(line.newNumber.map(String.init) ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .frame(width: 40, alignment: .trailing)
+                .padding(.trailing, 8)
+            Text(DiffView.marker(line.kind))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(DiffView.rowTextColor(line.kind))
+                .frame(width: 14)
+            Text(line.text.isEmpty ? " " : line.text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(DiffView.rowTextColor(line.kind))
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 1)
+        .background(DiffView.rowBackground(line.kind))
     }
 }
 
