@@ -208,7 +208,7 @@ struct SnippetsView: View {
             SnippetEditor(snippet: snip, onSave: { store.snippets.contains(where: { $0.id == snip.id }) ? store.update($0) : store.add($0) }, onDelete: {
                 store.remove(snip.id)
             })
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
     }
 

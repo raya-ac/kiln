@@ -138,7 +138,7 @@ struct ChatView: View {
             .sheet(isPresented: $showInstructionsEditor) {
                 SessionInstructionsEditor()
                     .environmentObject(store)
-                    .preferredColorScheme(.dark)
+                    .preferredColorScheme(Color.kilnPreferredColorScheme)
             }
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)

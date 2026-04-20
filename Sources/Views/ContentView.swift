@@ -114,15 +114,15 @@ struct ContentView: View {
                 LaunchRecoveryBanner()
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Color.kilnPreferredColorScheme)
         .sheet(isPresented: $store.showNewSessionSheet) {
             NewSessionSheet()
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .sheet(isPresented: $store.showSessionTemplates) {
             SessionTemplatesView()
                 .environmentObject(store)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         // PreToolUse approvals: while the queue is non-empty, block on the
         // head of the queue. The hook that spawned the request is suspended
@@ -134,7 +134,7 @@ struct ContentView: View {
             if let approval = store.pendingApprovals.first {
                 ApprovalDialog(approval: approval)
                     .environmentObject(store)
-                    .preferredColorScheme(.dark)
+                    .preferredColorScheme(Color.kilnPreferredColorScheme)
             }
         }
         .overlay {

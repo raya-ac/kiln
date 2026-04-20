@@ -252,11 +252,11 @@ struct ComposerView: View {
                 }
                 isFocused = true
             })
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .sheet(isPresented: $showExpandedEditor) {
             ExpandedComposerEditor(text: $input, onSend: { send() })
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .onChange(of: store.pendingComposerPrefill) { _, newValue in
             // Prefill hook used by edit-and-resend and similar flows.

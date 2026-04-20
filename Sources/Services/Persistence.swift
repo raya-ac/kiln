@@ -55,6 +55,35 @@ enum Persistence {
         let path = (sessionsDir as NSString).appendingPathComponent("\(id).json")
         try? FileManager.default.removeItem(atPath: path)
     }
+
+    // MARK: - Import / Export
+
+    /// Encode a live session to JSON bytes using the same on-disk shape as
+    /// `saveSession`, so exported files are round-trippable with `decodeSessionData`.
+    static func exportSessionJSONData(_ session: Session) -> Data? {
+        let data = SessionData(from: session)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? enc.encode(data)
+    }
+
+    /// Decode a previously-exported session JSON blob. Uses `SessionData`'s
+    /// forgiving decoder so older/newer exports survive.
+    static func decodeSessionData(_ data: Data) -> SessionData? {
+        return try? JSONDecoder().decode(SessionData.self, from: data)
+    }
+
+    /// Encode the full KilnSettings to JSON bytes for backup.
+    static func exportSettingsJSONData(_ settings: KilnSettings) -> Data? {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? enc.encode(settings)
+    }
+
+    /// Decode a settings-backup blob. Returns nil on malformed input.
+    static func decodeSettingsData(_ data: Data) -> KilnSettings? {
+        return try? JSONDecoder().decode(KilnSettings.self, from: data)
+    }
 }
 
 // MARK: - Codable session data (messages stored separately for perf)

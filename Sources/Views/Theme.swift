@@ -1,27 +1,55 @@
+import AppKit
 import SwiftUI
+
+// MARK: - Dynamic color helper
+
+/// Returns a Color that resolves to `light` under Aqua (and its HC variant)
+/// and to `dark` under DarkAqua. SwiftUI's `preferredColorScheme(...)` flows
+/// through the window's effective appearance, which NSColor dynamic providers
+/// evaluate at draw time — so these Colors auto-flip with the theme setting.
+private func kilnDyn(_ light: UInt, _ dark: UInt) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return NSColor(hex: isDark ? dark : light)
+    })
+}
+
+extension NSColor {
+    /// Convenience initializer from a packed RGB int (0xRRGGBB).
+    convenience init(hex: UInt, alpha: CGFloat = 1.0) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
+        )
+    }
+}
 
 // MARK: - Color Palette
 
 extension Color {
     // Backgrounds
-    static let kilnBg = Color(hex: 0x0A0A0B)
-    static let kilnSurface = Color(hex: 0x141415)
-    static let kilnSurfaceElevated = Color(hex: 0x1C1C1E)
-    static let kilnSurfaceHover = Color(hex: 0x242426)
+    static let kilnBg = kilnDyn(0xFAFAF9, 0x0A0A0B)
+    static let kilnSurface = kilnDyn(0xFFFFFF, 0x141415)
+    static let kilnSurfaceElevated = kilnDyn(0xF4F4F5, 0x1C1C1E)
+    static let kilnSurfaceHover = kilnDyn(0xE4E4E7, 0x242426)
 
     // Borders
-    static let kilnBorder = Color(hex: 0x2A2A2C)
-    static let kilnBorderSubtle = Color(hex: 0x1E1E20)
+    static let kilnBorder = kilnDyn(0xD4D4D8, 0x2A2A2C)
+    static let kilnBorderSubtle = kilnDyn(0xE4E4E7, 0x1E1E20)
 
     // Text
-    static let kilnText = Color(hex: 0xE4E4E7)
-    static let kilnTextSecondary = Color(hex: 0x8B8B8E)
-    static let kilnTextTertiary = Color(hex: 0x56565A)
+    static let kilnText = kilnDyn(0x09090B, 0xE4E4E7)
+    static let kilnTextSecondary = kilnDyn(0x52525B, 0x8B8B8E)
+    static let kilnTextTertiary = kilnDyn(0x71717A, 0x56565A)
 
     // Accent
     /// User-configurable accent color. Reads the current setting from
     /// UserDefaults so every `Color.kilnAccent` reference in the app
     /// automatically respects the user's choice. Falls back to orange.
+    /// Accent is the same hue in both modes — we're not remapping the
+    /// user's chosen brand color per appearance.
     static var kilnAccent: Color {
         let hex = (UserDefaults.standard.string(forKey: "kiln.accentHex") ?? "").trimmingCharacters(in: .whitespaces)
         if hex.isEmpty { return Color(hex: 0xF59E0B) }
@@ -30,13 +58,32 @@ extension Color {
     static var kilnAccentHover: Color { Color(hex: 0xFBBF24) }
     static var kilnAccentMuted: Color {
         let hex = (UserDefaults.standard.string(forKey: "kiln.accentHex") ?? "").trimmingCharacters(in: .whitespaces)
-        if hex.isEmpty { return Color(hex: 0xF59E0B).opacity(0.15) }
-        return Color(hexString: hex).opacity(0.15)
+        // Slightly stronger tint in light mode — 15% alpha on orange against
+        // a near-white background is nearly invisible. Read the stored theme
+        // mode rather than NSApp.effectiveAppearance to avoid main-actor
+        // isolation requirements at color-lookup time.
+        let alpha: Double = (Self.kilnThemeMode == .light) ? 0.22 : 0.15
+        if hex.isEmpty { return Color(hex: 0xF59E0B).opacity(alpha) }
+        return Color(hexString: hex).opacity(alpha)
     }
 
-    // Semantic
+    // Semantic — same hues in both modes for recognizability.
     static let kilnError = Color(hex: 0xEF4444)
     static let kilnSuccess = Color(hex: 0x22C55E)
+
+    /// The user's current theme mode, read from UserDefaults. Sheet-backed
+    /// views that don't carry `AppStore` in their environment use this to
+    /// honor the setting without needing the store injected.
+    static var kilnThemeMode: ThemeMode {
+        let raw = UserDefaults.standard.string(forKey: "kiln.themeMode") ?? ""
+        return ThemeMode(rawValue: raw) ?? .system
+    }
+
+    /// SwiftUI color scheme derived from `kilnThemeMode`. `nil` = follow
+    /// system. Pass directly to `.preferredColorScheme(...)`.
+    static var kilnPreferredColorScheme: ColorScheme? {
+        kilnThemeMode.colorScheme
+    }
 
     init(hex: UInt, alpha: Double = 1.0) {
         self.init(

@@ -347,7 +347,7 @@ struct SidebarView: View {
         .sheet(isPresented: $store.showSettings) {
             SettingsView()
                 .environmentObject(store)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .alert(store.settings.language.ui.setGroup, isPresented: $showNewGroupAlert) {
             TextField(store.settings.language.ui.groupName, text: $newGroupName)
@@ -673,6 +673,22 @@ struct SessionRow: View {
                 NSPasteboard.general.setString(session.id, forType: .string)
             } label: {
                 Label("Copy Session ID", systemImage: "number")
+            }
+
+            Button {
+                guard let data = store.exportSessionJSONData(session.id) else { return }
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.json]
+                let safeName = session.name
+                    .replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: " ", with: "-")
+                panel.nameFieldStringValue = "kiln-session-\(safeName).json"
+                if panel.runModal() == .OK, let dest = panel.url {
+                    try? data.write(to: dest)
+                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                }
+            } label: {
+                Label("Export as JSON", systemImage: "square.and.arrow.up")
             }
 
             if store.activeSession?.id == session.id {

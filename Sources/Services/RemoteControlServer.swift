@@ -234,6 +234,8 @@ final class RemoteControlServer: ObservableObject {
                 "language": store.settings.language.rawValue,
                 "useEngram": store.settings.useEngram,
                 "systemPrompt": store.settings.systemPrompt,
+                "themeMode": store.settings.themeMode.rawValue,
+                "accentHex": store.settings.accentHex,
             ])
 
         case ("GET", "/api/export"):
@@ -250,6 +252,53 @@ final class RemoteControlServer: ObservableObject {
                 ],
                 body: Data(md.utf8)
             )
+
+        case ("GET", "/api/export-json"):
+            let sid = req.query["session"] ?? store.activeSessionId ?? ""
+            guard let data = store.exportSessionJSONData(sid) else {
+                return .json(["error": "session not found"], status: 404)
+            }
+            let fname = "kiln-session-\(sid).json"
+            return HTTPResponse(
+                status: 200,
+                headers: [
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Content-Disposition": "attachment; filename=\(fname)",
+                ],
+                body: data
+            )
+
+        case ("POST", "/api/session/import"):
+            // Body is the raw session JSON (same shape as `/api/export-json`).
+            guard !req.body.isEmpty else {
+                return .json(["error": "empty body"], status: 400)
+            }
+            guard let newId = store.importSessionJSON(req.body) else {
+                return .json(["error": "invalid session json"], status: 400)
+            }
+            return .json(["status": "imported", "sessionId": newId])
+
+        case ("GET", "/api/settings/export"):
+            guard let data = store.exportSettingsJSONData() else {
+                return .json(["error": "encode failed"], status: 500)
+            }
+            return HTTPResponse(
+                status: 200,
+                headers: [
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Content-Disposition": "attachment; filename=kiln-settings.json",
+                ],
+                body: data
+            )
+
+        case ("POST", "/api/settings/import"):
+            guard !req.body.isEmpty else {
+                return .json(["error": "empty body"], status: 400)
+            }
+            guard store.importSettingsJSON(req.body) else {
+                return .json(["error": "invalid settings json"], status: 400)
+            }
+            return .json(["status": "imported"])
 
         case ("GET", "/api/remote"):
             return .json(remoteInfoJSON())
@@ -306,6 +355,69 @@ final class RemoteControlServer: ObservableObject {
             else { return .json(["error": "missing sessionId"], status: 400) }
             store.deleteSession(sid)
             return .json(["status": "ok"])
+
+        case ("POST", "/api/session/rename"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String,
+                  let name = body["name"] as? String
+            else { return .json(["error": "missing sessionId or name"], status: 400) }
+            store.renameSession(sid, name: name)
+            return .json(["status": "ok"])
+
+        case ("POST", "/api/session/pin"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            store.togglePin(sid)
+            return .json(["status": "ok"])
+
+        case ("POST", "/api/session/archive"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            store.toggleArchiveSession(sid)
+            return .json(["status": "ok"])
+
+        case ("POST", "/api/session/clear"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            store.clearSession(sid)
+            return .json(["status": "ok"])
+
+        case ("POST", "/api/session/duplicate"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            store.duplicateSession(sid)
+            return .json(["status": "ok", "activeSessionId": store.activeSessionId as Any])
+
+        case ("POST", "/api/session/group"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            let group = body["group"] as? String
+            // An empty string is treated as "remove from group".
+            store.setGroup(sid, group: (group?.isEmpty == false) ? group : nil)
+            return .json(["status": "ok"])
+
+        case ("POST", "/api/session/tag"):
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String,
+                  let tag = body["tag"] as? String
+            else { return .json(["error": "missing sessionId or tag"], status: 400) }
+            let op = (body["op"] as? String) ?? "add"
+            if op == "remove" { store.removeTag(tag, from: sid) }
+            else { store.addTag(tag, to: sid) }
+            return .json(["status": "ok"])
+
+        case ("GET", "/api/session/continuation"):
+            let sid = req.query["session"] ?? store.activeSessionId ?? ""
+            guard store.sessions.contains(where: { $0.id == sid }) else {
+                return .json(["error": "session not found"], status: 404)
+            }
+            let text = store.sessionAsContinuationPrompt(sid)
+            return .json(["text": text])
 
         case ("POST", "/api/select"):
             guard let body = req.jsonBody,
@@ -500,6 +612,8 @@ final class RemoteControlServer: ObservableObject {
             "settings": [
                 "defaultWorkDir": store.settings.defaultWorkDir,
                 "language": store.settings.language.rawValue,
+                "themeMode": store.settings.themeMode.rawValue,
+                "accentHex": store.settings.accentHex,
             ],
             "models": ClaudeModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0] },
         ]
@@ -526,7 +640,10 @@ final class RemoteControlServer: ObservableObject {
             "workDir": s.workDir,
             "messageCount": s.messages.count,
             "createdAt": s.createdAt.timeIntervalSince1970,
+            "updatedAt": (s.messages.last?.timestamp ?? s.createdAt).timeIntervalSince1970,
             "isPinned": s.isPinned,
+            "isArchived": s.isArchived,
+            "tags": s.tags,
             "group": s.group as Any,
             "forkedFrom": s.forkedFrom as Any,
         ]
@@ -712,6 +829,59 @@ final class RemoteControlServer: ObservableObject {
         --red: #ef4444;
         --green: #22c55e;
       }
+      /* Light mode. Follows the OS by default; force either mode by setting
+         data-theme="light" | "dark" on <html>. The JS below flips it when
+         the user's native-app theme setting comes in over /api/settings. */
+      html[data-theme="light"], html[data-theme="system"]:not([data-theme-override]) {
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #fafaf9;
+          --surface: #ffffff;
+          --surface-hover: #f4f4f5;
+          --surface-elevated: #f4f4f5;
+          --border: #e4e4e7;
+          --border-subtle: #f4f4f5;
+          --text: #09090b;
+          --text-secondary: #52525b;
+          --text-tertiary: #71717a;
+          --muted: #a1a1aa;
+          --accent: #ea580c;
+          --accent-muted: rgba(234, 88, 12, 0.14);
+          --user-bg: #e0f2fe;
+        }
+      }
+      html[data-theme="light"] {
+        --bg: #fafaf9;
+        --surface: #ffffff;
+        --surface-hover: #f4f4f5;
+        --surface-elevated: #f4f4f5;
+        --border: #e4e4e7;
+        --border-subtle: #f4f4f5;
+        --text: #09090b;
+        --text-secondary: #52525b;
+        --text-tertiary: #71717a;
+        --muted: #a1a1aa;
+        --accent: #ea580c;
+        --accent-muted: rgba(234, 88, 12, 0.14);
+        --user-bg: #e0f2fe;
+      }
+      html[data-theme="dark"] {
+        --bg: #0e0e10;
+        --surface: #18181b;
+        --surface-hover: #1f1f23;
+        --surface-elevated: #27272a;
+        --border: #27272a;
+        --border-subtle: #1f1f23;
+        --text: #e4e4e7;
+        --text-secondary: #a1a1aa;
+        --text-tertiary: #71717a;
+        --muted: #52525b;
+        --accent: #f97316;
+        --accent-muted: rgba(249, 115, 22, 0.15);
+        --user-bg: #1e293b;
+      }
       * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
       body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -763,6 +933,35 @@ final class RemoteControlServer: ObservableObject {
       .session-item .si-delete { opacity: 0; background: transparent; border: none; color: var(--text-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
       .session-item:hover .si-delete { opacity: 1; }
       .session-item .si-delete:hover { background: var(--red); color: white; }
+      .session-item .si-pin { color: var(--accent); font-size: 10px; }
+      .session-item.archived { opacity: 0.55; }
+      .session-item.archived .si-name { text-decoration: line-through; text-decoration-color: var(--muted); }
+      .si-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+      .si-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--surface-elevated); color: var(--text-tertiary); font-weight: 600; }
+      .si-rename { flex: 1; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 6px; color: var(--text); font-size: 12px; font-family: inherit; min-width: 0; }
+      .si-rename:focus { outline: none; }
+
+      /* Sidebar search + archive toggle */
+      .sb-search { display: flex; align-items: center; gap: 6px; margin: 0 8px 6px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 6px; }
+      .sb-search input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 11px; font-family: inherit; outline: none; min-width: 0; }
+      .sb-search .sb-glass { font-size: 10px; color: var(--text-tertiary); }
+      .sb-archive { display: flex; align-items: center; padding: 0 8px 6px; }
+      .sb-archive button { background: var(--surface-elevated); border: none; border-radius: 5px; padding: 4px 8px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 4px; }
+      .sb-archive button.on { background: var(--accent-muted); color: var(--accent); }
+
+      /* Context menu */
+      .ctx-menu { position: fixed; z-index: 100; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 200px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: none; font-size: 12px; }
+      .ctx-menu.show { display: block; }
+      .ctx-item { padding: 6px 10px; border-radius: 5px; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+      .ctx-item:hover { background: var(--surface-hover); }
+      .ctx-item.destructive { color: var(--red); }
+      .ctx-item.destructive:hover { background: rgba(239,68,68,0.12); }
+      .ctx-item .ctx-icon { width: 14px; text-align: center; opacity: 0.7; font-size: 11px; }
+      .ctx-sep { height: 1px; background: var(--border-subtle); margin: 4px 2px; }
+      .ctx-sub { position: relative; }
+      .ctx-sub > .ctx-item::after { content: '▸'; margin-left: auto; opacity: 0.5; font-size: 9px; }
+      .ctx-sub-menu { position: absolute; left: 100%; top: -4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 160px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: none; }
+      .ctx-sub:hover > .ctx-sub-menu { display: block; }
 
       /* Main */
       .main { display: flex; flex-direction: column; background: var(--bg); min-width: 0; overflow: hidden; }
@@ -886,6 +1085,11 @@ final class RemoteControlServer: ObservableObject {
             <button class="sidebar-tab" data-kind="chat">💬 Chat</button>
           </div>
           <button class="new-session-btn" id="newSessionBtn">+ New Session</button>
+          <div class="sb-search">
+            <span class="sb-glass">🔍</span>
+            <input id="sessionSearch" placeholder="Search sessions, tags, paths…" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="sb-archive" id="archiveBar"></div>
           <div class="session-list" id="sessionList"></div>
         </aside>
 
@@ -929,6 +1133,9 @@ final class RemoteControlServer: ObservableObject {
         <div class="modal" id="modalContent"></div>
       </div>
 
+      <!-- Session context menu (right-click / long-press on a session item) -->
+      <div class="ctx-menu" id="ctxMenu"></div>
+
     <script>
     const token = new URLSearchParams(location.search).get('t') || '';
     const qt = token ? ('?t=' + encodeURIComponent(token)) : '';
@@ -962,6 +1169,9 @@ final class RemoteControlServer: ObservableObject {
       rightTab: 'activity',
       attachments: [],  // { path, name }
       remote: null,
+      search: '',
+      showArchived: false,
+      renamingId: null,
     };
 
     // --- Render ---
@@ -969,19 +1179,58 @@ final class RemoteControlServer: ObservableObject {
       return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
     }
 
+    function matchesSearch(s, q) {
+      if (!q) return true;
+      const needle = q.toLowerCase();
+      const tagQuery = needle.startsWith('#') ? needle.slice(1) : needle;
+      return (
+        s.name.toLowerCase().includes(needle) ||
+        (s.workDir || '').toLowerCase().includes(needle) ||
+        (s.group || '').toLowerCase().includes(needle) ||
+        (s.tags || []).some(t => t.includes(tagQuery))
+      );
+    }
+
+    function renderArchiveBar() {
+      const bar = document.getElementById('archiveBar');
+      const archivedCount = state.sessions.filter(s => s.kind === state.sidebarKind && s.isArchived).length;
+      if (!archivedCount && !state.showArchived) { bar.innerHTML = ''; return; }
+      const cls = state.showArchived ? 'on' : '';
+      const label = state.showArchived ? '← Back to active' : `📦 Archive (${archivedCount})`;
+      bar.innerHTML = `<button class="${cls}" id="archiveToggle">${label}</button>`;
+      document.getElementById('archiveToggle').onclick = () => {
+        state.showArchived = !state.showArchived;
+        renderSessions();
+        renderArchiveBar();
+      };
+    }
+
     function renderSessions() {
       const box = document.getElementById('sessionList');
       box.innerHTML = '';
-      const kinds = state.sessions.filter(s => s.kind === state.sidebarKind);
-      if (!kinds.length) {
-        box.innerHTML = '<div class="empty">No ' + state.sidebarKind + ' sessions yet.</div>';
+      const filtered = state.sessions.filter(s =>
+        s.kind === state.sidebarKind &&
+        (state.showArchived ? s.isArchived : !s.isArchived) &&
+        matchesSearch(s, state.search)
+      );
+      if (!filtered.length) {
+        box.innerHTML = '<div class="empty">No ' + (state.showArchived ? 'archived' : state.sidebarKind) + ' sessions' + (state.search ? ' matching "' + escHTML(state.search) + '"' : '') + '.</div>';
         return;
       }
-      // Group
+      // Pinned float to top, in a synthetic "Pinned" group. Everything else
+      // keeps its real group. When searching, flatten so hits don't hide
+      // behind collapsed groups.
       const groups = {};
-      for (const s of kinds) {
-        const g = s.group || '—';
-        (groups[g] = groups[g] || []).push(s);
+      if (state.search) {
+        groups['—'] = filtered.slice();
+      } else {
+        const pinned = filtered.filter(s => s.isPinned);
+        if (pinned.length) groups['📌 Pinned'] = pinned;
+        for (const s of filtered) {
+          if (s.isPinned) continue;
+          const g = s.group || '—';
+          (groups[g] = groups[g] || []).push(s);
+        }
       }
       for (const [gname, list] of Object.entries(groups)) {
         const ge = document.createElement('div');
@@ -994,28 +1243,82 @@ final class RemoteControlServer: ObservableObject {
         }
         for (const s of list) {
           const it = document.createElement('div');
-          it.className = 'session-item' + (s.id === state.activeId ? ' active' : '');
-          it.innerHTML = `
-            <span class="si-icon">${s.kind === 'chat' ? '💬' : '⌨'}</span>
-            <div class="si-body">
-              <div class="si-name">${escHTML(s.name)}</div>
-              <div class="si-meta">${s.messageCount} msg · ${escHTML(s.model)}</div>
-            </div>
-            <button class="si-delete" data-id="${s.id}">×</button>
-          `;
-          it.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('si-delete')) return;
-            state.activeId = s.id;
-            await api('/api/select', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
-            await refreshAll();
-            if (window.innerWidth <= 900) document.querySelector('.layout').classList.remove('show-sidebar');
-          });
-          it.querySelector('.si-delete').addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (!confirm('Delete session "' + s.name + '"?')) return;
-            await api('/api/session/delete', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
-            await refreshAll();
-          });
+          const cls = ['session-item'];
+          if (s.id === state.activeId) cls.push('active');
+          if (s.isArchived) cls.push('archived');
+          it.className = cls.join(' ');
+          it.dataset.id = s.id;
+
+          const icon = s.forkedFrom ? '⑂' : (s.kind === 'chat' ? '💬' : '⌨');
+          const pin = s.isPinned ? '<span class="si-pin" title="Pinned">📌</span>' : '';
+          const tags = (s.tags || []).length
+            ? `<div class="si-tags">${s.tags.map(t => `<span class="si-tag">#${escHTML(t)}</span>`).join('')}</div>`
+            : '';
+
+          // Inline rename mode
+          if (state.renamingId === s.id) {
+            it.innerHTML = `
+              <span class="si-icon">${icon}</span>
+              <input class="si-rename" value="${escHTML(s.name)}" autofocus>
+            `;
+            const input = it.querySelector('.si-rename');
+            const commit = async () => {
+              const newName = input.value.trim();
+              state.renamingId = null;
+              if (newName && newName !== s.name) {
+                await api('/api/session/rename', { method: 'POST', body: JSON.stringify({ sessionId: s.id, name: newName }) });
+              }
+              await refreshAll();
+            };
+            input.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              else if (e.key === 'Escape') { state.renamingId = null; renderSessions(); }
+            });
+            input.addEventListener('blur', commit);
+            setTimeout(() => { input.focus(); input.select(); }, 0);
+          } else {
+            it.innerHTML = `
+              <span class="si-icon">${icon}</span>
+              <div class="si-body">
+                <div class="si-name">${pin}${escHTML(s.name)}</div>
+                <div class="si-meta">${s.messageCount} msg · ${escHTML(s.model)}</div>
+                ${tags}
+              </div>
+              <button class="si-delete" data-id="${s.id}" title="Delete">×</button>
+            `;
+            it.addEventListener('click', async (e) => {
+              if (e.target.classList.contains('si-delete')) return;
+              state.activeId = s.id;
+              await api('/api/select', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
+              await refreshAll();
+              if (window.innerWidth <= 900) document.querySelector('.layout').classList.remove('show-sidebar');
+            });
+            it.addEventListener('dblclick', (e) => {
+              if (e.target.classList.contains('si-delete')) return;
+              state.renamingId = s.id;
+              renderSessions();
+            });
+            it.addEventListener('contextmenu', (e) => {
+              e.preventDefault();
+              openSessionMenu(e.clientX, e.clientY, s);
+            });
+            // Long-press for touch devices — same menu as right-click.
+            let lpTimer = null;
+            it.addEventListener('touchstart', (e) => {
+              lpTimer = setTimeout(() => {
+                const t = e.touches[0];
+                openSessionMenu(t.clientX, t.clientY, s);
+              }, 500);
+            }, { passive: true });
+            it.addEventListener('touchend', () => { if (lpTimer) clearTimeout(lpTimer); });
+            it.addEventListener('touchmove', () => { if (lpTimer) clearTimeout(lpTimer); });
+            it.querySelector('.si-delete').addEventListener('click', async (e) => {
+              e.stopPropagation();
+              if (!confirm('Delete session "' + s.name + '"?')) return;
+              await api('/api/session/delete', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
+              await refreshAll();
+            });
+          }
           ge.appendChild(it);
         }
         box.appendChild(ge);
@@ -1213,11 +1516,189 @@ final class RemoteControlServer: ObservableObject {
 
     function render() {
       renderSessions();
+      renderArchiveBar();
       renderChatHeader();
       renderMessages();
       renderToolbar();
       renderAttachments();
       renderRightPanel();
+    }
+
+    // --- Session context menu ---
+    function closeCtxMenu() {
+      const m = document.getElementById('ctxMenu');
+      m.classList.remove('show');
+      m.innerHTML = '';
+    }
+    document.addEventListener('click', (e) => {
+      const m = document.getElementById('ctxMenu');
+      if (m.classList.contains('show') && !m.contains(e.target)) closeCtxMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeCtxMenu();
+    });
+
+    function openSessionMenu(x, y, s) {
+      const m = document.getElementById('ctxMenu');
+      const pinLabel = s.isPinned ? 'Unpin' : 'Pin';
+      const pinIcon = s.isPinned ? '📌' : '📍';
+      const archLabel = s.isArchived ? 'Unarchive' : 'Archive';
+      const archIcon = s.isArchived ? '📤' : '📦';
+      const existingTags = (s.tags || []).map(t =>
+        `<div class="ctx-item" data-act="untag" data-tag="${escHTML(t)}"><span class="ctx-icon">✕</span>Remove #${escHTML(t)}</div>`
+      ).join('');
+      m.innerHTML = `
+        <div class="ctx-item" data-act="rename"><span class="ctx-icon">✎</span>Rename</div>
+        <div class="ctx-item" data-act="pin"><span class="ctx-icon">${pinIcon}</span>${pinLabel}</div>
+        <div class="ctx-item" data-act="duplicate"><span class="ctx-icon">⎘</span>Duplicate (empty)</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-act="group"><span class="ctx-icon">📁</span>Set group…</div>
+        <div class="ctx-sub">
+          <div class="ctx-item"><span class="ctx-icon">🏷</span>Tags</div>
+          <div class="ctx-sub-menu">
+            <div class="ctx-item" data-act="tag-add"><span class="ctx-icon">+</span>Add tag…</div>
+            ${existingTags ? '<div class="ctx-sep"></div>' + existingTags : ''}
+          </div>
+        </div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-act="copy-continuation"><span class="ctx-icon">📋</span>Copy as continuation</div>
+        <div class="ctx-item" data-act="copy-path"><span class="ctx-icon">⌘</span>Copy path</div>
+        <div class="ctx-item" data-act="copy-id"><span class="ctx-icon">#</span>Copy session ID</div>
+        <div class="ctx-item" data-act="export"><span class="ctx-icon">⤓</span>Export markdown</div>
+        <div class="ctx-item" data-act="export-json"><span class="ctx-icon">{ }</span>Export JSON</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-act="clear"><span class="ctx-icon">🧹</span>Clear messages</div>
+        <div class="ctx-item" data-act="archive"><span class="ctx-icon">${archIcon}</span>${archLabel}</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item destructive" data-act="delete"><span class="ctx-icon">🗑</span>Delete</div>
+      `;
+      // Position (keep inside viewport)
+      m.style.left = '0px'; m.style.top = '0px';
+      m.classList.add('show');
+      const rect = m.getBoundingClientRect();
+      const px = Math.min(x, window.innerWidth - rect.width - 8);
+      const py = Math.min(y, window.innerHeight - rect.height - 8);
+      m.style.left = px + 'px';
+      m.style.top = py + 'px';
+
+      m.querySelectorAll('[data-act]').forEach(el => {
+        el.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const act = el.dataset.act;
+          closeCtxMenu();
+          await handleSessionAction(act, s, el.dataset);
+        });
+      });
+    }
+
+    async function handleSessionAction(act, s, data) {
+      const id = s.id;
+      try {
+        switch (act) {
+          case 'rename':
+            state.renamingId = id;
+            renderSessions();
+            return;
+          case 'pin':
+            await api('/api/session/pin', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+            break;
+          case 'duplicate':
+            await api('/api/session/duplicate', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+            break;
+          case 'archive':
+            await api('/api/session/archive', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+            break;
+          case 'clear':
+            if (!confirm('Clear all messages in "' + s.name + '"? This cannot be undone.')) return;
+            await api('/api/session/clear', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+            break;
+          case 'delete':
+            if (!confirm('Delete session "' + s.name + '"?')) return;
+            await api('/api/session/delete', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+            break;
+          case 'group': {
+            const g = prompt('Group name (empty to remove from group):', s.group || '');
+            if (g === null) return;
+            await api('/api/session/group', { method: 'POST', body: JSON.stringify({ sessionId: id, group: g }) });
+            break;
+          }
+          case 'tag-add': {
+            const t = prompt('Add tag (no # prefix):', '');
+            if (!t) return;
+            await api('/api/session/tag', { method: 'POST', body: JSON.stringify({ sessionId: id, tag: t, op: 'add' }) });
+            break;
+          }
+          case 'untag':
+            await api('/api/session/tag', { method: 'POST', body: JSON.stringify({ sessionId: id, tag: data.tag, op: 'remove' }) });
+            break;
+          case 'copy-continuation': {
+            const r = await api('/api/session/continuation?session=' + encodeURIComponent(id));
+            await copyToClipboard(r.text || '');
+            flash('Continuation prompt copied');
+            return;
+          }
+          case 'copy-path':
+            await copyToClipboard(s.workDir || '');
+            flash('Path copied');
+            return;
+          case 'copy-id':
+            await copyToClipboard(s.id);
+            flash('Session ID copied');
+            return;
+          case 'export':
+            window.location.href = '/api/export?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
+            return;
+          case 'export-json':
+            window.location.href = '/api/export-json?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
+            return;
+        }
+        await refreshAll();
+      } catch (e) {
+        alert('Action failed: ' + e.message);
+      }
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Fallback for iOS Safari without clipboard permission.
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch {}
+        document.body.removeChild(ta);
+      }
+    }
+
+    let flashTimer = null;
+    function flash(msg) {
+      let el = document.getElementById('flashToast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'flashToast';
+        el.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-elevated); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 16px; font-size:12px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.4); opacity:0; transition:opacity 0.2s;';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.opacity = '1';
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+    }
+
+    // --- Theme / accent sync with the native app ---
+    function applyServerAppearance(s) {
+      if (!s) return;
+      if (s.themeMode) {
+        document.documentElement.setAttribute('data-theme', s.themeMode);
+      }
+      if (s.accentHex) {
+        // Accent value arrives without "#" from the settings payload; accept
+        // either form. The accent-muted variant derives with a fixed alpha.
+        const hex = s.accentHex.startsWith('#') ? s.accentHex : '#' + s.accentHex;
+        document.documentElement.style.setProperty('--accent', hex);
+        document.documentElement.style.setProperty('--accent-muted', hex + '26'); // ~15%
+      }
     }
 
     // --- Data loading ---
@@ -1232,6 +1713,7 @@ final class RemoteControlServer: ObservableObject {
       state.usage = data.usage || state.usage;
       state.settings = { ...state.settings, ...(data.settings || {}) };
       state.models = data.models || [];
+      applyServerAppearance(state.settings);
       try { state.remote = await api('/api/remote'); } catch {}
       render();
     }
@@ -1309,6 +1791,11 @@ final class RemoteControlServer: ObservableObject {
       state.sidebarKind = b.dataset.kind;
       document.querySelectorAll('.sidebar-tab').forEach(x => x.classList.toggle('active', x === b));
       renderSessions();
+      renderArchiveBar();
+    });
+    document.getElementById('sessionSearch').addEventListener('input', (e) => {
+      state.search = e.target.value;
+      renderSessions();
     });
     document.querySelectorAll('.right-tab').forEach(b => b.onclick = () => {
       state.rightTab = b.dataset.tab;
@@ -1372,6 +1859,7 @@ final class RemoteControlServer: ObservableObject {
       const settings = await api('/api/settings');
       const r = state.remote || {};
       const m = document.getElementById('modalContent');
+      const tq = token ? ('?t=' + encodeURIComponent(token)) : '';
       m.innerHTML = `
         <h2>Settings · Remote</h2>
         <div class="info-box"><span class="lbl">language</span>${escHTML(settings.language)}</div>
@@ -1382,9 +1870,44 @@ final class RemoteControlServer: ObservableObject {
         <div class="info-box"><span class="lbl">port</span>${r.port || '—'}</div>
         ${(r.urls && r.urls.tailscale) ? `<div class="info-box"><span class="lbl">tailscale</span>${escHTML(r.urls.tailscale)}</div>` : ''}
         ${(r.urls && r.urls.lan) ? `<div class="info-box"><span class="lbl">lan</span>${escHTML(r.urls.lan)}</div>` : ''}
-        <div class="row"><button class="btn primary" onclick="closeModal()">Close</button></div>
+        <h2 style="margin-top:20px; font-size:13px;">Backup</h2>
+        <div class="row" style="gap:6px; flex-wrap:wrap;">
+          <a class="btn" href="/api/settings/export${tq}" download>Export settings</a>
+          <button class="btn" onclick="pickFileAndUpload('/api/settings/import','Settings imported')">Import settings…</button>
+          <button class="btn" onclick="pickFileAndUpload('/api/session/import','Session imported', true)">Import session…</button>
+        </div>
+        <div class="row" style="margin-top:14px;"><button class="btn primary" onclick="closeModal()">Close</button></div>
       `;
       document.getElementById('modalBg').classList.add('show');
+    };
+
+    /// Prompt for a JSON file and POST its raw contents to `url`. If
+    /// `refreshAfter` is true, re-pulls state so the new session shows up.
+    window.pickFileAndUpload = function(url, okMsg, refreshAfter) {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'application/json,.json';
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const tq = token ? ('?t=' + encodeURIComponent(token)) : '';
+          const res = await fetch(url + tq, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: text,
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) throw new Error(j.error || ('HTTP ' + res.status));
+          flash(okMsg || 'Imported');
+          closeModal();
+          if (refreshAfter) await refreshAll();
+        } catch (e) {
+          alert('Import failed: ' + e.message);
+        }
+      };
+      inp.click();
     };
     function closeModal() { document.getElementById('modalBg').classList.remove('show'); }
     document.getElementById('modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
@@ -1479,7 +2002,14 @@ struct HTTPResponse {
     }
 
     static func html(_ s: String, status: Int = 200) -> HTTPResponse {
-        HTTPResponse(status: status, headers: ["Content-Type": "text/html; charset=utf-8"], body: Data(s.utf8))
+        // Page is embedded in the binary; any change ships as a new build, so
+        // tell the browser never to reuse a stale copy. Without this, Safari
+        // and Chrome will happily serve yesterday's UI for hours.
+        HTTPResponse(status: status, headers: [
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        ], body: Data(s.utf8))
     }
 
     static func json(_ obj: Any, status: Int = 200) -> HTTPResponse {

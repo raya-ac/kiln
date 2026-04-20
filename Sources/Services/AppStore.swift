@@ -291,11 +291,14 @@ final class AppStore: ObservableObject {
         // "Tunnel Kiln" on last session. Requires warden to be configured;
         // silently stays idle otherwise (surface any failure in Settings).
         if d.bool(forKey: "warden.tunnelKiln") && wardenTunnels.config.isConfigured {
-            let sub = d.string(forKey: "warden.kilnSub").flatMap { $0.isEmpty ? nil : $0 }
+            // Tokens only authorize the sub they were issued for, so the
+            // restore path uses the claimed sub — ignoring any stale
+            // `warden.kilnSub` override from before auto-claim existed.
+            let sub = wardenTunnels.config.claimedSub
             wardenTunnels.start(
                 owner: .kilnSelf,
                 target: "127.0.0.1:\(remoteServer.port)",
-                sub: sub
+                sub: sub.isEmpty ? nil : sub
             )
         }
 
@@ -311,9 +314,9 @@ final class AppStore: ObservableObject {
             }
         }
 
-        // Seed UserDefaults so `Color.kilnAccent` picks up the user's choice
-        // even before they open settings.
-        mirrorAccentToUserDefaults()
+        // Seed UserDefaults so Theme.swift helpers (accent, color scheme)
+        // pick up the user's choice even before they open settings.
+        mirrorAppearanceToUserDefaults()
 
         // Load the user avatar (if any) so MessageRow can render it without
         // re-reading from disk on every frame.
@@ -692,17 +695,23 @@ final class AppStore: ObservableObject {
         Persistence.saveSession(sessions[idx])
     }
 
-    /// Mirror the user's accent-color choice to UserDefaults so `Color.kilnAccent`
-    /// (a static computed property) can read it without an @EnvironmentObject.
-    private func mirrorAccentToUserDefaults() {
+    /// Mirror user-appearance choices (accent, theme) to UserDefaults so
+    /// static Color helpers in Theme.swift can read them without needing the
+    /// AppStore in environment (useful for views presented in sheets).
+    private func mirrorAppearanceToUserDefaults() {
         UserDefaults.standard.set(settings.accentHex, forKey: "kiln.accentHex")
+        UserDefaults.standard.set(settings.themeMode.rawValue, forKey: "kiln.themeMode")
+        // Push the appearance to NSApp so window chrome (titlebar, traffic
+        // lights, native controls) flips with the user's choice. Passing nil
+        // means "follow system".
+        NSApp.appearance = settings.themeMode.nsAppearance
     }
 
     func saveSettings() {
         Persistence.saveSettings(settings)
-        mirrorAccentToUserDefaults()
-        // Force a re-render so Color.kilnAccent (which reads UserDefaults)
-        // updates immediately after a settings change.
+        mirrorAppearanceToUserDefaults()
+        // Force a re-render so Color.kilnAccent / Color.kilnPreferredColorScheme
+        // (which read UserDefaults) update immediately after a settings change.
         objectWillChange.send()
     }
 
@@ -762,6 +771,62 @@ final class AppStore: ObservableObject {
             md += "---\n\n"
         }
         return md
+    }
+
+    // MARK: - Import / Export (JSON)
+
+    /// Serialize a session to JSON bytes. Callers write these to disk or stream
+    /// them over HTTP. Returns nil if the id doesn't match a live session.
+    func exportSessionJSONData(_ id: String) -> Data? {
+        guard let s = sessions.first(where: { $0.id == id }) else { return nil }
+        return Persistence.exportSessionJSONData(s)
+    }
+
+    /// Import a session from a previously-exported JSON blob. Assigns a fresh
+    /// id, suffixes the name, and resets per-machine state (tunnel config,
+    /// pinned/archived flags) so we never clobber existing sessions. Returns
+    /// the new session id on success.
+    @discardableResult
+    func importSessionJSON(_ data: Data) -> String? {
+        guard let sd = Persistence.decodeSessionData(data) else { return nil }
+        let reconstructed = sd.toSession()
+        var imported = Session(
+            id: UUID().uuidString,
+            workDir: reconstructed.workDir,
+            name: reconstructed.name + " (imported)",
+            model: reconstructed.model,
+            isPinned: false,
+            group: reconstructed.group,
+            forkedFrom: nil,
+            kind: reconstructed.kind,
+            readOnly: reconstructed.readOnly,
+            isArchived: false,
+            sessionInstructions: reconstructed.sessionInstructions,
+            tags: reconstructed.tags,
+            tunnelPort: nil,
+            tunnelSub: nil,
+            createdAt: Date()
+        )
+        imported.messages = reconstructed.messages
+        sessions.insert(imported, at: 0)
+        activeSessionId = imported.id
+        Persistence.saveSession(imported)
+        return imported.id
+    }
+
+    /// Serialize full KilnSettings for backup.
+    func exportSettingsJSONData() -> Data? {
+        Persistence.exportSettingsJSONData(settings)
+    }
+
+    /// Replace the current settings with a backup. Persists to disk and
+    /// mirrors appearance to NSApp. Returns false if the blob is malformed.
+    @discardableResult
+    func importSettingsJSON(_ data: Data) -> Bool {
+        guard let incoming = Persistence.decodeSettingsData(data) else { return false }
+        settings = incoming
+        saveSettings()
+        return true
     }
 
     /// Fork a session at a specific message, creating a new session with messages up to (and including) that message.

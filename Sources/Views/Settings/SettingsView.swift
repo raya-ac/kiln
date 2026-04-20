@@ -337,6 +337,83 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                         }
 
+                        // Settings backup — JSON round-trip of the whole KilnSettings.
+                        HStack {
+                            Text("Settings")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.kilnTextSecondary)
+                                .frame(width: 120, alignment: .leading)
+                            Spacer()
+                            Text("backup / restore")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                            Button("Export") {
+                                guard let data = store.exportSettingsJSONData() else { return }
+                                let panel = NSSavePanel()
+                                panel.allowedContentTypes = [.json]
+                                panel.nameFieldStringValue = "kiln-settings-\(ISO8601DateFormatter().string(from: .now).prefix(10)).json"
+                                if panel.runModal() == .OK, let dest = panel.url {
+                                    try? data.write(to: dest)
+                                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.kilnAccentMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            Button("Import") {
+                                let panel = NSOpenPanel()
+                                panel.allowedContentTypes = [.json]
+                                panel.allowsMultipleSelection = false
+                                panel.canChooseDirectories = false
+                                if panel.runModal() == .OK, let src = panel.url,
+                                   let data = try? Data(contentsOf: src) {
+                                    _ = store.importSettingsJSON(data)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.kilnAccentMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+
+                        // Session import — paste a single session JSON back in.
+                        // Export-single-session lives in the sidebar context menu;
+                        // this is the matching import entry point.
+                        HStack {
+                            Text("Import session")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.kilnTextSecondary)
+                                .frame(width: 120, alignment: .leading)
+                            Spacer()
+                            Text("from JSON")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                            Button("Import") {
+                                let panel = NSOpenPanel()
+                                panel.allowedContentTypes = [.json]
+                                panel.allowsMultipleSelection = false
+                                panel.canChooseDirectories = false
+                                if panel.runModal() == .OK, let src = panel.url,
+                                   let data = try? Data(contentsOf: src) {
+                                    _ = store.importSessionJSON(data)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.kilnAccentMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+
                     }
 
                     // About
@@ -419,6 +496,17 @@ struct SettingsView: View {
             // Identity — avatar + display name, shown on every user message.
             SettingsRow(label: "You") {
                 UserIdentityEditor()
+                Spacer()
+            }
+
+            SettingsRow(label: "Theme") {
+                pickRow(options: ThemeMode.allCases, current: store.settings.themeMode) { v in
+                    store.settings.themeMode = v
+                    // Also keep the legacy string in sync so a downgrade
+                    // still shows the right mode at the top level.
+                    store.settings.theme = (v == .light) ? "light" : "dark"
+                    store.saveSettings()
+                } label: { $0.label }
                 Spacer()
             }
 
@@ -1062,121 +1150,47 @@ struct SettingsView: View {
     @ViewBuilder
     private var wardenTunnelSection: some View {
         SettingsSection(title: "WARDEN TUNNEL") {
-            // Config — server, domain, scheme, psk path
-            SettingsRow(label: "Server") {
-                TextField("tunnel.example.com", text: Binding(
-                    get: { store.wardenTunnels.config.server },
-                    set: {
-                        store.wardenTunnels.config.server = $0
-                        store.wardenTunnels.saveConfig()
+            // Auto-config status: the app claims its own bearer token from
+            // the baked-in tunnel server on first launch. No PSK file,
+            // no manual credential. Server/domain/scheme live under
+            // Advanced for the rare case of pointing at a different host.
+            SettingsRow(label: "Credential") {
+                if store.wardenTunnels.claimInFlight {
+                    HStack(spacing: 6) {
+                        ProgressView().scaleEffect(0.5).frame(width: 14, height: 14)
+                        Text("claiming token…").font(.system(size: 11)).foregroundStyle(Color.kilnTextSecondary)
                     }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.kilnBg)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
-                .onSubmit { restartKilnTunnelIfActive() }
-            }
-
-            SettingsRow(label: "Domain") {
-                TextField("example.com", text: Binding(
-                    get: { store.wardenTunnels.config.domain },
-                    set: {
-                        store.wardenTunnels.config.domain = $0
-                        store.wardenTunnels.saveConfig()
+                } else if !store.wardenTunnels.config.bearerToken.isEmpty {
+                    // Token present = healthy, even if the last re-claim
+                    // hit the 24h rate limit. The existing token is still
+                    // valid until it expires.
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("token claimed").font(.system(size: 11)).foregroundStyle(Color.kilnTextSecondary)
                     }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.kilnBg)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
-                .onSubmit { restartKilnTunnelIfActive() }
-            }
-
-            SettingsRow(label: "Scheme") {
-                Picker("", selection: Binding(
-                    get: { store.wardenTunnels.config.scheme.isEmpty ? "wss" : store.wardenTunnels.config.scheme },
-                    set: {
-                        store.wardenTunnels.config.scheme = $0
-                        store.wardenTunnels.saveConfig()
-                        // Scheme change affects the websocket URL, restart
-                        // immediately since the picker commits on click.
-                        restartKilnTunnelIfActive()
-                    }
-                )) {
-                    Text("wss").tag("wss")
-                    Text("ws").tag("ws")
+                } else if let err = store.wardenTunnels.claimError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .lineLimit(1).truncationMode(.middle)
+                } else {
+                    Text("no token").font(.system(size: 11)).foregroundStyle(Color.kilnTextTertiary)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 140)
-                Spacer()
-            }
 
-            SettingsRow(label: "PSK file") {
-                TextField("~/.config/warden/psk", text: Binding(
-                    get: { store.wardenTunnels.config.pskPath },
-                    set: {
-                        store.wardenTunnels.config.pskPath = $0
-                        store.wardenTunnels.saveConfig()
-                    }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.kilnBg)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
-                .onSubmit { restartKilnTunnelIfActive() }
+                Spacer()
 
                 Button {
-                    let panel = NSOpenPanel()
-                    panel.allowsMultipleSelection = false
-                    panel.canChooseFiles = true
-                    panel.canChooseDirectories = false
-                    if panel.runModal() == .OK, let url = panel.url {
-                        store.wardenTunnels.config.pskPath = url.path
-                        store.wardenTunnels.saveConfig()
-                        // File picker commits immediately, so do the restart
-                        // now rather than waiting for an onSubmit that will
-                        // never come.
-                        restartKilnTunnelIfActive()
-                    }
+                    Task { await store.wardenTunnels.claimIfNeeded() }
                 } label: {
-                    Image(systemName: "folder")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .frame(width: 22, height: 22)
+                    Text(store.wardenTunnels.config.bearerToken.isEmpty ? "Claim" : "Re-claim")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnText)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Color.kilnSurfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
-            }
-
-            SettingsRow(label: "Insecure TLS") {
-                Toggle("", isOn: Binding(
-                    get: { store.wardenTunnels.config.insecure },
-                    set: {
-                        store.wardenTunnels.config.insecure = $0
-                        store.wardenTunnels.saveConfig()
-                        // Insecure flag changes how the tunnel client validates
-                        // the server cert — restart so the live tunnel picks
-                        // up the new setting.
-                        restartKilnTunnelIfActive()
-                    }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
-                Spacer()
-                Text("dev only — skips TLS verification")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.kilnTextTertiary)
+                .disabled(store.wardenTunnels.claimInFlight)
             }
 
             Divider().background(Color.kilnBorderSubtle).padding(.vertical, 6)
@@ -1191,11 +1205,15 @@ struct SettingsView: View {
                     set: { enabled in
                         UserDefaults.standard.set(enabled, forKey: "warden.tunnelKiln")
                         if enabled {
-                            let sub = UserDefaults.standard.string(forKey: "warden.kilnSub").flatMap { $0.isEmpty ? nil : $0 }
+                            // Always register the sub our token was
+                            // issued for; any other value is rejected by
+                            // the server. Nil → client rolls a random
+                            // one, which only works pre-claim.
+                            let sub = store.wardenTunnels.config.claimedSub
                             store.wardenTunnels.start(
                                 owner: .kilnSelf,
                                 target: "127.0.0.1:\(store.remoteServer.port)",
-                                sub: sub
+                                sub: sub.isEmpty ? nil : sub
                             )
                         } else {
                             store.wardenTunnels.stop(owner: .kilnSelf)
@@ -1231,30 +1249,24 @@ struct SettingsView: View {
                 }
             }
 
-            SettingsRow(label: "Subdomain") {
-                TextField("auto (random)", text: Binding(
-                    get: { UserDefaults.standard.string(forKey: "warden.kilnSub") ?? "" },
-                    set: { UserDefaults.standard.set($0, forKey: "warden.kilnSub") }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.kilnBg)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
-                .frame(maxWidth: 240)
-                // Restart on submit so the new sub shows up in the URL row
-                // without the user having to flip Tunnel Kiln off and on.
-                .onSubmit { restartKilnTunnelIfActive() }
-                Spacer()
+            // Subdomain is derived from the claimed token — the server
+            // only authorizes the sub the token was issued for, so there's
+            // no free-text override. Shown read-only so the user can see
+            // which URL they'll get.
+            if !store.wardenTunnels.config.claimedSub.isEmpty {
+                SettingsRow(label: "Subdomain") {
+                    Text(store.wardenTunnels.config.claimedSub)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                    Spacer()
+                }
             }
 
             if let s = selfState, case .ready(let url) = s.status {
                 VStack(alignment: .leading, spacing: 6) {
                     urlRow(label: "public", url: url)
                     if !store.remoteServer.token.isEmpty {
-                        urlRow(label: "with token", url: "\(url)/?token=\(store.remoteServer.token)")
+                        urlRow(label: "with token", url: "\(url)/?t=\(store.remoteServer.token)")
                     }
                 }
                 .padding(.top, 6)
@@ -1469,8 +1481,13 @@ struct SettingsView: View {
             Button {
                 NSPasteboard.general.clearContents()
                 var s = url
-                if !store.remoteServer.token.isEmpty {
-                    s += "?t=\(store.remoteServer.token)"
+                // Only append the token if the URL doesn't already carry
+                // it — otherwise the "with token" row double-appends and
+                // the browser lands on `?t=X?t=X`, which the server reads
+                // as a single malformed value and 401s.
+                let tok = store.remoteServer.token
+                if !tok.isEmpty && !s.contains("t=\(tok)") {
+                    s += (s.contains("?") ? "&" : "?") + "t=\(tok)"
                 }
                 NSPasteboard.general.setString(s, forType: .string)
             } label: {

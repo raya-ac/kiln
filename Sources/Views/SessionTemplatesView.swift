@@ -107,7 +107,7 @@ struct SessionTemplatesView: View {
                 },
                 onDelete: { templates.remove(template.id) }
             )
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
     }
 

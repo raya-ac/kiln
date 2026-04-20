@@ -47,12 +47,16 @@ struct TunnelLogEntry: Identifiable, Sendable, Equatable {
 /// User-configured warden tunnel infrastructure. Persisted to UserDefaults.
 /// Matches the fields of `~/.config/warden/config.toml` so the Go CLI and
 /// Kiln can share one setup.
+///
+/// Defaults point at the project-owned warden deployment (tunnel.cute.pm
+/// over wss). Credential stays unset — user drops a bearer token or PSK
+/// path in Settings once and the tunnel is live. Everything else is baked.
 struct WardenConfig: Codable, Equatable, Sendable {
     /// Tunnel server hostname, e.g. "tunnel.example.com".
-    var server: String = ""
+    var server: String = "tunnel.cute.pm"
     /// Public domain that subdomains are carved out of, e.g. "example.com".
     /// Only used for URL display — the server decides the actual hostname.
-    var domain: String = ""
+    var domain: String = "cute.pm"
     /// "ws" or "wss". Defaults to wss.
     var scheme: String = "wss"
     /// Path to a file containing the shared PSK (hex or raw). Resolved at
@@ -61,11 +65,34 @@ struct WardenConfig: Codable, Equatable, Sendable {
     /// Optional pre-formatted bearer token (`tok_…`). If set, takes
     /// precedence over `pskPath`.
     var bearerToken: String = ""
+    /// Subdomain the current token was issued for. The token only lets
+    /// us register this sub — the server rejects any other. Populated by
+    /// `claimIfNeeded()` and used by the self-tunnel start path.
+    var claimedSub: String = ""
     /// Allow self-signed TLS (local dev).
     var insecure: Bool = false
 
     var isConfigured: Bool {
         !server.isEmpty && (!pskPath.isEmpty || !bearerToken.isEmpty)
+    }
+
+    // Manual decoder so each field falls back to its default if the saved
+    // JSON predates it. Synthesized Codable would throw keyNotFound on
+    // missing keys, which silently collapses the whole config back to
+    // defaults — blowing away the user's token.
+    private enum CodingKeys: String, CodingKey {
+        case server, domain, scheme, pskPath, bearerToken, claimedSub, insecure
+    }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.server      = (try? c.decode(String.self, forKey: .server))      ?? "tunnel.cute.pm"
+        self.domain      = (try? c.decode(String.self, forKey: .domain))      ?? "cute.pm"
+        self.scheme      = (try? c.decode(String.self, forKey: .scheme))      ?? "wss"
+        self.pskPath     = (try? c.decode(String.self, forKey: .pskPath))     ?? ""
+        self.bearerToken = (try? c.decode(String.self, forKey: .bearerToken)) ?? ""
+        self.claimedSub  = (try? c.decode(String.self, forKey: .claimedSub))  ?? ""
+        self.insecure    = (try? c.decode(Bool.self,   forKey: .insecure))    ?? false
     }
 }
 
@@ -101,8 +128,23 @@ final class WardenTunnelService: ObservableObject {
     private var backoffSeconds: [String: Double] = [:]
     private var reconnectTasks: [String: Task<Void, Never>] = [:]
 
+    /// Claim state surfaced to Settings so the UI can show progress while
+    /// Kiln is fetching its bearer token from the tunnel server.
+    @Published private(set) var claimInFlight: Bool = false
+    @Published private(set) var claimError: String?
+
     init() {
         self.config = Self.loadConfig()
+        // Persist the migrated config so backfilled fields (claimedSub,
+        // baked-in defaults) survive future launches. Cheap — UserDefaults
+        // write is synchronous but tiny.
+        saveConfig()
+        // Zero-config first launch: if the user hasn't configured a PSK or
+        // bearer token, grab one from the baked-in tunnel server's public
+        // /claim endpoint. The token is app-served — no filesystem PSK.
+        if config.bearerToken.isEmpty && config.pskPath.isEmpty && !config.server.isEmpty {
+            Task { [weak self] in await self?.claimIfNeeded() }
+        }
     }
 
     // MARK: - Config persistence
@@ -111,8 +153,25 @@ final class WardenTunnelService: ObservableObject {
 
     static func loadConfig() -> WardenConfig {
         guard let data = UserDefaults.standard.data(forKey: configKey),
-              let cfg = try? JSONDecoder().decode(WardenConfig.self, from: data)
+              var cfg = try? JSONDecoder().decode(WardenConfig.self, from: data)
         else { return WardenConfig() }
+        // Migrate older saves from before auto-claim: fill in baked
+        // defaults for any empty field, drop the now-obsolete pskPath
+        // default that pointed at the warden CLI's location, and flip
+        // insecure off (previous UI let users leave it on by accident).
+        let fresh = WardenConfig()
+        if cfg.server.isEmpty { cfg.server = fresh.server }
+        if cfg.domain.isEmpty { cfg.domain = fresh.domain }
+        if cfg.scheme.isEmpty || cfg.scheme == "ws" { cfg.scheme = fresh.scheme }
+        if cfg.pskPath == "~/.config/warden/psk" { cfg.pskPath = "" }
+        // Backfill claimedSub for tokens issued before we persisted it.
+        // Token format is `tok_<sub>_<hex>`; splitting on "_" yields
+        // ["tok", sub, hex], so the middle segment is the sub. This
+        // matches how warden-tunnel-server builds the token.
+        if cfg.claimedSub.isEmpty && cfg.bearerToken.hasPrefix("tok_") {
+            let parts = cfg.bearerToken.split(separator: "_")
+            if parts.count >= 3 { cfg.claimedSub = String(parts[1]) }
+        }
         return cfg
     }
 
@@ -303,6 +362,71 @@ final class WardenTunnelService: ObservableObject {
             return .session(String(key.dropFirst("session:".count)))
         }
         return .kilnSelf
+    }
+
+    // MARK: - Token claim (app-served PSK)
+
+    /// Hit the tunnel server's public `/claim` endpoint and stash the
+    /// returned bearer token. Idempotent: returns immediately if a token
+    /// is already configured or a claim is already in flight. Each Kiln
+    /// install ends up with its own 7-day token, re-claimed on expiry.
+    ///
+    /// The server is resolved from `config.server`; if the response
+    /// carries a `server` field we trust it (lets the server bounce
+    /// callers to a different host). `sub` defaults to a random hex
+    /// label so installs don't collide.
+    func claimIfNeeded(sub: String? = nil) async {
+        guard !claimInFlight else { return }
+        guard config.bearerToken.isEmpty else { return }
+        guard !config.server.isEmpty else {
+            claimError = "no tunnel server configured"
+            return
+        }
+
+        claimInFlight = true
+        claimError = nil
+        defer { claimInFlight = false }
+
+        let wantedSub = (sub?.isEmpty == false ? sub! : TunnelSub.random(8))
+        let scheme = config.scheme.isEmpty ? "https" : (config.scheme == "ws" ? "http" : "https")
+        guard let url = URL(string: "\(scheme)://\(config.server)/claim") else {
+            claimError = "invalid claim URL"
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "sub=\(wantedSub)".data(using: .utf8)
+        req.timeoutInterval = 15
+
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let http = resp as? HTTPURLResponse
+            let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            if (http?.statusCode ?? 500) >= 400 {
+                claimError = "claim: \(obj["error"] as? String ?? "HTTP \(http?.statusCode ?? 0)")"
+                return
+            }
+            guard let token = obj["token"] as? String, !token.isEmpty else {
+                claimError = "claim: server returned no token"
+                return
+            }
+            // Server may rewrite sub (e.g. reserved names) or advertise a
+            // different edge host — prefer whatever it sent us. Persist
+            // the sub too: tokens only authorize the sub they were issued
+            // for, so the tunnel-start path has to replay it exactly.
+            config.bearerToken = token
+            if let s = obj["server"] as? String, !s.isEmpty { config.server = s }
+            if let s = obj["sub"] as? String, !s.isEmpty {
+                config.claimedSub = s
+            } else {
+                config.claimedSub = wantedSub
+            }
+            saveConfig()
+        } catch {
+            claimError = "claim: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Credential helpers

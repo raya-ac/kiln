@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 
 // MARK: - Claude Models
 
@@ -798,6 +800,37 @@ enum HintStripMode: String, CaseIterable, Codable, Sendable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
+/// Appearance mode. `.system` follows the macOS-wide setting.
+/// Stored as the string rawValue on disk; the legacy `theme: String` field
+/// accepted "dark" | "light" and is preserved as the same rawValues.
+enum ThemeMode: String, CaseIterable, Codable, Sendable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light:  return "Light"
+        case .dark:   return "Dark"
+        }
+    }
+    /// SwiftUI scheme to apply, or `nil` to follow system.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+    /// NSAppearance for window-chrome sync. `nil` → follow system.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light:  return NSAppearance(named: .aqua)
+        case .dark:   return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 struct KilnSettings: Codable, Sendable {
     var defaultModel: ClaudeModel = .sonnet46
     var defaultWorkDir: String = NSHomeDirectory()
@@ -806,7 +839,13 @@ struct KilnSettings: Codable, Sendable {
     var useAutoMemory: Bool = false
     var defaultPermissions: PermissionMode = .bypass
     var defaultMode: SessionMode = .build
+    /// Legacy field — accepted "dark" | "light". Kept for Codable back-compat
+    /// so older preference files keep loading. New code should read/write
+    /// `themeMode` instead.
     var theme: String = "dark"
+    /// Appearance mode — what the Settings picker drives. Migrated from
+    /// `theme` when an older preferences file is decoded.
+    var themeMode: ThemeMode = .system
     var language: AppLanguage = .en
 
     // Appearance
@@ -856,6 +895,13 @@ struct KilnSettings: Codable, Sendable {
         defaultPermissions = (try? c.decode(PermissionMode.self, forKey: .defaultPermissions)) ?? .bypass
         defaultMode = (try? c.decode(SessionMode.self, forKey: .defaultMode)) ?? .build
         theme = (try? c.decode(String.self, forKey: .theme)) ?? "dark"
+        // Migrate the old String theme into the new enum when no explicit
+        // themeMode is stored. Fresh installs default to `.system`.
+        if let explicit = try? c.decode(ThemeMode.self, forKey: .themeMode) {
+            themeMode = explicit
+        } else {
+            themeMode = ThemeMode(rawValue: theme) ?? .system
+        }
         language = (try? c.decode(AppLanguage.self, forKey: .language)) ?? .en
         accentHex = (try? c.decode(String.self, forKey: .accentHex)) ?? "f97316"
         fontScale = (try? c.decode(FontScale.self, forKey: .fontScale)) ?? .medium
