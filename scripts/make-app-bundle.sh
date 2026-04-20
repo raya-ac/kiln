@@ -158,15 +158,20 @@ else
   echo "signing ad-hoc (no CODESIGN_IDENTITY set)"
 fi
 
+# `set -u` + empty arrays is a bash landmine: `"${EXTRA_OPTS[@]}"` on an
+# empty array triggers "unbound variable". The `+"…"` guard expands to
+# nothing when the array is unset/empty, and to the quoted elements otherwise.
 if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
   find "$APP/Contents/Frameworks/Sparkle.framework" \( -name '*.app' -o -name '*.xpc' \) \
     | while read -r helper; do
-      codesign --force "${EXTRA_OPTS[@]}" --sign "$IDENTITY" "$helper"
+      codesign --force ${EXTRA_OPTS[@]+"${EXTRA_OPTS[@]}"} --sign "$IDENTITY" "$helper"
     done
-  codesign --force "${EXTRA_OPTS[@]}" --sign "$IDENTITY" \
+  codesign --force ${EXTRA_OPTS[@]+"${EXTRA_OPTS[@]}"} --sign "$IDENTITY" \
     "$APP/Contents/Frameworks/Sparkle.framework"
 fi
-codesign --force --deep "${EXTRA_OPTS[@]}" "${ENTITLEMENTS_OPT[@]}" \
+codesign --force --deep \
+  ${EXTRA_OPTS[@]+"${EXTRA_OPTS[@]}"} \
+  ${ENTITLEMENTS_OPT[@]+"${ENTITLEMENTS_OPT[@]}"} \
   --sign "$IDENTITY" "$APP"
 
 # Sanity check: the bundle should be fully sealed now.

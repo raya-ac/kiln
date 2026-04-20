@@ -184,6 +184,11 @@ struct FileTreeView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Color.kilnSurface)
+                // File-level context menu on the header bar. Monaco has its
+                // own in-webview right-click menu for editor operations
+                // (cut/copy/paste/command palette/etc.) — this is for the
+                // file *around* that editor: save, revert, reveal, close.
+                .contextMenu { editorFileContextMenu(path: path) }
 
                 Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
@@ -200,6 +205,13 @@ struct FileTreeView: View {
                     isEditable: true,
                     onSave: { saveFile() }
                 )
+                // Same context menu is attached to the editor area so a
+                // two-finger click anywhere in the pane surfaces file ops
+                // as a fallback. Monaco's own right-click lives inside the
+                // WKWebView and intercepts first when the pointer is over
+                // editor glyphs; SwiftUI's contextMenu wins over the empty
+                // margins / gutter.
+                .contextMenu { editorFileContextMenu(path: path) }
             } else {
                 // Workdir header
                 HStack(spacing: 6) {
@@ -308,6 +320,69 @@ struct FileTreeView: View {
         } catch {
             print("Failed to save: \(error)")
         }
+    }
+
+    /// Revert to the on-disk version. Reads fresh rather than relying on
+    /// `originalContent` so externally-modified files get picked up.
+    private func revertFile() {
+        guard let path = selectedFile else { return }
+        if let fresh = try? String(contentsOfFile: path, encoding: .utf8) {
+            fileContent = fresh
+            originalContent = fresh
+            isDirty = false
+        }
+    }
+
+    private func closeCurrentFile() {
+        selectedFile = nil
+        fileContent = nil
+        isDirty = false
+        originalContent = nil
+    }
+
+    /// Context menu for the currently-open file. Used on both the header
+    /// strip and the editor body as a fallback when Monaco's in-webview
+    /// menu isn't what the user's trying to reach.
+    @ViewBuilder
+    private func editorFileContextMenu(path: String) -> some View {
+        if isDirty {
+            Button {
+                saveFile()
+            } label: { Label("Save", systemImage: "square.and.arrow.down") }
+            .keyboardShortcut("s")
+            Button(role: .destructive) {
+                revertFile()
+            } label: { Label("Revert Changes", systemImage: "arrow.uturn.backward") }
+            Divider()
+        }
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        } label: { Label("Reveal in Finder", systemImage: "folder") }
+        Button {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        } label: { Label("Open with Default App", systemImage: "arrow.up.forward.app") }
+        Divider()
+        Button {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(path, forType: .string)
+        } label: { Label("Copy Path", systemImage: "doc.on.doc") }
+        Button {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString((path as NSString).lastPathComponent, forType: .string)
+        } label: { Label("Copy Filename", systemImage: "doc.on.doc") }
+        if let content = fileContent, !content.isEmpty {
+            Button {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(content, forType: .string)
+            } label: { Label("Copy File Contents", systemImage: "text.quote") }
+        }
+        Divider()
+        Button {
+            closeCurrentFile()
+        } label: { Label("Close File", systemImage: "xmark") }
     }
 
     private func languageForFile(_ path: String) -> String {
@@ -423,6 +498,32 @@ struct FileRow: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
+            .contextMenu {
+                if !entry.isDirectory {
+                    Button {
+                        selectedFile = entry.path
+                        loadFile()
+                    } label: { Label("Open", systemImage: "doc.text") }
+                    Button {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
+                    } label: { Label("Open with Default App", systemImage: "arrow.up.forward.app") }
+                    Divider()
+                }
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: entry.path)])
+                } label: { Label("Reveal in Finder", systemImage: "folder") }
+                Divider()
+                Button {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(entry.path, forType: .string)
+                } label: { Label("Copy Path", systemImage: "doc.on.doc") }
+                Button {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(entry.name, forType: .string)
+                } label: { Label("Copy Name", systemImage: "doc.on.doc") }
+            }
 
             if expanded, let children {
                 ForEach(children) { child in

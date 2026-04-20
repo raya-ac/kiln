@@ -362,6 +362,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private func draggablePanel<V: View>(slot: PanelSlot, @ViewBuilder _ content: () -> V) -> some View {
+        let slots = visibleSlots
+        let isFlex = slots.firstIndex(of: slot) == flexIndex(for: slots)
         content()
             // Drop highlight — non-hit-testing overlay
             .overlay(
@@ -369,13 +371,14 @@ struct ContentView: View {
                     .fill(Color.kilnAccent.opacity(dragTargetSlot == slot ? 0.08 : 0))
                     .allowsHitTesting(false)
             )
-            // Drag handle — small visible grip at top-center, only this area
-            // initiates reorder-drag. The rest of the panel stays fully
-            // interactive for normal clicks.
+            // Header pill: click to promote to main, or drag to rearrange.
+            // Hidden when the panel is already the flex-center slot.
             .overlay(alignment: .top) {
-                DragHandle(slot: slot)
-                    .onDrag { NSItemProvider(object: slot.rawValue as NSString) }
-                    .padding(.top, 2)
+                if !isFlex {
+                    PanelPromoteButton(slot: slot, action: { promoteToMain(slot) })
+                        .onDrag { NSItemProvider(object: slot.rawValue as NSString) }
+                        .padding(.top, 3)
+                }
             }
             // Drop target applies to the whole panel but doesn't block hit testing
             .onDrop(of: [UTType.plainText], delegate: PanelDropDelegate(
@@ -383,6 +386,18 @@ struct ContentView: View {
                 dragTargetSlot: $dragTargetSlot,
                 onDrop: { src in if src != slot { movePanel(src, toIndexOf: slot) } }
             ))
+    }
+
+    /// Swap `slot` with whatever currently occupies the flex-center position.
+    /// A no-op when the slot is already the flex slot or when there's
+    /// nothing else visible to swap with.
+    private func promoteToMain(_ slot: PanelSlot) {
+        let slots = visibleSlots
+        let flex = flexIndex(for: slots)
+        guard slots.count > 1,
+              let myIdx = slots.firstIndex(of: slot),
+              myIdx != flex else { return }
+        movePanel(slot, toIndexOf: slots[flex])
     }
 
     // MARK: - Divider resize logic
@@ -461,30 +476,39 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Drag handle grip
+// MARK: - Panel promote button
+//
+// Replaces the old `DragHandle`. Sits pinned to the top of any non-flex
+// (side) panel. A single click swaps this panel with whatever's in the
+// center flex slot — much more discoverable than drag, though drag still
+// works as a passthrough for rearranging between side slots.
 
-struct DragHandle: View {
+struct PanelPromoteButton: View {
     let slot: PanelSlot
+    let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 8, weight: .bold))
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "rectangle.center.inset.filled")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Move to main")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(hovering ? Color.kilnBg : Color.kilnTextSecondary)
+            .background(hovering ? Color.kilnAccent : Color.kilnSurface.opacity(0.92))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.kilnBorder, lineWidth: 1))
         }
-        .foregroundStyle(hovering ? Color.kilnAccent : Color.kilnTextTertiary.opacity(0.6))
-        .frame(width: 28, height: 12)
-        .background(hovering ? Color.kilnSurfaceHover : Color.kilnSurface.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(
-            RoundedRectangle(cornerRadius: 3)
-                .stroke(Color.kilnBorder.opacity(hovering ? 1 : 0.4), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
         .onHover { inside in
             hovering = inside
-            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .help("Drag to rearrange this panel")
+        .help("Move this panel to the main area (or drag to rearrange)")
     }
 }
 
