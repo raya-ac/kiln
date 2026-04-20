@@ -34,6 +34,15 @@ struct ShortcutsOverlay: View {
             ("⌘.", "Interrupt generation"),
             ("⌘⇧R", "Retry last message"),
         ]),
+        ("Editor", [
+            ("⌘S", "Save active file"),
+            ("⌘⌥S", "Save all open files"),
+            ("⌘⇧W", "Close active tab"),
+            ("⌘⌥[", "Previous tab"),
+            ("⌘⌥]", "Next tab"),
+            ("⌘⇧B", "Toggle file tree"),
+            ("⌘⌥R", "Reveal active file in Finder"),
+        ]),
         ("Slash commands (client-side)", [
             ("/compact", "Summarize and reset history"),
             ("/clear", "Clear session messages"),

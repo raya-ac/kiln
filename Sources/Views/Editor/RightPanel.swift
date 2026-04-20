@@ -377,6 +377,63 @@ struct FileTreeView: View {
             syncWithActiveToolCalls()
             syncLiveWriteContent()
         }
+        .background(editorShortcuts)
+    }
+
+    /// Hidden buttons that register editor-local keyboard shortcuts.
+    /// Live in .background so they don't affect layout but stay in the
+    /// responder chain whenever the editor view is on screen.
+    @ViewBuilder
+    private var editorShortcuts: some View {
+        ZStack {
+            Button("Close Tab") { closeActiveTab() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+            Button("Next Tab") { navigateTab(by: 1) }
+                .keyboardShortcut("]", modifiers: [.command, .option])
+            Button("Previous Tab") { navigateTab(by: -1) }
+                .keyboardShortcut("[", modifiers: [.command, .option])
+            Button("Toggle File Tree") { showTree.toggle() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+            Button("Save All") { saveAll() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+            Button("Reveal Active In Finder") { revealActiveInFinder() }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
+    private func closeActiveTab() {
+        guard let idx = activeIndex else { return }
+        closeFile(at: idx)
+    }
+
+    private func navigateTab(by delta: Int) {
+        guard !openFiles.isEmpty, let idx = activeIndex else { return }
+        let n = openFiles.count
+        let next = ((idx + delta) % n + n) % n
+        activeIndex = next
+        showTree = false
+    }
+
+    private func saveAll() {
+        for i in openFiles.indices where openFiles[i].isDirty {
+            let f = openFiles[i]
+            do {
+                try f.content.write(toFile: f.path, atomically: true, encoding: .utf8)
+                openFiles[i].originalContent = f.content
+                pendingClaudeEdit.remove(f.path)
+                preEditSnapshot.removeValue(forKey: f.path)
+            } catch {
+                print("Failed to save \(f.path): \(error)")
+            }
+        }
+    }
+
+    private func revealActiveInFinder() {
+        guard let idx = activeIndex, openFiles.indices.contains(idx) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: openFiles[idx].path)])
     }
 
     /// Changes whenever a tool call is added/removed or flips isDone.
