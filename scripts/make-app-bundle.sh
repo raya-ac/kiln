@@ -61,6 +61,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Framewor
 
 cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"
 
+# SPM builds only stamp `@loader_path` into LC_RPATH. Once the binary lives
+# in Contents/MacOS/, that resolves to MacOS/ — but Sparkle.framework lives
+# one level up in Contents/Frameworks/, so dyld can't find it and the app
+# dies at launch with "Library not loaded: @rpath/Sparkle.framework/…".
+# Add the Frameworks search path explicitly. `|| true` keeps reruns idempotent.
+install_name_tool -add_rpath '@executable_path/../Frameworks' \
+  "$APP/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+
 # 3. Bundle Sparkle.framework. Pull the matching arch slice out of the
 # xcframework if available; otherwise fall back to whatever's there.
 SPARKLE_FW=""
