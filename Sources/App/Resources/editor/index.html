@@ -57,31 +57,144 @@
       require(['vs/editor/editor.main'], function () {
         // Dark theme tuned to the Kiln palette (roughly matches the
         // sidebar/surface tokens in Theme.swift).
+        // Kiln Dark — warm, low-saturation palette built around the app
+        // accent (#ff7a45). Token rules push syntax into the earthy half
+        // of the wheel (ember, clay, sand, moss) rather than the standard
+        // VS Code blue/purple cool tones.
+        //
+        // Color roles (hex, no hash for Monaco's token rule syntax):
+        //   ember  ff7a45   keywords, operators (the accent itself)
+        //   flame  ff9d6d   strings
+        //   sand   e8c39e   numbers, constants
+        //   moss   a3b986   types, classes
+        //   sage   7d9c7b   comments (mossier than the usual grey-green)
+        //   clay   d89a6e   function names
+        //   rust   c96a4a   regex, escapes, tag names
+        //   slate  9a9a9a   identifiers, fallthrough
+        //   dust   6a6a6a   punctuation, brackets
         monaco.editor.defineTheme('kiln-dark', {
           base: 'vs-dark',
           inherit: true,
-          rules: [],
+          rules: [
+            { token: '',                   foreground: 'e6e6e6' },
+            { token: 'comment',            foreground: '7d9c7b', fontStyle: 'italic' },
+            { token: 'comment.doc',        foreground: '8fae8d', fontStyle: 'italic' },
+            { token: 'string',             foreground: 'ff9d6d' },
+            { token: 'string.escape',      foreground: 'c96a4a' },
+            { token: 'string.regexp',      foreground: 'c96a4a' },
+            { token: 'number',             foreground: 'e8c39e' },
+            { token: 'constant',           foreground: 'e8c39e' },
+            { token: 'constant.numeric',   foreground: 'e8c39e' },
+            { token: 'constant.language',  foreground: 'e8c39e' },
+            { token: 'keyword',            foreground: 'ff7a45', fontStyle: 'bold' },
+            { token: 'keyword.control',    foreground: 'ff7a45', fontStyle: 'bold' },
+            { token: 'keyword.operator',   foreground: 'ff7a45' },
+            { token: 'storage',            foreground: 'ff7a45' },
+            { token: 'storage.type',       foreground: 'a3b986' },
+            { token: 'storage.modifier',   foreground: 'ff7a45' },
+            { token: 'type',               foreground: 'a3b986' },
+            { token: 'type.identifier',    foreground: 'a3b986' },
+            { token: 'entity.name.type',   foreground: 'a3b986' },
+            { token: 'entity.name.class',  foreground: 'a3b986' },
+            { token: 'entity.name.function', foreground: 'd89a6e' },
+            { token: 'function',           foreground: 'd89a6e' },
+            { token: 'variable',           foreground: 'e6e6e6' },
+            { token: 'variable.parameter', foreground: 'e6e6e6', fontStyle: 'italic' },
+            { token: 'identifier',         foreground: 'e6e6e6' },
+            { token: 'delimiter',          foreground: '9a9a9a' },
+            { token: 'delimiter.bracket',  foreground: '9a9a9a' },
+            { token: 'delimiter.parenthesis', foreground: '9a9a9a' },
+            { token: 'punctuation',        foreground: '6a6a6a' },
+            { token: 'operator',           foreground: 'ff7a45' },
+            // Language-specific niceties
+            { token: 'tag',                foreground: 'c96a4a' },           // html/xml
+            { token: 'tag.attribute',      foreground: 'd89a6e' },
+            { token: 'attribute.name',     foreground: 'd89a6e' },
+            { token: 'attribute.value',    foreground: 'ff9d6d' },
+            { token: 'metatag',            foreground: 'c96a4a' },
+            { token: 'key.json',           foreground: 'd89a6e' },
+            { token: 'string.key.json',    foreground: 'd89a6e' },
+            { token: 'string.value.json',  foreground: 'ff9d6d' },
+            { token: 'variable.parameter.markdown', foreground: 'e8c39e' },
+            { token: 'emphasis',           fontStyle: 'italic' },
+            { token: 'strong',             fontStyle: 'bold' }
+          ],
           colors: {
-            'editor.background': '#1a1a1a',
-            'editor.foreground': '#e6e6e6',
-            'editorLineNumber.foreground': '#4a4a4a',
-            'editorLineNumber.activeForeground': '#9a9a9a',
-            'editor.selectionBackground': '#3a3a3a',
+            'editor.background':              '#1a1a1a',
+            'editor.foreground':              '#e6e6e6',
+            'editorLineNumber.foreground':    '#3a3a3a',
+            'editorLineNumber.activeForeground': '#ff7a45',
+            'editor.selectionBackground':     '#ff7a4533',      // 20% accent
+            'editor.inactiveSelectionBackground': '#3a3a3a',
+            'editor.selectionHighlightBackground': '#ff7a4522',
+            'editor.wordHighlightBackground': '#ff7a4522',
+            'editor.wordHighlightStrongBackground': '#ff7a4544',
+            'editor.findMatchBackground':     '#ff7a4555',
+            'editor.findMatchHighlightBackground': '#ff7a4530',
             'editor.lineHighlightBackground': '#222222',
-            'editorCursor.foreground': '#ff7a45',
-            'editorGutter.background': '#1a1a1a',
-            'editorIndentGuide.background': '#262626',
-            'editorIndentGuide.activeBackground': '#3a3a3a'
+            'editor.lineHighlightBorder':     '#22222200',
+            'editorCursor.foreground':        '#ff7a45',
+            'editorWhitespace.foreground':    '#2a2a2a',
+            'editorGutter.background':        '#1a1a1a',
+            'editorGutter.modifiedBackground': '#ff7a45',
+            'editorGutter.addedBackground':   '#a3b986',
+            'editorGutter.deletedBackground': '#c96a4a',
+            'editorIndentGuide.background':   '#262626',
+            'editorIndentGuide.activeBackground': '#3a3a3a',
+            'editorBracketMatch.background':  '#ff7a4522',
+            'editorBracketMatch.border':      '#ff7a4588',
+            'editorOverviewRuler.border':     '#1a1a1a',
+            'editorWidget.background':        '#222222',
+            'editorWidget.border':            '#3a3a3a',
+            'editorSuggestWidget.background': '#222222',
+            'editorSuggestWidget.border':     '#3a3a3a',
+            'editorSuggestWidget.selectedBackground': '#ff7a4533',
+            'editorSuggestWidget.highlightForeground': '#ff7a45',
+            'editorHoverWidget.background':   '#222222',
+            'editorHoverWidget.border':       '#3a3a3a',
+            'scrollbarSlider.background':     '#3a3a3a55',
+            'scrollbarSlider.hoverBackground':'#3a3a3a99',
+            'scrollbarSlider.activeBackground':'#ff7a4588',
+            'minimap.background':             '#1a1a1a',
+            'minimap.selectionHighlight':     '#ff7a45',
+            'editorError.foreground':         '#c96a4a',
+            'editorWarning.foreground':       '#e8c39e',
+            'editorInfo.foreground':          '#a3b986'
           }
         });
+        // Kiln Light — same accent, brightened surfaces. Token rules mirror
+        // the dark theme but pull each hue darker so contrast holds on white.
         monaco.editor.defineTheme('kiln-light', {
           base: 'vs',
           inherit: true,
-          rules: [],
+          rules: [
+            { token: '',                   foreground: '1a1a1a' },
+            { token: 'comment',            foreground: '6a8a68', fontStyle: 'italic' },
+            { token: 'string',             foreground: 'd65a1f' },
+            { token: 'string.escape',      foreground: 'a84526' },
+            { token: 'number',             foreground: 'b8862e' },
+            { token: 'constant',           foreground: 'b8862e' },
+            { token: 'keyword',            foreground: 'd65a1f', fontStyle: 'bold' },
+            { token: 'keyword.operator',   foreground: 'd65a1f' },
+            { token: 'storage',            foreground: 'd65a1f' },
+            { token: 'type',               foreground: '5f7a44' },
+            { token: 'entity.name.type',   foreground: '5f7a44' },
+            { token: 'entity.name.function', foreground: 'a8651f' },
+            { token: 'function',           foreground: 'a8651f' },
+            { token: 'tag',                foreground: 'a84526' },
+            { token: 'attribute.name',     foreground: 'a8651f' },
+            { token: 'attribute.value',    foreground: 'd65a1f' }
+          ],
           colors: {
-            'editor.background': '#ffffff',
-            'editor.foreground': '#1a1a1a',
-            'editorCursor.foreground': '#ff7a45'
+            'editor.background':              '#ffffff',
+            'editor.foreground':              '#1a1a1a',
+            'editorLineNumber.foreground':    '#c0c0c0',
+            'editorLineNumber.activeForeground': '#ff7a45',
+            'editor.selectionBackground':     '#ff7a4533',
+            'editor.lineHighlightBackground': '#faf6f2',
+            'editorCursor.foreground':        '#ff7a45',
+            'editorBracketMatch.background':  '#ff7a4522',
+            'editorBracketMatch.border':      '#ff7a4588'
           }
         });
 
@@ -115,6 +228,103 @@
           post({ kind: 'change', text: editor.getValue() });
         });
 
+        // Rebuild a theme whose accent-derived colors swap in at runtime.
+        // Takes a hex without the leading '#'. Leaves non-accent token colors
+        // (earthy palette) in place — just recolors everything tied to the
+        // user's selected accent.
+        function buildDarkThemeWithAccent(hex) {
+          var a = (hex || 'ff7a45').replace('#', '').toLowerCase();
+          return {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+              { token: '',                   foreground: 'e6e6e6' },
+              { token: 'comment',            foreground: '7d9c7b', fontStyle: 'italic' },
+              { token: 'comment.doc',        foreground: '8fae8d', fontStyle: 'italic' },
+              { token: 'string',             foreground: 'ff9d6d' },
+              { token: 'string.escape',      foreground: 'c96a4a' },
+              { token: 'string.regexp',      foreground: 'c96a4a' },
+              { token: 'number',             foreground: 'e8c39e' },
+              { token: 'constant',           foreground: 'e8c39e' },
+              { token: 'keyword',            foreground: a, fontStyle: 'bold' },
+              { token: 'keyword.control',    foreground: a, fontStyle: 'bold' },
+              { token: 'keyword.operator',   foreground: a },
+              { token: 'storage',            foreground: a },
+              { token: 'storage.type',       foreground: 'a3b986' },
+              { token: 'storage.modifier',   foreground: a },
+              { token: 'type',               foreground: 'a3b986' },
+              { token: 'type.identifier',    foreground: 'a3b986' },
+              { token: 'entity.name.type',   foreground: 'a3b986' },
+              { token: 'entity.name.class',  foreground: 'a3b986' },
+              { token: 'entity.name.function', foreground: 'd89a6e' },
+              { token: 'function',           foreground: 'd89a6e' },
+              { token: 'variable',           foreground: 'e6e6e6' },
+              { token: 'variable.parameter', foreground: 'e6e6e6', fontStyle: 'italic' },
+              { token: 'identifier',         foreground: 'e6e6e6' },
+              { token: 'delimiter',          foreground: '9a9a9a' },
+              { token: 'punctuation',        foreground: '6a6a6a' },
+              { token: 'operator',           foreground: a },
+              { token: 'tag',                foreground: 'c96a4a' },
+              { token: 'attribute.name',     foreground: 'd89a6e' },
+              { token: 'attribute.value',    foreground: 'ff9d6d' }
+            ],
+            colors: {
+              'editor.background':                    '#1a1a1a',
+              'editor.foreground':                    '#e6e6e6',
+              'editorLineNumber.foreground':          '#3a3a3a',
+              'editorLineNumber.activeForeground':    '#' + a,
+              'editor.selectionBackground':           '#' + a + '33',
+              'editor.inactiveSelectionBackground':   '#3a3a3a',
+              'editor.selectionHighlightBackground':  '#' + a + '22',
+              'editor.wordHighlightBackground':       '#' + a + '22',
+              'editor.wordHighlightStrongBackground': '#' + a + '44',
+              'editor.findMatchBackground':           '#' + a + '55',
+              'editor.findMatchHighlightBackground':  '#' + a + '30',
+              'editor.lineHighlightBackground':       '#222222',
+              'editorCursor.foreground':              '#' + a,
+              'editorGutter.background':              '#1a1a1a',
+              'editorGutter.modifiedBackground':      '#' + a,
+              'editorBracketMatch.background':        '#' + a + '22',
+              'editorBracketMatch.border':            '#' + a + '88',
+              'editorSuggestWidget.selectedBackground': '#' + a + '33',
+              'editorSuggestWidget.highlightForeground': '#' + a,
+              'scrollbarSlider.activeBackground':     '#' + a + '88',
+              'minimap.selectionHighlight':           '#' + a
+            }
+          };
+        }
+
+        function buildLightThemeWithAccent(hex) {
+          var a = (hex || 'ff7a45').replace('#', '').toLowerCase();
+          return {
+            base: 'vs',
+            inherit: true,
+            rules: [
+              { token: '',                   foreground: '1a1a1a' },
+              { token: 'comment',            foreground: '6a8a68', fontStyle: 'italic' },
+              { token: 'string',             foreground: 'd65a1f' },
+              { token: 'number',             foreground: 'b8862e' },
+              { token: 'keyword',            foreground: a, fontStyle: 'bold' },
+              { token: 'keyword.operator',   foreground: a },
+              { token: 'storage',            foreground: a },
+              { token: 'type',               foreground: '5f7a44' },
+              { token: 'entity.name.function', foreground: 'a8651f' },
+              { token: 'function',           foreground: 'a8651f' }
+            ],
+            colors: {
+              'editor.background':              '#ffffff',
+              'editor.foreground':              '#1a1a1a',
+              'editorLineNumber.foreground':    '#c0c0c0',
+              'editorLineNumber.activeForeground': '#' + a,
+              'editor.selectionBackground':     '#' + a + '33',
+              'editor.lineHighlightBackground': '#faf6f2',
+              'editorCursor.foreground':        '#' + a,
+              'editorBracketMatch.background':  '#' + a + '22',
+              'editorBracketMatch.border':      '#' + a + '88'
+            }
+          };
+        }
+
         window.kiln = {
           setText: function (text) {
             if (editor.getValue() === text) return;
@@ -131,6 +341,12 @@
           },
           setTheme: function (name) {
             monaco.editor.setTheme(name || 'kiln-dark');
+          },
+          setAccent: function (hex) {
+            monaco.editor.defineTheme('kiln-dark',  buildDarkThemeWithAccent(hex));
+            monaco.editor.defineTheme('kiln-light', buildLightThemeWithAccent(hex));
+            // defineTheme doesn't re-apply to the active editor — nudge it.
+            monaco.editor.setTheme('kiln-dark');
           }
         };
 

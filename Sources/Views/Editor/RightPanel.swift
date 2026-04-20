@@ -22,8 +22,9 @@ struct RightPanel: View {
                                     .font(.system(size: 11, weight: .medium))
                                     .fixedSize()
                             }
-                            .padding(.horizontal, 9)
-                            .padding(.top, 6)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                             .foregroundStyle(selectedTab == tab ? Color.kilnAccent : Color.kilnTextTertiary)
 
                             Rectangle()
@@ -32,6 +33,7 @@ struct RightPanel: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .help("\(tab.label) panel")
                 }
                 Spacer(minLength: 0)
             }
@@ -102,14 +104,49 @@ enum RightTab: String, CaseIterable, Identifiable {
 
 // MARK: - File Tree
 
+/// One open buffer in the editor. Holds both the live `content` (what the
+/// user is editing) and the `originalContent` (what was on disk when we
+/// last read it) so we can compute a dirty flag and support Revert without
+/// another disk hit.
+struct OpenFile: Identifiable, Equatable {
+    let id: String            // absolute path — paths are unique, so they double as ids
+    var path: String
+    var content: String
+    var originalContent: String
+    var isDirty: Bool { content != originalContent }
+
+    init(path: String, content: String) {
+        self.id = path
+        self.path = path
+        self.content = content
+        self.originalContent = content
+    }
+}
+
 struct FileTreeView: View {
     @EnvironmentObject var store: AppStore
     @State private var entries: [FileEntry] = []
-    @State private var selectedFile: String?
-    @State private var fileContent: String?
-    @State private var isDirty = false
-    @State private var originalContent: String?
     @State private var filter: String = ""
+
+    // Multi-file editing state.
+    //
+    // `openFiles` is the ordered tab strip. `activeIndex` selects which one
+    // the editor is showing. `showTree` lets the user jump back to the tree
+    // view without closing their open files — the tabs survive the visit.
+    @State private var openFiles: [OpenFile] = []
+    @State private var activeIndex: Int?
+    @State private var showTree: Bool = true
+
+    // Real-time sync with Claude's edits. We track:
+    //   - `syncedToolIds`: tool-use IDs we've already pulled into the
+    //     editor, so we don't re-read the same file on every view update.
+    //   - `claudeEditing`: paths currently being edited by an in-flight
+    //     Edit/Write/MultiEdit — drives the pulse on matching tabs.
+    //   - `externalConflict`: paths where Claude wrote while the user had
+    //     unsaved edits. We don't clobber the buffer; we show a warning.
+    @State private var syncedToolIds: Set<String> = []
+    @State private var claudeEditing: Set<String> = []
+    @State private var externalConflict: Set<String> = []
 
     private var currentWorkDir: String {
         let dir = store.activeSession?.workDir ?? NSHomeDirectory()
@@ -124,40 +161,53 @@ struct FileTreeView: View {
         return entries.filter { $0.name.lowercased().contains(q) }
     }
 
+    /// True when we have at least one file open AND the user isn't
+    /// explicitly viewing the tree. Drives which of the two bodies renders.
+    private var showingEditor: Bool {
+        !showTree && activeIndex != nil && openFiles.indices.contains(activeIndex ?? -1)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if fileContent != nil, let path = selectedFile {
-                // Tab bar for open file
-                HStack(spacing: 6) {
-                    Button {
-                        selectedFile = nil
-                        fileContent = nil
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.kilnTextSecondary)
-                            .frame(width: 20, height: 20)
-                            .background(Color.kilnSurfaceElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
+            // Tab strip is pinned whenever any file is open, even while the
+            // user is browsing the tree — it's the only way back to the
+            // editor without losing their place.
+            if !openFiles.isEmpty {
+                EditorTabStrip(
+                    openFiles: openFiles,
+                    activeIndex: activeIndex,
+                    showingTree: showTree,
+                    editingPaths: claudeEditing,
+                    conflictPaths: externalConflict,
+                    onSelect: { idx in
+                        activeIndex = idx
+                        showTree = false
+                    },
+                    onClose: { idx in closeFile(at: idx) },
+                    onToggleTree: { showTree.toggle() }
+                )
+                Rectangle().fill(Color.kilnBorder).frame(height: 1)
+            }
 
+            if showingEditor, let idx = activeIndex {
+                let path = openFiles[idx].path
+
+                // Header strip (filename, dirty dot, save, language badge).
+                HStack(spacing: 6) {
                     Image(systemName: iconForFile(URL(fileURLWithPath: path).lastPathComponent))
                         .font(.system(size: 10))
                         .foregroundStyle(Color.kilnAccent)
                     Text(URL(fileURLWithPath: path).lastPathComponent)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.kilnText)
-                    if isDirty {
+                    if openFiles[idx].isDirty {
                         Circle()
                             .fill(Color.kilnAccent)
                             .frame(width: 6, height: 6)
                     }
                     Spacer()
-                    if isDirty {
-                        Button {
-                            saveFile()
-                        } label: {
+                    if openFiles[idx].isDirty {
+                        Button { saveActive() } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "square.and.arrow.down")
                                     .font(.system(size: 9))
@@ -184,33 +234,30 @@ struct FileTreeView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Color.kilnSurface)
-                // File-level context menu on the header bar. Monaco has its
-                // own in-webview right-click menu for editor operations
-                // (cut/copy/paste/command palette/etc.) — this is for the
-                // file *around* that editor: save, revert, reveal, close.
                 .contextMenu { editorFileContextMenu(path: path) }
 
                 Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
-                // Editor
+                // Editor — binding mutates openFiles[idx].content directly
+                // so the dirty flag updates live and survives tab switches.
                 CodeEditorView(
                     text: Binding(
-                        get: { fileContent ?? "" },
+                        get: { openFiles[idx].content },
                         set: { newValue in
-                            fileContent = newValue
-                            isDirty = true
+                            guard openFiles.indices.contains(idx) else { return }
+                            openFiles[idx].content = newValue
                         }
                     ),
                     language: languageForFile(path),
                     isEditable: true,
-                    onSave: { saveFile() }
+                    accentHex: store.settings.accentHex,
+                    onSave: { saveActive() }
                 )
-                // Same context menu is attached to the editor area so a
-                // two-finger click anywhere in the pane surfaces file ops
-                // as a fallback. Monaco's own right-click lives inside the
-                // WKWebView and intercepts first when the pointer is over
-                // editor glyphs; SwiftUI's contextMenu wins over the empty
-                // margins / gutter.
+                // ID the editor per-path so Monaco resets its buffer when
+                // the user flips to a different tab. Without this, switching
+                // tabs leaves the old text onscreen for a frame while the
+                // binding catches up.
+                .id(path)
                 .contextMenu { editorFileContextMenu(path: path) }
             } else {
                 // Workdir header
@@ -284,10 +331,8 @@ struct FileTreeView: View {
                             ForEach(filteredEntries) { entry in
                                 FileRow(
                                     entry: entry,
-                                    entries: $entries,
-                                    selectedFile: $selectedFile,
-                                    fileContent: $fileContent,
-                                    isDirty: $isDirty,
+                                    activePath: activeIndex.flatMap { openFiles.indices.contains($0) ? openFiles[$0].path : nil },
+                                    onOpen: { path in openFile(at: path) },
                                     depth: 0
                                 )
                             }
@@ -301,6 +346,178 @@ struct FileTreeView: View {
         .task(id: currentWorkDir) {
             await loadDirectory()
         }
+        // Live sync: any Edit/MultiEdit/Write against a path we've got open
+        // pulses its tab while streaming, streams Write content into the
+        // editor buffer live, and re-reads from disk when the tool call
+        // finishes. We re-run on every render — cheap, and guarantees we
+        // pick up streamed-input updates that don't shift the (id,isDone)
+        // tuple.
+        .onChange(of: toolCallSignature) { _, _ in syncWithActiveToolCalls() }
+        .onChange(of: liveInputSignature) { _, _ in syncLiveWriteContent() }
+        .onAppear {
+            syncWithActiveToolCalls()
+            syncLiveWriteContent()
+        }
+    }
+
+    /// Changes whenever a tool call is added/removed or flips isDone.
+    private var toolCallSignature: String {
+        store.activeToolCalls
+            .map { "\($0.id):\($0.isDone ? 1 : 0)" }
+            .joined(separator: ",")
+    }
+
+    /// Changes whenever streamed input length changes — lets us push
+    /// partial Write content into the editor as it streams in.
+    private var liveInputSignature: String {
+        store.activeToolCalls
+            .filter { $0.name == "Write" && !$0.isDone }
+            .map { "\($0.id):\($0.input.count)" }
+            .joined(separator: ",")
+    }
+
+    /// Walk the currently-running tool calls, find any Edit / MultiEdit / Write
+    /// that targets a file we have open, and reflect its state in the editor.
+    /// In-flight → pulse the tab. Finished → re-read the file (if the buffer
+    /// is clean) or flag a conflict (if the user was editing the same file).
+    private func syncWithActiveToolCalls() {
+        var nowEditing: Set<String> = []
+        var anyCompleted = false
+        for call in store.activeToolCalls {
+            guard call.name == "Edit" || call.name == "MultiEdit" || call.name == "Write" else { continue }
+            guard let path = filePath(fromToolInput: call.input) else { continue }
+
+            if !call.isDone {
+                nowEditing.insert(path)
+                continue
+            }
+
+            if syncedToolIds.contains(call.id) { continue }
+            syncedToolIds.insert(call.id)
+            anyCompleted = true
+
+            // Auto-open the file if the user didn't already have it open — so
+            // the user sees what Claude just did without having to hunt for it.
+            if !openFiles.contains(where: { $0.path == path }) {
+                let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                openFiles.append(OpenFile(path: path, content: content))
+                if activeIndex == nil { activeIndex = openFiles.count - 1 }
+                externalConflict.remove(path)
+                continue
+            }
+
+            guard let idx = openFiles.firstIndex(where: { $0.path == path }) else { continue }
+            if openFiles[idx].isDirty && openFiles[idx].content != openFiles[idx].originalContent {
+                // True conflict: the user has unsaved edits that diverge from
+                // both disk and Claude's stream. Flag it; don't clobber.
+                externalConflict.insert(path)
+            } else if let fresh = try? String(contentsOfFile: path, encoding: .utf8) {
+                openFiles[idx].content = fresh
+                openFiles[idx].originalContent = fresh
+                externalConflict.remove(path)
+            }
+        }
+        claudeEditing = nowEditing
+        if anyCompleted {
+            // Refresh the file tree so new files / renames / deletes show up.
+            Task { await loadDirectory() }
+        }
+    }
+
+    /// Stream Write tool `content` directly into the editor buffer as Claude
+    /// emits it — so the user literally watches the file fill in. Skipped
+    /// when the user has unsaved edits (we'd be fighting their typing).
+    private func syncLiveWriteContent() {
+        for call in store.activeToolCalls where call.name == "Write" && !call.isDone {
+            guard let path = filePath(fromToolInput: call.input) else { continue }
+            // Auto-open the target so the stream is visible. For brand-new
+            // files there's nothing on disk yet, so start with an empty buffer.
+            let idx: Int
+            if let existing = openFiles.firstIndex(where: { $0.path == path }) {
+                idx = existing
+            } else {
+                let initial = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                openFiles.append(OpenFile(path: path, content: initial))
+                idx = openFiles.count - 1
+                if activeIndex == nil { activeIndex = idx }
+                showTree = false
+            }
+            // If the buffer is in the middle of user edits, don't touch it.
+            if openFiles[idx].isDirty && openFiles[idx].originalContent != openFiles[idx].content {
+                // Only skip if the divergence is something we haven't streamed.
+                // In practice claudeEditing flagging catches this visually.
+                continue
+            }
+            if let content = streamedField("content", from: call.input) {
+                if openFiles[idx].content != content {
+                    openFiles[idx].content = content
+                    // Keep originalContent tracking the streaming view so the
+                    // dirty-dot doesn't flash on during streaming. It'll be
+                    // reset to the disk version on completion anyway.
+                    openFiles[idx].originalContent = content
+                }
+            }
+        }
+    }
+
+    /// Best-effort extract of `file_path` from a streamed tool-input JSON.
+    private func filePath(fromToolInput input: String) -> String? {
+        if let data = input.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let p = obj["file_path"] as? String {
+            return p
+        }
+        return streamedField("file_path", from: input)
+    }
+
+    /// Pull a string field out of a JSON-ish input that may still be
+    /// streaming. Handles the common case where the JSON is incomplete but
+    /// the field we want is already fully emitted.
+    private func streamedField(_ name: String, from input: String) -> String? {
+        // Fast path: complete JSON.
+        if let data = input.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let v = obj[name] as? String {
+            return v
+        }
+        // Slow path: walk the string looking for `"name":"..."` accounting
+        // for \" escapes and \n / \t / \\. Stops at the closing quote or at
+        // end of string (whichever comes first), returning what we've got —
+        // partial content is fine for live preview.
+        let key = "\"\(name)\""
+        guard let keyRange = input.range(of: key) else { return nil }
+        var i = keyRange.upperBound
+        // Skip whitespace and colon.
+        while i < input.endIndex, input[i].isWhitespace { i = input.index(after: i) }
+        guard i < input.endIndex, input[i] == ":" else { return nil }
+        i = input.index(after: i)
+        while i < input.endIndex, input[i].isWhitespace { i = input.index(after: i) }
+        guard i < input.endIndex, input[i] == "\"" else { return nil }
+        i = input.index(after: i)
+
+        var out = ""
+        while i < input.endIndex {
+            let c = input[i]
+            if c == "\\" {
+                let n = input.index(after: i)
+                guard n < input.endIndex else { break }
+                switch input[n] {
+                case "n": out.append("\n")
+                case "t": out.append("\t")
+                case "r": out.append("\r")
+                case "\"": out.append("\"")
+                case "\\": out.append("\\")
+                case "/": out.append("/")
+                default: out.append(input[n])
+                }
+                i = input.index(after: n)
+                continue
+            }
+            if c == "\"" { break }
+            out.append(c)
+            i = input.index(after: i)
+        }
+        return out.isEmpty ? nil : out
     }
 
     private func displayPath(_ path: String) -> String {
@@ -311,33 +528,69 @@ struct FileTreeView: View {
         return path
     }
 
-    private func saveFile() {
-        guard let path = selectedFile, let content = fileContent else { return }
+    // MARK: - Multi-file operations
+    //
+    // `openFile` is the single entry point for "the user wants to open this
+    // path." If it's already open, we focus it; if not, we read it off
+    // disk and append a tab. Failures don't pop a dialog — the error text
+    // lives in the buffer, which is arguably a debug feature.
+
+    private func openFile(at path: String) {
+        if let idx = openFiles.firstIndex(where: { $0.path == path }) {
+            activeIndex = idx
+            showTree = false
+            return
+        }
+        let content: String
         do {
-            try content.write(toFile: path, atomically: true, encoding: .utf8)
-            isDirty = false
-            originalContent = content
+            content = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            content = "Failed to read: \(error.localizedDescription)"
+        }
+        openFiles.append(OpenFile(path: path, content: content))
+        activeIndex = openFiles.count - 1
+        showTree = false
+    }
+
+    private func closeFile(at idx: Int) {
+        guard openFiles.indices.contains(idx) else { return }
+        openFiles.remove(at: idx)
+        if openFiles.isEmpty {
+            activeIndex = nil
+            showTree = true
+            return
+        }
+        if let cur = activeIndex {
+            if cur == idx {
+                // Focus the neighbour on the left, or the new first if we
+                // closed the very first tab.
+                activeIndex = max(0, min(idx, openFiles.count - 1))
+            } else if cur > idx {
+                activeIndex = cur - 1
+            }
+        }
+    }
+
+    private func saveActive() {
+        guard let idx = activeIndex, openFiles.indices.contains(idx) else { return }
+        let f = openFiles[idx]
+        do {
+            try f.content.write(toFile: f.path, atomically: true, encoding: .utf8)
+            openFiles[idx].originalContent = f.content    // clears isDirty
         } catch {
             print("Failed to save: \(error)")
         }
     }
 
-    /// Revert to the on-disk version. Reads fresh rather than relying on
-    /// `originalContent` so externally-modified files get picked up.
-    private func revertFile() {
-        guard let path = selectedFile else { return }
+    /// Re-read the on-disk version (discarding edits). Picks up external
+    /// modifications in addition to undoing unsaved work.
+    private func revertActive() {
+        guard let idx = activeIndex, openFiles.indices.contains(idx) else { return }
+        let path = openFiles[idx].path
         if let fresh = try? String(contentsOfFile: path, encoding: .utf8) {
-            fileContent = fresh
-            originalContent = fresh
-            isDirty = false
+            openFiles[idx].content = fresh
+            openFiles[idx].originalContent = fresh
         }
-    }
-
-    private func closeCurrentFile() {
-        selectedFile = nil
-        fileContent = nil
-        isDirty = false
-        originalContent = nil
     }
 
     /// Context menu for the currently-open file. Used on both the header
@@ -345,14 +598,15 @@ struct FileTreeView: View {
     /// menu isn't what the user's trying to reach.
     @ViewBuilder
     private func editorFileContextMenu(path: String) -> some View {
+        let idx = activeIndex
+        let isDirty = idx.flatMap { openFiles.indices.contains($0) ? openFiles[$0].isDirty : nil } ?? false
+        let content = idx.flatMap { openFiles.indices.contains($0) ? openFiles[$0].content : nil } ?? ""
+
         if isDirty {
-            Button {
-                saveFile()
-            } label: { Label("Save", systemImage: "square.and.arrow.down") }
-            .keyboardShortcut("s")
-            Button(role: .destructive) {
-                revertFile()
-            } label: { Label("Revert Changes", systemImage: "arrow.uturn.backward") }
+            Button { saveActive() } label: { Label("Save", systemImage: "square.and.arrow.down") }
+                .keyboardShortcut("s")
+            Button(role: .destructive) { revertActive() }
+                label: { Label("Revert Changes", systemImage: "arrow.uturn.backward") }
             Divider()
         }
         Button {
@@ -372,7 +626,7 @@ struct FileTreeView: View {
             pb.clearContents()
             pb.setString((path as NSString).lastPathComponent, forType: .string)
         } label: { Label("Copy Filename", systemImage: "doc.on.doc") }
-        if let content = fileContent, !content.isEmpty {
+        if !content.isEmpty {
             Button {
                 let pb = NSPasteboard.general
                 pb.clearContents()
@@ -381,7 +635,7 @@ struct FileTreeView: View {
         }
         Divider()
         Button {
-            closeCurrentFile()
+            if let idx = idx { closeFile(at: idx) }
         } label: { Label("Close File", systemImage: "xmark") }
     }
 
@@ -440,10 +694,11 @@ struct FileTreeView: View {
 
 struct FileRow: View {
     let entry: FileEntry
-    @Binding var entries: [FileEntry]
-    @Binding var selectedFile: String?
-    @Binding var fileContent: String?
-    @Binding var isDirty: Bool
+    /// Absolute path of the currently-focused tab, if any — used only for
+    /// highlighting the row. The row doesn't read or write files itself;
+    /// that all routes through `onOpen`.
+    let activePath: String?
+    let onOpen: (String) -> Void
     let depth: Int
 
     @State private var expanded = false
@@ -457,14 +712,11 @@ struct FileRow: View {
                     expanded.toggle()
                     if expanded && children == nil { loadChildren() }
                 } else {
-                    selectedFile = entry.path
-                    loadFile()
+                    onOpen(entry.path)
                 }
             } label: {
                 HStack(spacing: 4) {
-                    // Indent
                     Spacer().frame(width: CGFloat(depth) * 14)
-
                     if entry.isDirectory {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 7, weight: .bold))
@@ -473,26 +725,23 @@ struct FileRow: View {
                     } else {
                         Spacer().frame(width: 12)
                     }
-
                     Image(systemName: entry.isDirectory
                           ? (expanded ? "folder.fill" : "folder.fill")
                           : iconForFile(entry.name))
                         .font(.system(size: 10))
                         .foregroundStyle(entry.isDirectory ? Color.kilnAccent.opacity(0.7) : Color.kilnTextTertiary)
                         .frame(width: 14)
-
                     Text(entry.name)
                         .font(.system(size: 11))
-                        .foregroundStyle(selectedFile == entry.path ? Color.kilnAccent : Color.kilnText)
+                        .foregroundStyle(activePath == entry.path ? Color.kilnAccent : Color.kilnText)
                         .lineLimit(1)
-
                     Spacer()
                 }
                 .padding(.vertical, 3)
                 .padding(.horizontal, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(selectedFile == entry.path ? Color.kilnAccentMuted :
+                        .fill(activePath == entry.path ? Color.kilnAccentMuted :
                                 (hovering ? Color.kilnSurfaceHover : .clear))
                 )
             }
@@ -500,10 +749,8 @@ struct FileRow: View {
             .onHover { hovering = $0 }
             .contextMenu {
                 if !entry.isDirectory {
-                    Button {
-                        selectedFile = entry.path
-                        loadFile()
-                    } label: { Label("Open", systemImage: "doc.text") }
+                    Button { onOpen(entry.path) }
+                        label: { Label("Open", systemImage: "doc.text") }
                     Button {
                         NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
                     } label: { Label("Open with Default App", systemImage: "arrow.up.forward.app") }
@@ -529,10 +776,8 @@ struct FileRow: View {
                 ForEach(children) { child in
                     FileRow(
                         entry: child,
-                        entries: $entries,
-                        selectedFile: $selectedFile,
-                        fileContent: $fileContent,
-                        isDirty: $isDirty,
+                        activePath: activePath,
+                        onOpen: onOpen,
                         depth: depth + 1
                     )
                 }
@@ -563,14 +808,129 @@ struct FileRow: View {
             print("Failed to load children: \(error)")
         }
     }
+}
 
-    private func loadFile() {
-        do {
-            fileContent = try String(contentsOfFile: entry.path, encoding: .utf8)
-            isDirty = false
-        } catch {
-            fileContent = "Failed to read: \(error.localizedDescription)"
+// MARK: - Editor tab strip
+//
+// Horizontal scroll of one "tab" per open file, plus a Files button on the
+// left that flips back to the tree without closing any tabs. A visible
+// indicator runs along the bottom of the active tab. Dirty files get an
+// accent dot; middle-click / x-button closes.
+
+struct EditorTabStrip: View {
+    let openFiles: [OpenFile]
+    let activeIndex: Int?
+    let showingTree: Bool
+    var editingPaths: Set<String> = []
+    var conflictPaths: Set<String> = []
+    let onSelect: (Int) -> Void
+    let onClose: (Int) -> Void
+    let onToggleTree: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onToggleTree) {
+                Image(systemName: showingTree ? "sidebar.left" : "list.bullet.indent")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(showingTree ? Color.kilnAccent : Color.kilnTextSecondary)
+                    .frame(width: 28, height: 24)
+                    .background(showingTree ? Color.kilnAccentMuted : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help(showingTree ? "Back to editor" : "Show file tree")
+            .padding(.leading, 4)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(Array(openFiles.enumerated()), id: \.element.id) { idx, f in
+                        EditorTab(
+                            file: f,
+                            active: !showingTree && activeIndex == idx,
+                            claudeEditing: editingPaths.contains(f.path),
+                            externalConflict: conflictPaths.contains(f.path),
+                            onSelect: { onSelect(idx) },
+                            onClose: { onClose(idx) }
+                        )
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
         }
+        .padding(.vertical, 3)
+        .background(Color.kilnSurface)
+    }
+}
+
+struct EditorTab: View {
+    let file: OpenFile
+    let active: Bool
+    var claudeEditing: Bool = false
+    var externalConflict: Bool = false
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var hovering = false
+    @State private var pulse = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 5) {
+                Image(systemName: iconForFile(file.path))
+                    .font(.system(size: 9))
+                    .foregroundStyle(active ? Color.kilnAccent : Color.kilnTextTertiary)
+                Text((file.path as NSString).lastPathComponent)
+                    .font(.system(size: 11, weight: active ? .semibold : .medium))
+                    .foregroundStyle(active ? Color.kilnText : Color.kilnTextSecondary)
+                    .lineLimit(1)
+                if externalConflict {
+                    // Claude wrote while buffer was dirty — user needs to
+                    // reconcile by saving or reverting.
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color(hex: 0xF59E0B))
+                        .help("Claude edited this file while you had unsaved changes")
+                } else if claudeEditing {
+                    // In-flight tool call touching this file — pulse the dot.
+                    Circle()
+                        .fill(Color.kilnAccent)
+                        .frame(width: 6, height: 6)
+                        .opacity(pulse ? 0.35 : 1.0)
+                        .onAppear {
+                            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                                pulse = true
+                            }
+                        }
+                        .onDisappear { pulse = false }
+                        .help("Claude is editing this file")
+                } else if file.isDirty {
+                    Circle().fill(Color.kilnAccent).frame(width: 5, height: 5)
+                }
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .frame(width: 18, height: 18)
+                        .background(hovering ? Color.kilnSurfaceHover : Color.clear)
+                        .clipShape(Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Close tab")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(active ? Color.kilnBg : (hovering ? Color.kilnSurfaceHover : Color.clear))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(active ? Color.kilnBorder : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(file.path)
     }
 }
 

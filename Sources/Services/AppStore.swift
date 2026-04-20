@@ -19,6 +19,11 @@ final class AppStore: ObservableObject {
     @Published var showNewSessionSheet = false
     @Published var showSessionTemplates = false
     @Published var showShortcutsOverlay = false
+    /// First-run onboarding. Drives the OnboardingSheet overlay — walks
+    /// through the welcome, checks for Claude Code, and helps install it
+    /// if missing. Sticky: dismissing it writes `kiln.onboardingCompleted`
+    /// to UserDefaults so it never pops up again.
+    @Published var showOnboarding = false
 
     /// Session ids currently multi-selected in the sidebar. Empty means
     /// single-selection mode (the activeSessionId rules).
@@ -321,6 +326,19 @@ final class AppStore: ObservableObject {
         // Load the user avatar (if any) so MessageRow can render it without
         // re-reading from disk on every frame.
         AvatarStore.shared.load(filename: settings.userAvatarFilename)
+
+        // First-run onboarding. A missing key — not just `false` — is the
+        // trigger, so users who complete it once never see it again even
+        // if they later clear all sessions.
+        if UserDefaults.standard.object(forKey: "kiln.onboardingCompleted") == nil {
+            showOnboarding = true
+        }
+    }
+
+    /// Mark onboarding as completed. Persists across launches.
+    func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: "kiln.onboardingCompleted")
+        showOnboarding = false
     }
 
     /// Handle a `kiln://` URL — used by the URL scheme handler.

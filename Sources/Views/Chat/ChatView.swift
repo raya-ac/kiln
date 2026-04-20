@@ -68,6 +68,11 @@ struct ChatView: View {
 
                     Spacer()
 
+                    // Context window usage — moved here from the composer
+                    // toolbar so it's visible alongside the session's identity
+                    // bar rather than buried at the bottom.
+                    ContextDisplay()
+
                     // Session instructions button — opens per-session system
                     // prompt override. Orange dot when one is set.
                     Button {
@@ -1984,6 +1989,7 @@ struct WorkDirButton: View {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
+                panel.canCreateDirectories = true
                 panel.directoryURL = URL(fileURLWithPath: session.workDir)
                 panel.prompt = "Use directory"
                 if panel.runModal() == .OK, let url = panel.url {

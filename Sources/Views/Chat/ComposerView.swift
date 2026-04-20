@@ -646,29 +646,13 @@ struct ComposerToolbar: View {
                     .help(store.extendedContext ? "1 million token context window" : "Standard 200K context window")
                 }
 
-                if !isChatSession {
-                    Spacer().frame(width: 4)
-
-                    // Divider
-                    Rectangle()
-                        .fill(Color.kilnBorder)
-                        .frame(width: 1, height: 16)
-
-                    Spacer().frame(width: 4)
-                }
-
-                // Model pills with Claude icon
-                ForEach(ClaudeModel.allCases) { model in
-                    ModelPill(model: model)
-                }
+                // Model picker lives in the chat header strip now —
+                // duplicating it here made the composer toolbar noisy.
 
                 Spacer()
 
                 // Rate-limit meter — shows tokens-per-5min velocity
                 RateLimitMeter()
-
-                // Context / cost display
-                ContextDisplay()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
@@ -859,6 +843,9 @@ struct ContextDisplay: View {
                 .help("\(store.inputTokens) input + \(store.outputTokens) output tokens · \(Int(usagePercent * 100))% of context")
             }
 
+            // Cost moved out — the per-session cost in the chat header
+            // already covers this, no need to show it twice.
+
             // Compact button — appears when context is 75%+ full
             if shouldSuggestCompact {
                 Button {
@@ -881,12 +868,6 @@ struct ContextDisplay: View {
                 .help("Ask Claude to compact this session's history")
             }
 
-            // Cost
-            if store.totalCost > 0 {
-                Text(String(format: "$%.2f", store.totalCost))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.kilnTextTertiary)
-            }
         }
     }
 

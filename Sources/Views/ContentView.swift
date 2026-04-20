@@ -219,6 +219,11 @@ struct ContentView: View {
             NewSessionSheet()
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
+        .sheet(isPresented: $store.showOnboarding) {
+            OnboardingView()
+                .environmentObject(store)
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
+        }
         .sheet(isPresented: $store.showSessionTemplates) {
             SessionTemplatesView()
                 .environmentObject(store)
@@ -371,13 +376,13 @@ struct ContentView: View {
                     .fill(Color.kilnAccent.opacity(dragTargetSlot == slot ? 0.08 : 0))
                     .allowsHitTesting(false)
             )
-            // Header pill: click to promote to main, or drag to rearrange.
-            // Hidden when the panel is already the flex-center slot.
+            // Drag source: a thin strip along the top edge, only for
+            // non-flex (side) panels. Invisible by default, lights up
+            // on hover. Doesn't intercept clicks — regular panel content
+            // still works the way it did before.
             .overlay(alignment: .top) {
                 if !isFlex {
-                    PanelPromoteButton(slot: slot, action: { promoteToMain(slot) })
-                        .onDrag { NSItemProvider(object: slot.rawValue as NSString) }
-                        .padding(.top, 3)
+                    PanelDragStrip(slot: slot)
                 }
             }
             // Drop target applies to the whole panel but doesn't block hit testing
@@ -476,39 +481,43 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Panel promote button
+// MARK: - Panel drag strip
 //
-// Replaces the old `DragHandle`. Sits pinned to the top of any non-flex
-// (side) panel. A single click swaps this panel with whatever's in the
-// center flex slot — much more discoverable than drag, though drag still
-// works as a passthrough for rearranging between side slots.
+// A thin, invisible-by-default handle pinned to the top edge of a panel.
+// Drag it onto another panel to swap positions. Hover tints the strip with
+// an accent highlight so the affordance is discoverable without clutter
+// once you know it's there.
 
-struct PanelPromoteButton: View {
+struct PanelDragStrip: View {
     let slot: PanelSlot
-    let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: "rectangle.center.inset.filled")
-                    .font(.system(size: 9, weight: .semibold))
-                Text("Move to main")
-                    .font(.system(size: 10, weight: .medium))
+        HStack(spacing: 3) {
+            // Grip dots — only visible on hover so the strip doesn't clutter
+            // the header area of every panel.
+            ForEach(0..<3, id: \.self) { _ in
+                Circle()
+                    .fill(Color.kilnTextTertiary)
+                    .frame(width: 2, height: 2)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .foregroundStyle(hovering ? Color.kilnBg : Color.kilnTextSecondary)
-            .background(hovering ? Color.kilnAccent : Color.kilnSurface.opacity(0.92))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.kilnBorder, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .frame(height: 6)
+        .padding(.top, 2)
+        .contentShape(Rectangle())
+        .opacity(hovering ? 0.9 : 0.0)
+        .background(
+            hovering
+                ? Color.kilnAccent.opacity(0.08)
+                : Color.clear
+        )
         .onHover { inside in
             hovering = inside
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
         }
-        .help("Move this panel to the main area (or drag to rearrange)")
+        .onDrag { NSItemProvider(object: slot.rawValue as NSString) }
+        .help("Drag to rearrange panels")
     }
 }
 
@@ -591,43 +600,8 @@ struct ResizableDivider: View {
                 .allowsHitTesting(false)
                 .animation(.easeOut(duration: 0.12), value: hovering)
 
-            if showCollapseButton {
-                VStack {
-                    Spacer()
-                    CollapseChevron(
-                        direction: collapseSide == .left ? "chevron.left" : "chevron.right",
-                        action: onCollapse
-                    )
-                    Spacer()
-                }
-                .allowsHitTesting(true)
-            }
         }
-        .frame(width: 8)
-    }
-}
-
-private struct CollapseChevron: View {
-    let direction: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: direction)
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(hovering ? Color.kilnBg : Color.kilnTextTertiary)
-                .frame(width: 14, height: 28)
-                .background(hovering ? Color.kilnAccent : Color.kilnSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.kilnBorder, lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help("Collapse panel")
+        .frame(width: 12)
     }
 }
 
@@ -762,6 +736,9 @@ struct NewSessionSheet: View {
                         let panel = NSOpenPanel()
                         panel.canChooseDirectories = true
                         panel.canChooseFiles = false
+                        // Let the user make a new folder from inside the picker —
+                        // otherwise they have to bounce out to Finder first.
+                        panel.canCreateDirectories = true
                         panel.directoryURL = URL(fileURLWithPath: workDir)
                         if panel.runModal() == .OK, let url = panel.url {
                             workDir = url.path

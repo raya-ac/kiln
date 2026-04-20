@@ -42,7 +42,7 @@ struct SidebarView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
-            .help("Archive selected")
+            .help("Archive selected sessions")
 
             Button {
                 store.bulkDelete()
@@ -55,7 +55,7 @@ struct SidebarView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
-            .help("Delete selected")
+            .help("Delete selected sessions")
 
             Button {
                 store.clearSelection()
@@ -68,7 +68,7 @@ struct SidebarView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
-            .help("Clear selection")
+            .help("Clear selection (Esc)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -235,6 +235,7 @@ struct SidebarView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
+                    .help(showArchived ? "Show active sessions" : "Show archived sessions")
                     Spacer()
                 }
                 .padding(.horizontal, 8)
@@ -342,6 +343,7 @@ struct SidebarView: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
+            .help("Open Settings (⌘,)")
         }
         .background(Color.kilnSurface)
         .sheet(isPresented: $store.showSettings) {
@@ -473,43 +475,15 @@ struct SessionRow: View {
                             SessionDonePulse()
                         }
                     }
-                    HStack(spacing: 3) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 8))
-                        Text(URL(fileURLWithPath: session.workDir).lastPathComponent)
-                            .lineLimit(1)
-
-                        // Git branch badge — only when repo awareness is on
-                        // and the workdir is inside a git repository.
-                        if store.settings.enableRepoAwareness,
-                           let git = GitStatus.info(for: session.workDir) {
-                            Text("·")
-                            HStack(spacing: 2) {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.system(size: 8))
-                                Text(git.branch)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .lineLimit(1)
-                                if git.dirtyCount > 0 {
-                                    Text("●")
-                                        .font(.system(size: 7))
-                                        .foregroundStyle(Color.kilnAccent)
-                                        .help("\(git.dirtyCount) uncommitted change\(git.dirtyCount == 1 ? "" : "s")")
-                                }
-                            }
-                            .foregroundStyle(git.dirtyCount > 0 ? Color.kilnAccent : Color.kilnTextTertiary)
-                        }
-
-                        if !session.messages.isEmpty {
-                            Text("·")
-                            Text("\(session.messages.count) \(store.settings.language.ui.msgs)")
-                        }
-
-                        Text("·")
-                        Text(relativeTime(session.createdAt))
-                    }
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.kilnTextTertiary)
+                    // Metadata line. Rendered as a single Text with middle
+                    // truncation so narrow sidebars don't break each chunk
+                    // into its own character-per-line column — the previous
+                    // HStack-of-Texts collapsed ugly when space was tight.
+                    metadataLine(for: session)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
                     // Tag chips — cross-cutting labels on top of the group field.
                     if !session.tags.isEmpty {
@@ -537,6 +511,7 @@ struct SessionRow: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Color.kilnTextTertiary)
                         .frame(width: 16)
+                        .help("Drag to reorder or move to a group")
                 }
 
                 // Delete on hover
@@ -552,6 +527,7 @@ struct SessionRow: View {
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
+                    .help("Delete session")
                 }
             }
             .padding(.horizontal, 8)
@@ -755,6 +731,30 @@ struct SessionRow: View {
         } message: {
             Text("Tags are lowercased free-form labels. Used for cross-cutting filters.")
         }
+    }
+
+    /// Compose the subtitle metadata as a single Text so it truncates as
+    /// one unit instead of wrapping each chunk independently.
+    private func metadataLine(for session: Session) -> Text {
+        let folder = URL(fileURLWithPath: session.workDir).lastPathComponent
+        var parts: [String] = [folder]
+
+        if store.settings.enableRepoAwareness,
+           let git = GitStatus.info(for: session.workDir) {
+            let branch = git.dirtyCount > 0 ? "\(git.branch)●" : git.branch
+            parts.append(branch)
+        }
+
+        if !session.messages.isEmpty {
+            parts.append("\(session.messages.count) \(store.settings.language.ui.msgs)")
+        }
+
+        parts.append(relativeTime(session.createdAt))
+
+        // U+00B7 (·) as the separator — same as before but baked into one string.
+        return Text(Image(systemName: "folder"))
+            + Text(" ")
+            + Text(parts.joined(separator: " · "))
     }
 
     private func relativeTime(_ date: Date) -> String {

@@ -24,6 +24,7 @@ struct CodeEditorView: NSViewRepresentable {
     @Binding var text: String
     let language: String
     let isEditable: Bool
+    var accentHex: String = "ff7a45"
     var onSave: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -59,6 +60,7 @@ struct CodeEditorView: NSViewRepresentable {
 
         guard coord.ready else { return }
         coord.push(text: text, language: Self.monacoLanguage(for: language), editable: isEditable)
+        coord.pushAccent(accentHex)
     }
 
     static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) {
@@ -181,6 +183,7 @@ struct CodeEditorView: NSViewRepresentable {
         private var lastPushedText: String = ""
         private var lastPushedLang: String = ""
         private var lastEditable: Bool?
+        private var lastAccent: String = ""
 
         init(_ parent: CodeEditorView) { self.parent = parent }
 
@@ -192,6 +195,7 @@ struct CodeEditorView: NSViewRepresentable {
                 push(text: parent.text,
                      language: CodeEditorView.monacoLanguage(for: parent.language),
                      editable: parent.isEditable)
+                pushAccent(parent.accentHex)
             case "change":
                 guard let newText = dict["text"] as? String else { return }
                 lastPushedText = newText
@@ -220,6 +224,17 @@ struct CodeEditorView: NSViewRepresentable {
                 let js = "window.kiln && window.kiln.setEditable(\(editable ? "true" : "false"));"
                 web.evaluateJavaScript(js, completionHandler: nil)
             }
+        }
+
+        /// Push the user's accent hex through to Monaco so keywords, cursor,
+        /// selection etc. pick up their selected color. Idempotent.
+        func pushAccent(_ hex: String) {
+            guard let web = webView, ready else { return }
+            let clean = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+            if clean == lastAccent { return }
+            lastAccent = clean
+            let js = "window.kiln && window.kiln.setAccent(\(Self.jsString(clean)));"
+            web.evaluateJavaScript(js, completionHandler: nil)
         }
 
         /// JSON-encode a Swift string for safe inline injection into JS.
