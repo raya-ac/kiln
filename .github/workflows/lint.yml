@@ -16,7 +16,7 @@ jobs:
     name: swift-format --lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Select latest Xcode (26+)
         run: |
