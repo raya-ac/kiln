@@ -213,6 +213,12 @@ final class WardenTunnelService: ObservableObject {
         }
     }
 
+    /// True if the user currently wants this owner's tunnel running. Used by
+    /// Settings to decide whether a config edit should trigger a live restart.
+    func isActive(owner: TunnelOwner) -> Bool {
+        wantsRunning.contains(owner.key)
+    }
+
     /// Stop all tunnels — invoked on quit / logout.
     func stopAll() {
         for key in Array(clients.keys) {

@@ -4,6 +4,12 @@ struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var tab: SettingsTab = .settings
+    // Local editing buffer for the Port field so typing "9000" doesn't
+    // mutate the live server port through the intermediate values 9, 90, 900.
+    // Synced from `store.remoteServer.port` on appear and when the server
+    // mutates it (e.g. on launch); applied back on submit/focus loss.
+    @State private var portDraft: String = ""
+    @FocusState private var portFocused: Bool
 
     enum SettingsTab: String, CaseIterable, Identifiable {
         case settings, stats
@@ -875,24 +881,28 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Port") {
-                TextField("8421", text: Binding(
-                    get: { String(store.remoteServer.port) },
-                    set: { newVal in
-                        if let p = UInt16(newVal.trimmingCharacters(in: .whitespaces)) {
-                            store.remoteServer.port = p
-                            UserDefaults.standard.set(Int(p), forKey: "remote.port")
-                        }
+                TextField("8421", text: $portDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.kilnText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.kilnBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                    .frame(width: 90)
+                    .focused($portFocused)
+                    .onAppear { portDraft = String(store.remoteServer.port) }
+                    .onChange(of: store.remoteServer.port) { _, new in
+                        // Re-sync if the server's port changes out-from-under us
+                        // (e.g. loaded from defaults on launch) and we're not
+                        // actively editing.
+                        if !portFocused { portDraft = String(new) }
                     }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnText)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.kilnBg)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
-                .frame(width: 90)
+                    .onSubmit { commitPort() }
+                    .onChange(of: portFocused) { _, focused in
+                        if !focused { commitPort() }
+                    }
 
                 Spacer()
             }
@@ -1041,6 +1051,7 @@ struct SettingsView: View {
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .onSubmit { restartKilnTunnelIfActive() }
             }
 
             SettingsRow(label: "Domain") {
@@ -1058,6 +1069,7 @@ struct SettingsView: View {
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .onSubmit { restartKilnTunnelIfActive() }
             }
 
             SettingsRow(label: "Scheme") {
@@ -1066,6 +1078,9 @@ struct SettingsView: View {
                     set: {
                         store.wardenTunnels.config.scheme = $0
                         store.wardenTunnels.saveConfig()
+                        // Scheme change affects the websocket URL, restart
+                        // immediately since the picker commits on click.
+                        restartKilnTunnelIfActive()
                     }
                 )) {
                     Text("wss").tag("wss")
@@ -1091,6 +1106,7 @@ struct SettingsView: View {
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .onSubmit { restartKilnTunnelIfActive() }
 
                 Button {
                     let panel = NSOpenPanel()
@@ -1100,6 +1116,10 @@ struct SettingsView: View {
                     if panel.runModal() == .OK, let url = panel.url {
                         store.wardenTunnels.config.pskPath = url.path
                         store.wardenTunnels.saveConfig()
+                        // File picker commits immediately, so do the restart
+                        // now rather than waiting for an onSubmit that will
+                        // never come.
+                        restartKilnTunnelIfActive()
                     }
                 } label: {
                     Image(systemName: "folder")
@@ -1118,6 +1138,10 @@ struct SettingsView: View {
                     set: {
                         store.wardenTunnels.config.insecure = $0
                         store.wardenTunnels.saveConfig()
+                        // Insecure flag changes how the tunnel client validates
+                        // the server cert — restart so the live tunnel picks
+                        // up the new setting.
+                        restartKilnTunnelIfActive()
                     }
                 ))
                 .toggleStyle(.switch)
@@ -1193,6 +1217,9 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
                 .frame(maxWidth: 240)
+                // Restart on submit so the new sub shows up in the URL row
+                // without the user having to flip Tunnel Kiln off and on.
+                .onSubmit { restartKilnTunnelIfActive() }
                 Spacer()
             }
 
@@ -1349,6 +1376,40 @@ struct SettingsView: View {
         .background(Color.kilnSurface)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.kilnBorderSubtle, lineWidth: 1))
+    }
+
+    /// Apply the port draft: parse → persist → rebind the listener if the
+    /// server is already running. Invalid input (non-numeric or port 0) is
+    /// silently reverted to the live port so the field can never show a value
+    /// that disagrees with the server.
+    private func commitPort() {
+        let trimmed = portDraft.trimmingCharacters(in: .whitespaces)
+        guard let p = UInt16(trimmed), p > 0 else {
+            portDraft = String(store.remoteServer.port)
+            return
+        }
+        if p == store.remoteServer.port { return }
+        store.remoteServer.port = p
+        UserDefaults.standard.set(Int(p), forKey: "remote.port")
+        if store.remoteServer.isRunning { store.remoteServer.start() }
+        // A running Kiln self-tunnel points at the old port — retarget it.
+        restartKilnTunnelIfActive()
+    }
+
+    /// Restart Kiln's own warden tunnel if the user has it enabled, picking
+    /// up whatever config + target + subdomain are current right now. Called
+    /// after any change that the live tunnel wouldn't otherwise notice:
+    /// remote server port, warden server/domain/scheme/psk/insecure, or the
+    /// kiln subdomain field.
+    private func restartKilnTunnelIfActive() {
+        guard store.wardenTunnels.isActive(owner: .kilnSelf) else { return }
+        let sub = UserDefaults.standard.string(forKey: "warden.kilnSub")
+            .flatMap { $0.isEmpty ? nil : $0 }
+        store.wardenTunnels.start(
+            owner: .kilnSelf,
+            target: "127.0.0.1:\(store.remoteServer.port)",
+            sub: sub
+        )
     }
 
     private var tailscaleStatusColor: Color {

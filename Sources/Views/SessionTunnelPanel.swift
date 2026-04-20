@@ -252,6 +252,13 @@ struct SessionTunnelPanel: View {
             port: port,
             sub: sub.isEmpty ? nil : sub
         )
+        // If the tunnel is currently live, restart it so the new port /
+        // subdomain take effect without the user having to flip the switch.
+        // `startSessionTunnel` is idempotent — the service stops the prior
+        // tunnel first.
+        if store.wardenTunnels.isActive(owner: .session(s.id)), port != nil {
+            store.startSessionTunnel(sessionId: s.id)
+        }
     }
 
     private func toggle() {
