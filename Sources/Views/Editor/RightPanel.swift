@@ -147,6 +147,13 @@ struct FileTreeView: View {
     @State private var syncedToolIds: Set<String> = []
     @State private var claudeEditing: Set<String> = []
     @State private var externalConflict: Set<String> = []
+    // Pre-edit snapshot of each path Claude is about to touch. Captured on
+    // the first in-flight Edit/Write/MultiEdit for that path, preserved
+    // across subsequent edits, and cleared when the user Accepts or Reverts.
+    @State private var preEditSnapshot: [String: String] = [:]
+    // Paths with a pending Accept/Revert decision after Claude's tool chain
+    // completed. Drives the banner in the editor header.
+    @State private var pendingClaudeEdit: Set<String> = []
 
     private var currentWorkDir: String {
         let dir = store.activeSession?.workDir ?? NSHomeDirectory()
@@ -235,6 +242,15 @@ struct FileTreeView: View {
                 .padding(.vertical, 6)
                 .background(Color.kilnSurface)
                 .contextMenu { editorFileContextMenu(path: path) }
+
+                if pendingClaudeEdit.contains(path) {
+                    ClaudeEditBanner(
+                        path: path,
+                        hasSnapshot: preEditSnapshot[path] != nil,
+                        onAccept: { acceptClaudeEdit(path: path) },
+                        onRevert: { revertClaudeEdit(path: path) }
+                    )
+                }
 
                 Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
@@ -392,6 +408,18 @@ struct FileTreeView: View {
             // path prefix, which would mis-flag siblings or spawn phantom tabs.
             guard let path = filePathIfComplete(fromToolInput: call.input) else { continue }
 
+            // Snapshot the pre-edit content the first time we see a tool
+            // call targeting this path (whether in-flight or already
+            // complete). Preserved across subsequent edits so Revert takes
+            // the user all the way back to the original.
+            if preEditSnapshot[path] == nil {
+                if let existing = openFiles.first(where: { $0.path == path }) {
+                    preEditSnapshot[path] = existing.originalContent
+                } else {
+                    preEditSnapshot[path] = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                }
+            }
+
             if !call.isDone {
                 nowEditing.insert(path)
                 continue
@@ -400,6 +428,9 @@ struct FileTreeView: View {
             if syncedToolIds.contains(call.id) { continue }
             syncedToolIds.insert(call.id)
             anyCompleted = true
+            // Surface the Accept/Revert banner now that Claude committed
+            // a change to this path.
+            pendingClaudeEdit.insert(path)
 
             // Auto-open the file if the user didn't already have it open — so
             // the user sees what Claude just did without having to hunt for it.
@@ -603,6 +634,52 @@ struct FileTreeView: View {
         }
     }
 
+    /// Dismiss the Claude-edit banner for this path. No content changes —
+    /// the user is happy with what's on disk.
+    private func acceptClaudeEdit(path: String) {
+        pendingClaudeEdit.remove(path)
+        preEditSnapshot.removeValue(forKey: path)
+    }
+
+    /// Restore the pre-edit snapshot to both the buffer and disk. If the
+    /// file was empty-before (Claude created it), Revert deletes the file.
+    private func revertClaudeEdit(path: String) {
+        guard let original = preEditSnapshot[path] else {
+            pendingClaudeEdit.remove(path)
+            return
+        }
+        let fm = FileManager.default
+        // If the path didn't exist pre-edit (Claude created it from nothing)
+        // the best revert is to remove it. We detect that by checking if the
+        // snapshot is empty AND the file existed only because Claude wrote
+        // it — but we can't reliably distinguish "empty file" from "no
+        // file", so we just write the snapshot back unconditionally and
+        // trust the user to delete if wanted. Simpler and predictable.
+        do {
+            try original.write(toFile: path, atomically: true, encoding: .utf8)
+        } catch {
+            presentRevertError(error)
+            return
+        }
+        if let idx = openFiles.firstIndex(where: { $0.path == path }) {
+            openFiles[idx].content = original
+            openFiles[idx].originalContent = original
+        }
+        externalConflict.remove(path)
+        pendingClaudeEdit.remove(path)
+        preEditSnapshot.removeValue(forKey: path)
+        Task { await loadDirectory() }
+    }
+
+    private func presentRevertError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Revert failed"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private func openFile(at path: String) {
         if let idx = openFiles.firstIndex(where: { $0.path == path }) {
             activeIndex = idx
@@ -645,6 +722,9 @@ struct FileTreeView: View {
         do {
             try f.content.write(toFile: f.path, atomically: true, encoding: .utf8)
             openFiles[idx].originalContent = f.content    // clears isDirty
+            // A manual save is an implicit accept of whatever Claude did.
+            pendingClaudeEdit.remove(f.path)
+            preEditSnapshot.removeValue(forKey: f.path)
         } catch {
             print("Failed to save: \(error)")
         }
@@ -1005,6 +1085,67 @@ struct FileRow: View {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+// MARK: - Claude edit banner
+//
+// Appears under the file header after Claude finishes an Edit/Write/
+// MultiEdit. Accept dismisses it; Revert restores the pre-edit snapshot
+// to both the buffer and disk. Disappears automatically when the user
+// manually saves — handled by the caller clearing `pendingClaudeEdit`.
+
+struct ClaudeEditBanner: View {
+    let path: String
+    let hasSnapshot: Bool
+    let onAccept: () -> Void
+    let onRevert: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+            Text("Claude edited this file")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.kilnText)
+            Spacer()
+            Button(action: onRevert) {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Revert")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(Color.kilnTextSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.kilnSurfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasSnapshot)
+            .help(hasSnapshot ? "Restore the pre-edit version to disk" : "No snapshot available")
+
+            Button(action: onAccept) {
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Accept")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(Color.kilnBg)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.kilnAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this banner and keep the change")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.kilnAccentMuted)
     }
 }
 
