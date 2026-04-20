@@ -3,6 +3,12 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    // Nested ObservableObjects on `store` (remoteServer, wardenTunnels)
+    // don't propagate their @Published mutations through the outer
+    // AppStore, so the settings sheet would otherwise only refresh on
+    // window re-focus. `refreshTick` is bumped on each nested-object
+    // publish (see `.onReceive` in body), forcing a re-render.
+    @State private var refreshTick: Int = 0
     @State private var tab: SettingsTab = .settings
     // Local editing buffer for the Port field so typing "9000" doesn't
     // mutate the live server port through the intermediate values 9, 90, 900.
@@ -74,6 +80,15 @@ struct SettingsView: View {
         }
         .frame(width: 540, height: 560)
         .background(Color.kilnBg)
+        // Persist on any settings mutation — lets us drop the per-Toggle
+        // `saveSettings()` calls and gives SwiftUI a direct `$store.settings.X`
+        // binding so toggles animate live instead of waiting for re-open.
+        .onChange(of: store.settings) { _, _ in store.saveSettings() }
+        // Bridge the nested publishers into this view's update graph.
+        .onReceive(store.remoteServer.objectWillChange) { _ in refreshTick &+= 1 }
+        .onReceive(store.wardenTunnels.objectWillChange) { _ in refreshTick &+= 1 }
+        // Touch refreshTick so SwiftUI tracks it as a dependency.
+        .background(Color.clear.id(refreshTick))
     }
 
     private var settingsScroll: some View {
@@ -226,12 +241,9 @@ struct SettingsView: View {
                     // Engram
                     SettingsSection(title: store.settings.language.ui.memory) {
                         SettingsRow(label: store.settings.language.ui.enableEngram) {
-                            Toggle("", isOn: Binding(
-                                get: { store.settings.useEngram },
-                                set: { store.settings.useEngram = $0; store.saveSettings() }
-                            ))
-                            .toggleStyle(.switch)
-                            .tint(Color.kilnAccent)
+                            SettingsToggle(value: store.settings.useEngram) { v in
+                                store.settings.useEngram = v
+                            }
                         }
 
                         if store.settings.useEngram {
@@ -565,12 +577,9 @@ struct SettingsView: View {
     private var chatSection: some View {
         SettingsSection(title: "CHAT") {
             SettingsRow(label: "Avatars") {
-                Toggle("", isOn: Binding(
-                    get: { store.settings.showAvatars },
-                    set: { store.settings.showAvatars = $0; store.saveSettings() }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
+                SettingsToggle(value: store.settings.showAvatars) { v in
+                    store.settings.showAvatars = v
+                }
                 Spacer()
             }
 
@@ -582,12 +591,9 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Auto-scroll") {
-                Toggle("", isOn: Binding(
-                    get: { store.settings.autoScroll },
-                    set: { store.settings.autoScroll = $0; store.saveSettings() }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
+                SettingsToggle(value: store.settings.autoScroll) { v in
+                    store.settings.autoScroll = v
+                }
                 Spacer()
                 Text("Scroll to bottom as Claude streams")
                     .font(.system(size: 10))
@@ -595,30 +601,26 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Thinking") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.thinkingCollapsedByDefault },
-                    set: { store.settings.thinkingCollapsedByDefault = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.thinkingCollapsedByDefault,
+                    set: { store.settings.thinkingCollapsedByDefault = $0 }
+                ) {
                     Text("Collapsed by default")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 Spacer()
             }
 
             SettingsRow(label: "Follow-ups") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.showFollowUpChips },
-                    set: { store.settings.showFollowUpChips = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.showFollowUpChips,
+                    set: { store.settings.showFollowUpChips = $0 }
+                ) {
                     Text("Show suggestion chips in briefings")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 Spacer()
             }
         }
@@ -648,12 +650,9 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Spell check") {
-                Toggle("", isOn: Binding(
-                    get: { store.settings.spellCheck },
-                    set: { store.settings.spellCheck = $0; store.saveSettings() }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
+                SettingsToggle(value: store.settings.spellCheck) { v in
+                    store.settings.spellCheck = v
+                }
                 Spacer()
             }
 
@@ -810,30 +809,26 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Repo info") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.enableRepoAwareness },
-                    set: { store.settings.enableRepoAwareness = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.enableRepoAwareness,
+                    set: { store.settings.enableRepoAwareness = $0 }
+                ) {
                     Text("Show git branch + dirty status in sidebar")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 Spacer()
             }
 
             SettingsRow(label: "Token heatmap") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.showTokenHeatmap },
-                    set: { store.settings.showTokenHeatmap = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.showTokenHeatmap,
+                    set: { store.settings.showTokenHeatmap = $0 }
+                ) {
                     Text("Color-code message bars by estimated size")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 Spacer()
             }
 
@@ -873,30 +868,26 @@ struct SettingsView: View {
     private var notificationsSection: some View {
         SettingsSection(title: "NOTIFICATIONS") {
             SettingsRow(label: "On completion") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.notifyOnCompletion },
-                    set: { store.settings.notifyOnCompletion = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.notifyOnCompletion,
+                    set: { store.settings.notifyOnCompletion = $0 }
+                ) {
                     Text("Notify when Claude finishes")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 Spacer()
             }
 
             SettingsRow(label: "Sound") {
-                Toggle(isOn: Binding(
-                    get: { store.settings.notifySound },
-                    set: { store.settings.notifySound = $0; store.saveSettings() }
-                )) {
+                SettingsToggle(
+                    value: store.settings.notifySound,
+                    set: { store.settings.notifySound = $0 }
+                ) {
                     Text("Play sound with notification")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
                 .disabled(!store.settings.notifyOnCompletion)
                 Spacer()
             }
@@ -969,15 +960,10 @@ struct SettingsView: View {
     private var remoteControlSection: some View {
         SettingsSection(title: "REMOTE CONTROL") {
             SettingsRow(label: "Enable") {
-                Toggle("", isOn: Binding(
-                    get: { store.remoteServer.isRunning },
-                    set: { enabled in
-                        UserDefaults.standard.set(enabled, forKey: "remote.enabled")
-                        if enabled { store.remoteServer.start() } else { store.remoteServer.stop() }
-                    }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
+                SettingsToggle(value: store.remoteServer.isRunning) { enabled in
+                    UserDefaults.standard.set(enabled, forKey: "remote.enabled")
+                    if enabled { store.remoteServer.start() } else { store.remoteServer.stop() }
+                }
 
                 Spacer()
 
@@ -1200,28 +1186,23 @@ struct SettingsView: View {
             let selfState = store.wardenTunnels.tunnels[selfKey]
 
             SettingsRow(label: "Tunnel Kiln") {
-                Toggle("", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "warden.tunnelKiln") },
-                    set: { enabled in
-                        UserDefaults.standard.set(enabled, forKey: "warden.tunnelKiln")
-                        if enabled {
-                            // Always register the sub our token was
-                            // issued for; any other value is rejected by
-                            // the server. Nil → client rolls a random
-                            // one, which only works pre-claim.
-                            let sub = store.wardenTunnels.config.claimedSub
-                            store.wardenTunnels.start(
-                                owner: .kilnSelf,
-                                target: "127.0.0.1:\(store.remoteServer.port)",
-                                sub: sub.isEmpty ? nil : sub
-                            )
-                        } else {
-                            store.wardenTunnels.stop(owner: .kilnSelf)
-                        }
+                SettingsToggle(value: UserDefaults.standard.bool(forKey: "warden.tunnelKiln")) { enabled in
+                    UserDefaults.standard.set(enabled, forKey: "warden.tunnelKiln")
+                    if enabled {
+                        // Always register the sub our token was issued for;
+                        // any other value is rejected by the server. Nil →
+                        // client rolls a random one, which only works
+                        // pre-claim.
+                        let sub = store.wardenTunnels.config.claimedSub
+                        store.wardenTunnels.start(
+                            owner: .kilnSelf,
+                            target: "127.0.0.1:\(store.remoteServer.port)",
+                            sub: sub.isEmpty ? nil : sub
+                        )
+                    } else {
+                        store.wardenTunnels.stop(owner: .kilnSelf)
                     }
-                ))
-                .toggleStyle(.switch)
-                .tint(Color.kilnAccent)
+                }
                 .disabled(!store.wardenTunnels.config.isConfigured)
 
                 Spacer()
@@ -1540,6 +1521,66 @@ struct SettingsRow<Content: View>: View {
                 .frame(width: 90, alignment: .leading)
             content
         }
+    }
+}
+
+// MARK: - SettingsToggle
+//
+// Custom-built switch. macOS SwiftUI's Toggle(.switch) bridges to NSSwitch,
+// which refuses to animate its knob when the underlying binding source
+// isn't itself a SwiftUI-observed value (e.g. UserDefaults, a nested
+// ObservableObject like store.remoteServer). We sidestep the bridge
+// entirely: this is just a Button with a local @State driving the knob.
+struct SettingsToggle<Label: View>: View {
+    let value: Bool
+    let set: (Bool) -> Void
+    @ViewBuilder let label: () -> Label
+    @State private var local: Bool = false
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                let new = !local
+                withAnimation(.easeInOut(duration: 0.15)) { local = new }
+                set(new)
+            } label: {
+                ZStack(alignment: local ? .trailing : .leading) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(local ? Color.kilnAccent : Color.kilnSurfaceElevated)
+                        .frame(width: 32, height: 18)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.kilnBorder.opacity(local ? 0 : 0.6), lineWidth: 1)
+                        )
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 14, height: 14)
+                        .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                        .padding(.horizontal, 2)
+                }
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? 1.0 : 0.45)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            label()
+        }
+        .onAppear { local = value }
+        .onChange(of: value) { _, v in
+            if v != local {
+                withAnimation(.easeInOut(duration: 0.15)) { local = v }
+            }
+        }
+    }
+}
+
+extension SettingsToggle where Label == EmptyView {
+    init(value: Bool, set: @escaping (Bool) -> Void) {
+        self.value = value
+        self.set = set
+        self.label = { EmptyView() }
     }
 }
 

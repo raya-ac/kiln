@@ -333,6 +333,9 @@ struct FileTreeView: View {
                                     entry: entry,
                                     activePath: activeIndex.flatMap { openFiles.indices.contains($0) ? openFiles[$0].path : nil },
                                     onOpen: { path in openFile(at: path) },
+                                    onPathRenamed: { old, new in renameOpenFile(from: old, to: new) },
+                                    onPathDeleted: { path in closeOpenFile(at: path) },
+                                    onSiblingsChanged: { Task { await loadDirectory() } },
                                     depth: 0
                                 )
                             }
@@ -385,7 +388,9 @@ struct FileTreeView: View {
         var anyCompleted = false
         for call in store.activeToolCalls {
             guard call.name == "Edit" || call.name == "MultiEdit" || call.name == "Write" else { continue }
-            guard let path = filePath(fromToolInput: call.input) else { continue }
+            // Use the strict parse — mid-stream we may only have a partial
+            // path prefix, which would mis-flag siblings or spawn phantom tabs.
+            guard let path = filePathIfComplete(fromToolInput: call.input) else { continue }
 
             if !call.isDone {
                 nowEditing.insert(path)
@@ -429,7 +434,9 @@ struct FileTreeView: View {
     /// when the user has unsaved edits (we'd be fighting their typing).
     private func syncLiveWriteContent() {
         for call in store.activeToolCalls where call.name == "Write" && !call.isDone {
-            guard let path = filePath(fromToolInput: call.input) else { continue }
+            // Only use the path once it's fully terminated — otherwise we'd
+            // spawn a tab per character as the path itself streams in.
+            guard let path = filePathIfComplete(fromToolInput: call.input) else { continue }
             // Auto-open the target so the stream is visible. For brand-new
             // files there's nothing on disk yet, so start with an empty buffer.
             let idx: Int
@@ -468,6 +475,42 @@ struct FileTreeView: View {
             return p
         }
         return streamedField("file_path", from: input)
+    }
+
+    /// Strict variant — only returns once the `file_path` quoted value is
+    /// fully terminated. Used for auto-open decisions so we don't spawn a
+    /// new tab per character while the path is still streaming.
+    private func filePathIfComplete(fromToolInput input: String) -> String? {
+        // Complete JSON parse — ideal case.
+        if let data = input.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let p = obj["file_path"] as? String {
+            return p
+        }
+        // Partial JSON: check that `"file_path":"..."` has its closing quote.
+        guard let keyRange = input.range(of: "\"file_path\"") else { return nil }
+        var i = keyRange.upperBound
+        while i < input.endIndex, input[i].isWhitespace { i = input.index(after: i) }
+        guard i < input.endIndex, input[i] == ":" else { return nil }
+        i = input.index(after: i)
+        while i < input.endIndex, input[i].isWhitespace { i = input.index(after: i) }
+        guard i < input.endIndex, input[i] == "\"" else { return nil }
+        i = input.index(after: i)
+        while i < input.endIndex {
+            let c = input[i]
+            if c == "\\" {
+                let n = input.index(after: i)
+                guard n < input.endIndex else { return nil }
+                i = input.index(after: n)
+                continue
+            }
+            if c == "\"" {
+                // Fully terminated — pull the value via the streaming walker.
+                return streamedField("file_path", from: input)
+            }
+            i = input.index(after: i)
+        }
+        return nil
     }
 
     /// Pull a string field out of a JSON-ish input that may still be
@@ -534,6 +577,31 @@ struct FileTreeView: View {
     // path." If it's already open, we focus it; if not, we read it off
     // disk and append a tab. Failures don't pop a dialog — the error text
     // lives in the buffer, which is arguably a debug feature.
+
+    /// Update any open tab whose path is (a) the renamed path, or (b) a file
+    /// nested under a renamed directory.
+    private func renameOpenFile(from old: String, to new: String) {
+        for i in openFiles.indices {
+            let p = openFiles[i].path
+            if p == old {
+                openFiles[i].path = new
+            } else if p.hasPrefix(old + "/") {
+                openFiles[i].path = new + p.dropFirst(old.count)
+            }
+        }
+    }
+
+    /// Close any open tab whose path was deleted (or was inside a deleted dir).
+    private func closeOpenFile(at path: String) {
+        var i = openFiles.count - 1
+        while i >= 0 {
+            let p = openFiles[i].path
+            if p == path || p.hasPrefix(path + "/") {
+                closeFile(at: i)
+            }
+            i -= 1
+        }
+    }
 
     private func openFile(at path: String) {
         if let idx = openFiles.firstIndex(where: { $0.path == path }) {
@@ -699,6 +767,13 @@ struct FileRow: View {
     /// that all routes through `onOpen`.
     let activePath: String?
     let onOpen: (String) -> Void
+    /// Notify the tree when a file gets renamed so open-tabs can update.
+    var onPathRenamed: (String, String) -> Void = { _, _ in }
+    /// Notify the tree when a path is deleted so open-tabs can close.
+    var onPathDeleted: (String) -> Void = { _ in }
+    /// Called when this row's siblings change (rename/delete/create at this
+    /// level) — the owning parent re-reads its children list.
+    var onSiblingsChanged: () -> Void = {}
     let depth: Int
 
     @State private var expanded = false
@@ -756,6 +831,21 @@ struct FileRow: View {
                     } label: { Label("Open with Default App", systemImage: "arrow.up.forward.app") }
                     Divider()
                 }
+                if entry.isDirectory {
+                    Button { createInside(isDirectory: false) }
+                        label: { Label("New File…", systemImage: "doc.badge.plus") }
+                    Button { createInside(isDirectory: true) }
+                        label: { Label("New Folder…", systemImage: "folder.badge.plus") }
+                    Divider()
+                }
+                Button { renameEntry() }
+                    label: { Label("Rename…", systemImage: "pencil") }
+                Button { duplicateEntry() }
+                    label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                Divider()
+                Button(role: .destructive) { deleteEntry() }
+                    label: { Label("Move to Trash", systemImage: "trash") }
+                Divider()
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: entry.path)])
                 } label: { Label("Reveal in Finder", systemImage: "folder") }
@@ -778,6 +868,9 @@ struct FileRow: View {
                         entry: child,
                         activePath: activePath,
                         onOpen: onOpen,
+                        onPathRenamed: onPathRenamed,
+                        onPathDeleted: onPathDeleted,
+                        onSiblingsChanged: { loadChildren() },
                         depth: depth + 1
                     )
                 }
@@ -807,6 +900,111 @@ struct FileRow: View {
         } catch {
             print("Failed to load children: \(error)")
         }
+    }
+
+    // MARK: - File operations
+    //
+    // All of these run on the main thread because they're kicked off by the
+    // context menu. For very large trees this could block briefly — good
+    // enough for a single-node op.
+
+    private func renameEntry() {
+        let alert = NSAlert()
+        alert.messageText = "Rename"
+        alert.informativeText = "New name for \"\(entry.name)\""
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = entry.name
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, newName != entry.name else { return }
+        let parent = (entry.path as NSString).deletingLastPathComponent
+        let newPath = (parent as NSString).appendingPathComponent(newName)
+        do {
+            try FileManager.default.moveItem(atPath: entry.path, toPath: newPath)
+            onPathRenamed(entry.path, newPath)
+            onSiblingsChanged()
+        } catch {
+            presentError("Rename failed", error)
+        }
+    }
+
+    private func duplicateEntry() {
+        let parent = (entry.path as NSString).deletingLastPathComponent
+        let ext = (entry.name as NSString).pathExtension
+        let stem = (entry.name as NSString).deletingPathExtension
+        var n = 1
+        var candidate: String
+        repeat {
+            let base = n == 1 ? "\(stem) copy" : "\(stem) copy \(n)"
+            candidate = ext.isEmpty ? base : "\(base).\(ext)"
+            n += 1
+        } while FileManager.default.fileExists(atPath: (parent as NSString).appendingPathComponent(candidate))
+        let dest = (parent as NSString).appendingPathComponent(candidate)
+        do {
+            try FileManager.default.copyItem(atPath: entry.path, toPath: dest)
+            onSiblingsChanged()
+        } catch {
+            presentError("Duplicate failed", error)
+        }
+    }
+
+    private func deleteEntry() {
+        let alert = NSAlert()
+        alert.messageText = "Move \"\(entry.name)\" to Trash?"
+        alert.informativeText = "You can restore it from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)
+            onPathDeleted(entry.path)
+            onSiblingsChanged()
+        } catch {
+            presentError("Delete failed", error)
+        }
+    }
+
+    private func createInside(isDirectory: Bool) {
+        let alert = NSAlert()
+        alert.messageText = isDirectory ? "New Folder" : "New File"
+        alert.informativeText = "Name"
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = isDirectory ? "untitled folder" : "untitled.txt"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let dest = (entry.path as NSString).appendingPathComponent(name)
+        let fm = FileManager.default
+        do {
+            if isDirectory {
+                try fm.createDirectory(atPath: dest, withIntermediateDirectories: false)
+            } else {
+                fm.createFile(atPath: dest, contents: Data())
+            }
+            // Expand the directory so the new item is visible, then reload.
+            if !expanded { expanded = true }
+            loadChildren()
+        } catch {
+            presentError("Create failed", error)
+        }
+    }
+
+    private func presentError(_ title: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 

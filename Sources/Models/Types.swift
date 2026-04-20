@@ -831,7 +831,7 @@ enum ThemeMode: String, CaseIterable, Codable, Sendable, Identifiable {
     }
 }
 
-struct KilnSettings: Codable, Sendable {
+struct KilnSettings: Codable, Sendable, Equatable {
     var defaultModel: ClaudeModel = .sonnet46
     var defaultWorkDir: String = NSHomeDirectory()
     var systemPrompt: String = KilnSettings.defaultSystemPrompt
