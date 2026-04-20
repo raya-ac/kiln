@@ -300,6 +300,19 @@ final class RemoteControlServer: ObservableObject {
             }
             return .json(["status": "imported"])
 
+        case ("POST", "/api/session/new-here"):
+            // Fresh session pointed at the same workdir as an existing one.
+            // Mirrors the native "New session here" context-menu action.
+            guard let body = req.jsonBody,
+                  let sid = body["sessionId"] as? String,
+                  let src = store.sessions.first(where: { $0.id == sid })
+            else { return .json(["error": "missing sessionId"], status: 400) }
+            store.createSession(workDir: src.workDir, model: src.model, kind: src.kind)
+            return .json([
+                "status": "created",
+                "sessionId": store.activeSessionId as Any,
+            ])
+
         case ("GET", "/api/remote"):
             return .json(remoteInfoJSON())
 
@@ -1566,6 +1579,7 @@ final class RemoteControlServer: ObservableObject {
         <div class="ctx-item" data-act="copy-id"><span class="ctx-icon">#</span>Copy session ID</div>
         <div class="ctx-item" data-act="export"><span class="ctx-icon">⤓</span>Export markdown</div>
         <div class="ctx-item" data-act="export-json"><span class="ctx-icon">{ }</span>Export JSON</div>
+        <div class="ctx-item" data-act="new-here"><span class="ctx-icon">+</span>New session here</div>
         <div class="ctx-sep"></div>
         <div class="ctx-item" data-act="clear"><span class="ctx-icon">🧹</span>Clear messages</div>
         <div class="ctx-item" data-act="archive"><span class="ctx-icon">${archIcon}</span>${archLabel}</div>
@@ -1651,6 +1665,10 @@ final class RemoteControlServer: ObservableObject {
           case 'export-json':
             window.location.href = '/api/export-json?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
             return;
+          case 'new-here':
+            await api('/api/session/new-here', { sessionId: id });
+            flash('New session created');
+            break;
         }
         await refreshAll();
       } catch (e) {

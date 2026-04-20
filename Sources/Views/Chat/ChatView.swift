@@ -61,6 +61,11 @@ struct ChatView: View {
                     // Working directory — click to change.
                     WorkDirButton(session: session)
 
+                    // Git branch + dirty indicator for the session's workdir.
+                    // Hidden for non-repo dirs. Cached via GitStatus so this
+                    // is cheap to render on every frame.
+                    BranchBadge(workDir: session.workDir)
+
                     Spacer()
 
                     // Session instructions button — opens per-session system
@@ -1987,5 +1992,48 @@ struct WorkDirButton: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .help(session.workDir)
+    }
+}
+
+// Small badge next to WorkDirButton showing current git branch + a dot
+// for uncommitted changes. Renders nothing when the workdir isn't a
+// repo. Ticks every 10s via a timer so it notices mid-session commits
+// without requiring the user to click anything.
+struct BranchBadge: View {
+    let workDir: String
+    @State private var info: GitStatus.Info?
+    // Matches GitStatus.ttl so we don't re-probe needlessly.
+    private let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Group {
+            if let i = info, i.isRepo {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 9))
+                    Text(i.branch)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if i.dirtyCount > 0 {
+                        // Dirty dot — orange to match accent, no count so it
+                        // doesn't grow unbounded on messy repos.
+                        Circle()
+                            .fill(Color.kilnAccent)
+                            .frame(width: 5, height: 5)
+                            .help("\(i.dirtyCount) uncommitted change\(i.dirtyCount == 1 ? "" : "s")")
+                    }
+                }
+                .foregroundStyle(Color.kilnTextSecondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.kilnSurfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .help("Branch: \(i.branch)\n\(i.dirtyCount) uncommitted")
+            }
+        }
+        .onAppear { info = GitStatus.info(for: workDir) }
+        .onChange(of: workDir) { _, newDir in info = GitStatus.info(for: newDir) }
+        .onReceive(timer) { _ in info = GitStatus.info(for: workDir) }
     }
 }

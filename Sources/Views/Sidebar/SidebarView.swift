@@ -661,6 +661,15 @@ struct SessionRow: View {
                 Label("Reveal in Finder", systemImage: "folder")
             }
 
+            // Start a fresh session pointed at the same workdir. Useful when
+            // you want a clean chat for the same repo without redoing the
+            // directory picker.
+            Button {
+                store.createSession(workDir: session.workDir, model: session.model, kind: session.kind)
+            } label: {
+                Label("New session here", systemImage: "plus.bubble")
+            }
+
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.workDir, forType: .string)
