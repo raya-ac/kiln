@@ -368,14 +368,41 @@ struct SettingsView: View {
                                     .foregroundStyle(Color.kilnTextTertiary)
                             }
                             Spacer()
-                            Text("v0.1.0")
+                            Text(Self.versionString)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(Color.kilnTextTertiary)
+                                .textSelection(.enabled)
                         }
                     }
                 }
                 .padding(24)
             }
+    }
+
+    // MARK: - Version
+
+    /// Reads `CFBundleShortVersionString` + `CFBundleVersion` from Info.plist.
+    /// In dev (swift run / swift build open), Info.plist isn't bundled, so
+    /// we fall back to reading the repo-root `VERSION` file if the binary
+    /// is sitting inside a checkout.
+    static var versionString: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        if let short = info["CFBundleShortVersionString"] as? String, !short.isEmpty {
+            let build = info["CFBundleVersion"] as? String ?? ""
+            return build.isEmpty || build == short ? "v\(short)" : "v\(short) (\(build))"
+        }
+        // Dev fallback: look for a VERSION file next to the executable's
+        // enclosing package root. Works for `swift run`/`swift build` runs.
+        let exe = Bundle.main.executableURL ?? URL(fileURLWithPath: "/")
+        var dir = exe.deletingLastPathComponent()
+        for _ in 0..<6 {
+            let candidate = dir.appendingPathComponent("VERSION")
+            if let v = try? String(contentsOf: candidate, encoding: .utf8) {
+                return "v\(v.trimmingCharacters(in: .whitespacesAndNewlines)) (dev)"
+            }
+            dir.deleteLastPathComponent()
+        }
+        return "dev"
     }
 
     // MARK: - Appearance

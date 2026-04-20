@@ -34,6 +34,9 @@ jobs:
       - name: swift build
         run: swift build -c release
 
+      - name: swift test
+        run: swift test
+
       # Sanity: ensure the per-arch bundle script works on CI. Runner is
       # arm64, so arm64 compiles natively; x86_64 is a cross-compile.
       - name: Bundle arm64

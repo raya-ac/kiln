@@ -668,6 +668,13 @@ struct SessionRow: View {
                 Label("Copy Path", systemImage: "doc.on.doc")
             }
 
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(session.id, forType: .string)
+            } label: {
+                Label("Copy Session ID", systemImage: "number")
+            }
+
             if store.activeSession?.id == session.id {
                 Button {
                     let term = NSAppleScript(source: """

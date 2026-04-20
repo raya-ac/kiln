@@ -27,5 +27,10 @@ let package = Package(
             // exclude it from SPM's resource handling.
             exclude: ["App/Resources/AppIcon.icns"]
         ),
+        .testTarget(
+            name: "KilnTests",
+            dependencies: ["Kiln"],
+            path: "Tests/KilnTests"
+        ),
     ]
 )
