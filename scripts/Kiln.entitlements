@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Kiln spawns `claude` as a child process, reads/writes ~/.kiln,
+         listens on 127.0.0.1 for the remote-control server, opens outbound
+         WebSocket tunnels via warden, and loads Sparkle for auto-updates.
+         Keep the entitlement set narrow but sufficient for all of that. -->
+
+    <!-- Needed for Sparkle to re-launch the updated bundle and for any
+         inherited-exec child process with hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- We run `claude` and git/ripgrep helpers as child processes. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Outbound sockets for remote-control + warden tunnel. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Remote-control server binds locally; localhost listen still works
+         without a sandbox, but we set the entitlement so future sandboxing
+         won't silently break it. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- User files: sessions, PSKs, exported chats. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

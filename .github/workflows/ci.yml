@@ -1,0 +1,43 @@
+name: CI
+
+# Fast "does it compile?" check on every push/PR that doesn't touch a tag.
+# Matches `swift build` locally — no bundle/sign/notarize.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: swift build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode (26+)
+        run: |
+          if [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app
+          fi
+          xcodebuild -version
+          xcrun --show-sdk-version --sdk macosx
+
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-ci-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            spm-ci-${{ runner.os }}-
+
+      - name: swift build
+        run: swift build -c release
+
+      # Sanity: ensure the per-arch bundle script works on CI. Runner is
+      # arm64, so arm64 compiles natively; x86_64 is a cross-compile.
+      - name: Bundle arm64
+        run: ./scripts/make-app-bundle.sh 0.0.0-ci arm64
+
+      - name: Bundle x86_64
+        run: ./scripts/make-app-bundle.sh 0.0.0-ci x86_64

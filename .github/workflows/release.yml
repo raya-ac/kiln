@@ -1,0 +1,204 @@
+name: Release
+
+# Triggered by pushing a semver tag like v0.1.0. The workflow builds a
+# universal Kiln.app, optionally code-signs + notarizes it (if the required
+# secrets are present), signs the zip with Sparkle's EdDSA key, regenerates
+# appcast.xml, and publishes the whole thing as a GitHub Release.
+#
+# Required repo secrets (for unsigned testing, leave unset):
+#   SPARKLE_ED_PRIVATE_KEY   base64 of the EdDSA private key file
+#   SPARKLE_ED_PUBLIC_KEY    matching base64 public key (embedded in Info.plist)
+#
+# Optional secrets for Developer ID signing + notarization:
+#   APPLE_CERT_P12           base64 of the .p12 certificate bundle
+#   APPLE_CERT_P12_PASSWORD  password for the .p12
+#   APPLE_CODESIGN_IDENTITY  e.g. "Developer ID Application: Jane Doe (TEAMID)"
+#   APPLE_API_KEY_P8         base64 of the App Store Connect API key .p8
+#   APPLE_API_KEY_ID         the 10-char key id
+#   APPLE_API_ISSUER_ID      the issuer UUID
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without leading v). Used when dispatched manually."
+        required: true
+        default: "0.0.0"
+
+permissions:
+  contents: write  # needed to create the GitHub Release and push appcast.xml
+
+jobs:
+  build:
+    name: Build & Release ${{ github.ref_name }}
+    runs-on: macos-latest
+
+    # Secrets can't be referenced in step-level `if:` directly, so we
+    # project their presence into env vars once up top and gate on those.
+    env:
+      HAS_CERT: ${{ secrets.APPLE_CERT_P12 != '' && 'true' || 'false' }}
+      HAS_NOTARY: ${{ secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_CODESIGN_IDENTITY != '' && 'true' || 'false' }}
+      HAS_SPARKLE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY != '' && 'true' || 'false' }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          # Full history so we can commit the updated appcast back to main.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select latest Xcode (26+)
+        run: |
+          # Prefer Xcode 26 for the macOS 26 SDK; fall back to whatever
+          # the runner ships with latest `xcode-select -s` default.
+          if [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app
+          fi
+          xcodebuild -version
+          xcrun --show-sdk-version --sdk macosx
+
+      - name: Compute version
+        id: ver
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            # strip leading v
+            tag="${GITHUB_REF_NAME#v}"
+            echo "version=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Developer/Xcode/DerivedData
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      # ─── Optional: Developer ID signing ────────────────────────────────
+      - name: Import signing cert
+        if: env.HAS_CERT == 'true'
+        env:
+          P12_B64: ${{ secrets.APPLE_CERT_P12 }}
+          P12_PASS: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASS="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASS" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
+
+      # ─── Fetch Sparkle's CLI tools (generate_appcast, sign_update) ─────
+      - name: Download Sparkle release tools
+        run: |
+          SPARKLE_VERSION="2.6.4"
+          curl -L -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p .sparkle-tools
+          tar -xJf sparkle.tar.xz -C .sparkle-tools
+          ls -la .sparkle-tools/bin/
+
+      # ─── Build both arch bundles ───────────────────────────────────────
+      # Sparkle picks the right one at update time via sparkle:machineArchitectures,
+      # which generate_appcast sets automatically from each zip's binary.
+      - name: Build arm64 bundle
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          SUPUBLIC_ED_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        run: ./scripts/make-app-bundle.sh "${{ steps.ver.outputs.version }}" arm64
+
+      - name: Build x86_64 bundle
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          SUPUBLIC_ED_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+        run: ./scripts/make-app-bundle.sh "${{ steps.ver.outputs.version }}" x86_64
+
+      # ─── Optional: notarize with notarytool ────────────────────────────
+      - name: Notarize each arch
+        if: env.HAS_NOTARY == 'true'
+        env:
+          KEY_B64: ${{ secrets.APPLE_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$KEY_B64" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
+          for ARCH in arm64 x86_64; do
+            ZIP="dist/Kiln-${VERSION}-${ARCH}.zip"
+            APP="dist/${ARCH}/Kiln.app"
+            xcrun notarytool submit "$ZIP" \
+              --key "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8" \
+              --key-id "$KEY_ID" \
+              --issuer "$ISSUER" \
+              --wait
+            xcrun stapler staple "$APP"
+            # Re-zip after stapling so the shipped archive contains the ticket.
+            rm -f "$ZIP"
+            ( cd "dist/${ARCH}" && ditto -c -k --sequesterRsrc --keepParent "Kiln.app" "../Kiln-${VERSION}-${ARCH}.zip" )
+          done
+
+      # ─── Sparkle: regenerate appcast covering both arch zips ───────────
+      # generate_appcast inspects each zip's binary and writes a
+      # sparkle:machineArchitectures="arm64|x86_64" attribute so the
+      # running app on each Mac pulls the matching zip.
+      - name: Regenerate appcast.xml
+        if: env.HAS_SPARKLE_KEY == 'true'
+        env:
+          ED_PRIV: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          echo "$ED_PRIV" | base64 --decode > "$RUNNER_TEMP/ed25519"
+          chmod 600 "$RUNNER_TEMP/ed25519"
+          # Keep the pre-existing appcast.xml so old entries are preserved
+          # and only the new version's items are added.
+          if [ -f appcast.xml ]; then
+            cp appcast.xml dist/appcast.xml
+          fi
+          # generate_appcast only looks at top-level zips in the dir. Make
+          # sure nothing else in dist/ ends in .zip unintentionally.
+          .sparkle-tools/bin/generate_appcast \
+            --ed-key-file "$RUNNER_TEMP/ed25519" \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            dist/
+          cp dist/appcast.xml appcast.xml
+
+      - name: Commit appcast to main
+        if: env.HAS_SPARKLE_KEY == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          cp appcast.xml appcast.xml.new
+          mv appcast.xml.new appcast.xml
+          git add appcast.xml
+          if git diff --cached --quiet; then
+            echo "no appcast changes"
+          else
+            git commit -m "release: update appcast for ${{ github.ref_name }}"
+            git push origin main
+          fi
+
+      # ─── Publish GitHub Release ───────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Kiln ${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/Kiln-${{ steps.ver.outputs.version }}-arm64.zip
+            dist/Kiln-${{ steps.ver.outputs.version }}-x86_64.zip

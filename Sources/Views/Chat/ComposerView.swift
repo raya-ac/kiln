@@ -1,0 +1,1267 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
+
+struct ComposerView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var input = ""
+    @FocusState private var isFocused: Bool
+    @State private var dropHovering = false
+    @State private var showSnippets = false
+    @State private var showExpandedEditor = false
+    /// When the user types `/` at the start of a line, we surface a
+    /// command popup. Selection state lives here so arrow keys can navigate.
+    @State private var slashSelectedIndex: Int = 0
+
+    /// Prompt history navigation: index into `PromptHistoryStore.entries`.
+    /// -1 means "not browsing history"; 0 = most recent prompt.
+    @State private var historyIndex: Int = -1
+    /// Saves what the user had typed before they started browsing history,
+    /// so they can escape back to it.
+    @State private var savedDraft: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Toolbar row
+            ComposerToolbar()
+
+            // Undo-send banner (only when a send is pending)
+            if let pending = store.pendingSend {
+                UndoSendBanner(pending: pending) {
+                    if let restored = store.cancelPendingSend() {
+                        input = restored.text
+                        store.composerAttachments = restored.attachments
+                    }
+                }
+            }
+
+            // Slash command popup — appears inline when the input starts with "/".
+            if let matches = slashMatches, !matches.isEmpty {
+                SlashCommandPopup(
+                    matches: matches,
+                    selected: $slashSelectedIndex,
+                    onPick: { cmd in insertSlashCommand(cmd) }
+                )
+            }
+
+            // Attachment chips
+            if !store.composerAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(store.composerAttachments) { att in
+                            AttachmentChip(attachment: att) {
+                                store.removeAttachment(att.id)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                }
+                .frame(height: 66)
+            }
+
+            // Input row
+            HStack(alignment: .bottom, spacing: 10) {
+                // Attach button
+                Button {
+                    pickFiles()
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.kilnSurface)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Attach files or images")
+
+                // Snippets button
+                Button {
+                    showSnippets = true
+                } label: {
+                    Image(systemName: "text.alignleft")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.kilnSurface)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Snippets (⌘/)")
+                .keyboardShortcut("/", modifiers: .command)
+
+                // Expand to full editor — for long prompts
+                Button {
+                    showExpandedEditor = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(Color.kilnSurface)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Expand editor")
+
+                VStack(spacing: 0) {
+                    TextField(placeholderText, text: $input, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13 * store.settings.fontScale.factor))
+                        .foregroundStyle(Color.kilnText)
+                        .lineLimit(1...8)
+                        .focused($isFocused)
+                        .onSubmit {
+                            // If the slash popup is open and has a selection, Enter accepts that.
+                            if let matches = slashMatches, !matches.isEmpty {
+                                insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
+                                return
+                            }
+                            if store.settings.sendKey == .enter { send() }
+                            else { input += "\n" }
+                        }
+                        .onAppear { isFocused = true }
+                        .disableAutocorrection(!store.settings.spellCheck)
+                        .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .tiff]) { providers in
+                            handlePaste(providers)
+                        }
+                        .onChange(of: input) { _, _ in slashSelectedIndex = 0 }
+                        .onKeyPress(.upArrow) {
+                            // Slash popup takes priority.
+                            if let matches = slashMatches, !matches.isEmpty {
+                                slashSelectedIndex = max(0, slashSelectedIndex - 1)
+                                return .handled
+                            }
+                            // History recall — only when input is empty or already browsing.
+                            let entries = PromptHistoryStore.shared.entries
+                            guard !entries.isEmpty else { return .ignored }
+                            if historyIndex == -1 && input.isEmpty == false { return .ignored }
+                            if historyIndex == -1 { savedDraft = input }
+                            historyIndex = min(historyIndex + 1, entries.count - 1)
+                            input = entries[historyIndex]
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            if let matches = slashMatches, !matches.isEmpty {
+                                slashSelectedIndex = min(matches.count - 1, slashSelectedIndex + 1)
+                                return .handled
+                            }
+                            guard historyIndex >= 0 else { return .ignored }
+                            let entries = PromptHistoryStore.shared.entries
+                            historyIndex -= 1
+                            if historyIndex < 0 {
+                                input = savedDraft
+                                savedDraft = ""
+                            } else {
+                                input = entries[min(historyIndex, entries.count - 1)]
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.escape) {
+                            // Clear the / at the front to dismiss the popup.
+                            if slashMatches != nil { input = ""; return .handled }
+                            // Exit history browse mode cleanly.
+                            if historyIndex >= 0 {
+                                input = savedDraft
+                                savedDraft = ""
+                                historyIndex = -1
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                        .onKeyPress(.tab) {
+                            guard let matches = slashMatches, !matches.isEmpty else { return .ignored }
+                            insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
+                            return .handled
+                        }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.kilnSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(borderColor, lineWidth: dropHovering ? 2 : 1)
+                )
+
+                if store.isSessionBusy(store.activeSessionId) {
+                    Button {
+                        store.interrupt()
+                    } label: {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(Color.kilnError)
+                    }
+                    .buttonStyle(KilnPressStyle())
+                    .help("Stop generation (⌘.)")
+                } else {
+                    Button {
+                        send()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(
+                                canSend ? Color.kilnAccent : Color.kilnTextTertiary
+                            )
+                    }
+                    .buttonStyle(KilnPressStyle())
+                    .disabled(!canSend)
+                    .help(store.settings.sendKey == .cmdEnter ? "Send (⌘⏎)" : "Send (⏎)")
+                    .modifier(CmdEnterSendModifier(enabled: store.settings.sendKey == .cmdEnter))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            // Keyboard hint strip — clickable. Mode controlled by settings.
+            if shouldShowHintStrip {
+                HStack(spacing: 8) {
+                    let sendLabel = store.settings.sendKey == .cmdEnter ? "⌘⏎" : "⏎"
+                    hintButton(sendLabel, "send") { send() }
+                        .disabled(!canSend)
+                    hintButton(store.settings.sendKey == .cmdEnter ? "⏎" : "⇧⏎", "newline") {
+                        input += "\n"
+                    }
+                    hintButton("⌘/", "snippets") { showSnippets = true }
+                    hintButton("⌘K", "commands") { store.showCommandPalette = true }
+                    hintButton("⌘⇧F", "search") { store.showGlobalSearch = true }
+                    if store.isSessionBusy(store.activeSessionId) {
+                        hintButton("⌘.", "stop") { store.interrupt() }
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(Color.kilnBg)
+        .onDrop(of: [.fileURL, .image], isTargeted: $dropHovering) { providers in
+            handleDrop(providers)
+        }
+        .sheet(isPresented: $showSnippets) {
+            SnippetsView(onInsert: { text in
+                if input.isEmpty {
+                    input = text
+                } else {
+                    input += (input.hasSuffix("\n") ? "" : "\n\n") + text
+                }
+                isFocused = true
+            })
+            .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showExpandedEditor) {
+            ExpandedComposerEditor(text: $input, onSend: { send() })
+                .preferredColorScheme(.dark)
+        }
+        .onChange(of: store.pendingComposerPrefill) { _, newValue in
+            // Prefill hook used by edit-and-resend and similar flows.
+            guard let text = newValue, !text.isEmpty else { return }
+            input = text
+            isFocused = true
+            store.pendingComposerPrefill = nil
+        }
+    }
+
+    @ViewBuilder
+    private func hintButton(_ key: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(key)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.kilnSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                Text(label)
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HintHoverStyle())
+    }
+
+    private var canSend: Bool {
+        let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAttachments = !store.composerAttachments.isEmpty
+        return (hasText || hasAttachments) && !store.isSessionBusy(store.activeSessionId)
+    }
+
+    /// Returns the current slash query (text after the leading `/`) or nil
+    /// if we shouldn't be showing the popup.
+    private var slashMatches: [SlashCommand]? {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("/") else { return nil }
+        // Only fire while the input is a single word (no spaces yet).
+        if trimmed.contains(" ") { return nil }
+        let query = String(trimmed.dropFirst()).lowercased()
+        let all = SlashCommands.all()
+        if query.isEmpty { return all }
+        return all.filter {
+            $0.label.lowercased().contains(query) ||
+            $0.description.lowercased().contains(query)
+        }
+    }
+
+    private func insertSlashCommand(_ cmd: SlashCommand) {
+        input = cmd.label + " "
+        slashSelectedIndex = 0
+        isFocused = true
+    }
+
+    private var placeholderText: String {
+        let custom = store.settings.composerPlaceholder
+        return custom.isEmpty ? store.settings.language.ui.messagePlaceholder : custom
+    }
+
+    private var shouldShowHintStrip: Bool {
+        switch store.settings.hintStripMode {
+        case .always: return true
+        case .focused: return isFocused
+        case .never: return false
+        }
+    }
+
+    private var borderColor: Color {
+        if dropHovering { return Color.kilnAccent }
+        if isFocused { return Color.kilnAccent.opacity(0.5) }
+        return Color.kilnBorder
+    }
+
+    private func send() {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSend else { return }
+
+        // All slash commands are handled client-side. Claude Code's native
+        // slash commands only work in interactive mode; we run --print.
+        if text.hasPrefix("/") && !text.hasPrefix("//") && isRecognizedSlashCommand(text) {
+            handleSlashCommand(text)
+            return
+        }
+
+        let attached = store.composerAttachments
+        PromptHistoryStore.shared.record(text)
+        historyIndex = -1
+        savedDraft = ""
+        input = ""
+        store.clearAttachments()
+        store.queueSend(text, attachments: attached)
+    }
+
+    private func isRecognizedSlashCommand(_ raw: String) -> Bool {
+        let cmd = raw.split(separator: " ").first?.lowercased() ?? ""
+        return SlashCommands.all().contains { $0.label.lowercased() == cmd }
+    }
+
+    private func handleSlashCommand(_ raw: String) {
+        let parts = raw.split(separator: " ", maxSplits: 1).map(String.init)
+        let cmd = parts.first?.lowercased() ?? ""
+        let arg = parts.count > 1 ? parts[1] : ""
+        input = ""
+        store.clearAttachments()
+
+        switch cmd {
+        case "/fork":
+            if let sid = store.activeSessionId,
+               let msg = store.activeSession?.messages.last {
+                store.forkSession(fromSessionId: sid, atMessageId: msg.id)
+            }
+        case "/export":
+            guard let id = store.activeSessionId else { return }
+            let md = store.exportSessionMarkdown(id)
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.plainText]
+            panel.nameFieldStringValue = "\(store.activeSession?.name ?? "chat").md"
+            if panel.runModal() == .OK, let url = panel.url {
+                try? md.write(to: url, atomically: true, encoding: .utf8)
+            }
+        case "/retry":
+            Task { await store.retryLastMessage() }
+        case "/compact":
+            Task { await store.compactSession() }
+        case "/clear":
+            if let id = store.activeSessionId { store.clearSession(id) }
+        case "/model":
+            store.cycleToNextModel()
+        case "/compare":
+            // Pick a model different from the current one — cycle forward by
+            // one in allCases. User can re-run /compare to try more models.
+            let current = store.activeSession?.model ?? .sonnet46
+            let all = ClaudeModel.allCases
+            let alt: ClaudeModel = {
+                guard let i = all.firstIndex(of: current) else { return all.first ?? current }
+                return all[(i + 1) % all.count]
+            }()
+            Task { await store.compareWithModel(alt) }
+        case "/interrupt":
+            store.interrupt()
+        case "/instructions":
+            // Route through the store so the chat header sheet can open it.
+            store.requestOpenInstructions = true
+        case "/title":
+            Task { await store.generateSessionTitle() }
+        case "/settings":
+            store.showSettings = true
+        case "/search":
+            let q = arg.trimmingCharacters(in: .whitespaces)
+            if !q.isEmpty {
+                // Seed the global-search view's query via a lightweight
+                // notification — the receiver in ContentView clears it.
+                store.pendingSearchQuery = q
+            }
+            store.showGlobalSearch = true
+        default:
+            // Unknown command — send as plain text so Claude can respond to it.
+            Task { await store.sendMessage(raw) }
+        }
+    }
+
+    private func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                store.addAttachment(path: url.path, name: url.lastPathComponent)
+            }
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+                    var url: URL?
+                    if let d = data as? Data {
+                        url = URL(dataRepresentation: d, relativeTo: nil)
+                    } else if let u = data as? URL {
+                        url = u
+                    }
+                    guard let u = url else { return }
+                    Task { @MainActor in
+                        store.addAttachment(path: u.path, name: u.lastPathComponent)
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                handled = true
+                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.png.identifier) { data, _ in
+                    guard let d = data else { return }
+                    Task { @MainActor in
+                        if let path = writePastedImage(d, ext: "png") {
+                            store.addAttachment(path: path, name: "pasted.png")
+                        }
+                    }
+                }
+            }
+        }
+        return handled
+    }
+
+    private func handlePaste(_ providers: [NSItemProvider]) {
+        _ = handleDrop(providers)
+    }
+
+    private func writePastedImage(_ data: Data, ext: String) -> String? {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kiln-attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("pasted-\(Int(Date().timeIntervalSince1970)).\(ext)")
+        do {
+            try data.write(to: file)
+            return file.path
+        } catch {
+            return nil
+        }
+    }
+}
+
+// MARK: - Attachment Chip
+
+struct AttachmentChip: View {
+    let attachment: ComposerAttachment
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    private var isImage: Bool {
+        let ext = (attachment.name as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "webp", "tiff", "heic", "bmp"].contains(ext)
+    }
+
+    private var thumbnail: NSImage? {
+        guard isImage, FileManager.default.fileExists(atPath: attachment.path) else { return nil }
+        return NSImage(contentsOfFile: attachment.path)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 42, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.kilnAccent)
+                    .frame(width: 32, height: 32)
+                    .background(Color.kilnBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(attachment.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.kilnText)
+                    .lineLimit(1)
+                Text(attachment.path)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: 200, alignment: .leading)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 16, height: 16)
+                    .background(hovering ? Color.kilnSurfaceHover : Color.clear)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.kilnSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorder, lineWidth: 1))
+        .help(attachment.path)
+    }
+
+    private var icon: String {
+        let ext = (attachment.name as NSString).pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg", "gif", "webp", "tiff", "heic": return "photo"
+        case "pdf": return "doc.richtext"
+        case "mp4", "mov", "m4v", "webm": return "film"
+        case "mp3", "wav", "m4a", "flac": return "waveform"
+        default: return "doc"
+        }
+    }
+}
+
+// MARK: - Composer Toolbar
+
+struct ComposerToolbar: View {
+    @EnvironmentObject var store: AppStore
+
+    private var isChatSession: Bool {
+        store.activeSession?.kind == .chat
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if !isChatSession {
+                    // Mode toggle: Plan / Build — code sessions only
+                    ToolbarPill(
+                        icon: store.sessionMode.icon,
+                        label: store.sessionMode.label,
+                        color: store.sessionMode == .plan ? .cyan : Color.kilnAccent,
+                        active: true
+                    ) {
+                        store.sessionMode = store.sessionMode == .build ? .plan : .build
+                    }
+                    .help(store.sessionMode.description)
+
+                    // Permissions — code sessions only
+                    ToolbarPill(
+                        icon: store.permissionMode.icon,
+                        label: store.permissionMode.label,
+                        color: permissionColor,
+                        active: true
+                    ) {
+                        cyclePermissions()
+                    }
+                    .help(store.permissionMode.description)
+
+                    // Max turns — code sessions only
+                    ToolbarPill(
+                        icon: "arrow.trianglehead.2.counterclockwise",
+                        label: store.maxTurns.map { "\($0) \(store.settings.language.ui.turnsSuffix)" } ?? "∞ \(store.settings.language.ui.turnsSuffix)",
+                        color: Color.kilnTextSecondary,
+                        active: store.maxTurns != nil
+                    ) {
+                        cycleMaxTurns()
+                    }
+                    .help("Limit agentic turns")
+                }
+
+                // Thinking toggle
+                ToolbarPill(
+                    icon: "brain",
+                    label: store.thinkingEnabled ? store.settings.language.ui.think : store.settings.language.ui.noThink,
+                    color: store.thinkingEnabled ? .purple : Color.kilnTextSecondary,
+                    active: store.thinkingEnabled
+                ) {
+                    store.thinkingEnabled.toggle()
+                }
+                .help("Extended thinking — lets Claude reason before responding")
+
+                // Effort level — only meaningful with thinking on
+                if store.thinkingEnabled {
+                    ToolbarPill(
+                        icon: "gauge.with.dots.needle.67percent",
+                        label: localizedEffortLabel,
+                        color: effortColor,
+                        active: true
+                    ) {
+                        cycleEffort()
+                    }
+                    .help("Thinking effort: low / med / high / max")
+                }
+
+                // Extended context (only for Opus)
+                if store.activeSession?.model.supportsExtendedContext == true {
+                    ToolbarPill(
+                        icon: "arrow.up.left.and.arrow.down.right",
+                        label: store.extendedContext ? "1M ctx" : "200K ctx",
+                        color: store.extendedContext ? .purple : Color.kilnTextSecondary,
+                        active: store.extendedContext
+                    ) {
+                        store.extendedContext.toggle()
+                    }
+                    .help(store.extendedContext ? "1 million token context window" : "Standard 200K context window")
+                }
+
+                if !isChatSession {
+                    Spacer().frame(width: 4)
+
+                    // Divider
+                    Rectangle()
+                        .fill(Color.kilnBorder)
+                        .frame(width: 1, height: 16)
+
+                    Spacer().frame(width: 4)
+                }
+
+                // Model pills with Claude icon
+                ForEach(ClaudeModel.allCases) { model in
+                    ModelPill(model: model)
+                }
+
+                Spacer()
+
+                // Rate-limit meter — shows tokens-per-5min velocity
+                RateLimitMeter()
+
+                // Context / cost display
+                ContextDisplay()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private var permissionColor: Color {
+        switch store.permissionMode {
+        case .bypass: Color.kilnAccent
+        case .ask: .blue
+        case .deny: Color.kilnError
+        }
+    }
+
+    private func cyclePermissions() {
+        switch store.permissionMode {
+        case .bypass: store.permissionMode = .ask
+        case .ask: store.permissionMode = .deny
+        case .deny: store.permissionMode = .bypass
+        }
+    }
+
+    private var effortColor: Color {
+        switch store.effortLevel {
+        case .low: Color.kilnTextSecondary
+        case .medium: .blue
+        case .high: .purple
+        case .max: Color(hex: 0xD97706)
+        }
+    }
+
+    private var localizedEffortLabel: String {
+        let ui = store.settings.language.ui
+        switch store.effortLevel {
+        case .low: return ui.effortLow
+        case .medium: return ui.effortMed
+        case .high: return ui.effortHigh
+        case .max: return ui.effortMax
+        }
+    }
+
+    private func cycleEffort() {
+        switch store.effortLevel {
+        case .low: store.effortLevel = .medium
+        case .medium: store.effortLevel = .high
+        case .high: store.effortLevel = .max
+        case .max: store.effortLevel = .low
+        }
+    }
+
+    private func cycleMaxTurns() {
+        switch store.maxTurns {
+        case nil: store.maxTurns = 5
+        case 5: store.maxTurns = 10
+        case 10: store.maxTurns = 25
+        case 25: store.maxTurns = 50
+        default: store.maxTurns = nil
+        }
+    }
+}
+
+// MARK: - Model Pill with Claude Icon
+
+struct ModelPill: View {
+    let model: ClaudeModel
+    @EnvironmentObject var store: AppStore
+    @State private var hovering = false
+
+    private var selected: Bool {
+        store.activeSession?.model == model
+    }
+
+    var body: some View {
+        Button {
+            store.setModel(model)
+        } label: {
+            HStack(spacing: 4) {
+                // Claude sparkle icon
+                ClaudeIcon(size: 10)
+                    .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextTertiary)
+                Text(model.label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextTertiary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(selected ? modelColor : (hovering ? Color.kilnSurfaceHover : Color.kilnSurface))
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .help(model.fullId)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(selected ? .clear : Color.kilnBorderSubtle, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+
+    private var modelColor: Color {
+        switch model {
+        case .opus47, .opus46: Color(hex: 0xD97706)   // deep amber
+        case .sonnet46: Color.kilnAccent
+        case .haiku45: Color(hex: 0x8B8B8E)  // muted gray
+        }
+    }
+}
+
+// MARK: - Claude Icon (sparkle shape)
+
+struct ClaudeIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(systemName: "sparkle")
+            .font(.system(size: size, weight: .semibold))
+    }
+}
+
+// MARK: - Context Display
+
+struct ContextDisplay: View {
+    @EnvironmentObject var store: AppStore
+
+    private var contextWindow: Int {
+        guard let model = store.activeSession?.model else { return 200_000 }
+        if store.extendedContext, let ext = model.extendedContextWindow {
+            return ext
+        }
+        return model.contextWindow
+    }
+
+    private var totalTokens: Int {
+        store.inputTokens + store.outputTokens
+    }
+
+    private var usagePercent: Double {
+        guard contextWindow > 0 else { return 0 }
+        return Double(totalTokens) / Double(contextWindow)
+    }
+
+    private var usageColor: Color {
+        if usagePercent > 0.9 { return Color.kilnError }
+        if usagePercent > 0.75 { return Color(hex: 0xF59E0B) }
+        if usagePercent > 0.5 { return Color.kilnAccent }
+        return Color.kilnTextTertiary
+    }
+
+    /// Above 75%, show the Compact button inline so the user can shed tokens
+    /// before hitting the cliff. Above 90% the whole bar flashes red.
+    private var shouldSuggestCompact: Bool {
+        usagePercent > 0.75
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Token count + context bar
+            if totalTokens > 0 {
+                HStack(spacing: 4) {
+                    // Horizontal progress bar (replaces the ring — easier to read at a glance)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.kilnBorder)
+                            .frame(width: 48, height: 4)
+                        Capsule()
+                            .fill(usageColor)
+                            .frame(width: CGFloat(min(usagePercent, 1.0)) * 48, height: 4)
+                    }
+
+                    Text(formatTokens(totalTokens))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(usageColor)
+
+                    Text("/")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.kilnTextTertiary)
+
+                    Text(formatTokens(contextWindow))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+
+                    // Percentage — only when meaningfully used
+                    if usagePercent > 0.25 {
+                        Text("\(Int(usagePercent * 100))%")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(usageColor)
+                    }
+                }
+                .help("\(store.inputTokens) input + \(store.outputTokens) output tokens · \(Int(usagePercent * 100))% of context")
+            }
+
+            // Compact button — appears when context is 75%+ full
+            if shouldSuggestCompact {
+                Button {
+                    let s = store
+                    Task { await s.compact() }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "rectangle.compress.vertical")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Compact")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.kilnBg)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(usageColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Ask Claude to compact this session's history")
+            }
+
+            // Cost
+            if store.totalCost > 0 {
+                Text(String(format: "$%.2f", store.totalCost))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+        }
+    }
+
+    private func formatTokens(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.0fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+}
+
+// MARK: - Toolbar Pill
+
+struct ToolbarPill: View {
+    let icon: String
+    let label: String
+    let color: Color
+    let active: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(active ? color : Color.kilnTextTertiary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(hovering ? Color.kilnSurfaceHover : Color.kilnSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(active ? color.opacity(0.3) : Color.kilnBorderSubtle, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+// Subtle hover effect for the composer hint buttons.
+struct HintHoverStyle: ButtonStyle {
+    @State private var hovering = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : (hovering ? 1.0 : 0.75))
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.1), value: hovering)
+    }
+}
+
+private struct CmdEnterSendModifier: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content.keyboardShortcut(.return, modifiers: .command)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Undo Send Banner
+//
+// Shows a countdown strip above the composer while a queued message is
+// within its cancellation window. Click Undo to pull the message back
+// into the input field unchanged.
+
+struct UndoSendBanner: View {
+    let pending: AppStore.PendingSend
+    let onUndo: () -> Void
+    @EnvironmentObject var store: AppStore
+    @State private var now: Date = .now
+
+    private var remaining: Int {
+        let total = store.settings.undoSendWindow
+        let elapsed = Int(now.timeIntervalSince(pending.sentAt))
+        return max(0, total - elapsed)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "paperplane.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.kilnAccent)
+            Text("Sending in \(remaining)s")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.kilnText)
+            Text("·")
+                .foregroundStyle(Color.kilnTextTertiary)
+            Text(String(pending.text.prefix(60)) + (pending.text.count > 60 ? "…" : ""))
+                .font(.system(size: 11))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            Button {
+                onUndo()
+            } label: {
+                Text("Undo")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.kilnBg)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.kilnAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("z", modifiers: .command)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.kilnSurface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.kilnAccent).frame(height: 2)
+                .scaleEffect(x: CGFloat(remaining) / CGFloat(max(1, store.settings.undoSendWindow)), y: 1, anchor: .leading)
+                .animation(.linear(duration: 0.1), value: remaining)
+        }
+        .onReceive(Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()) { _ in
+            now = .now
+        }
+    }
+}
+
+// MARK: - Slash Command Popup
+//
+// Inline autocomplete that appears when the composer input starts with "/".
+// Arrow keys navigate, Tab/Return accept, Escape dismisses. Clicking a row
+// also accepts.
+
+struct SlashCommandPopup: View {
+    let matches: [SlashCommand]
+    @Binding var selected: Int
+    let onPick: (SlashCommand) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Image(systemName: "command")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                Text("Slash command")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .tracking(0.6)
+                Spacer()
+                Text("↑↓ navigate · ⏎ pick · esc close")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(Array(matches.prefix(8).enumerated()), id: \.element.id) { idx, cmd in
+                            SlashCommandRow(cmd: cmd, selected: idx == selected)
+                                .id(idx)
+                                .onTapGesture { onPick(cmd) }
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 6)
+                }
+                .frame(maxHeight: 220)
+                .onChange(of: selected) { _, newValue in
+                    withAnimation(.linear(duration: 0.08)) {
+                        proxy.scrollTo(newValue, anchor: .center)
+                    }
+                }
+            }
+        }
+        .background(Color.kilnSurface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.kilnBorder).frame(height: 1)
+        }
+    }
+}
+
+private struct SlashCommandRow: View {
+    let cmd: SlashCommand
+    let selected: Bool
+
+    private var kindTag: (label: String, color: Color)? {
+        switch cmd.kind {
+        case .builtin: return nil
+        case .agent: return ("AGENT", Color.purple)
+        case .kiln: return ("KILN", Color.kilnAccent)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(cmd.label)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.kilnAccent)
+                .frame(width: 110, alignment: .leading)
+            Text(cmd.description)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.kilnTextSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            if let tag = kindTag {
+                Text(tag.label)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(tag.color)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(tag.color.opacity(0.5), lineWidth: 1)
+                    )
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? Color.kilnAccentMuted : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(selected ? Color.kilnAccent.opacity(0.3) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Expanded Composer Editor
+//
+// Full-size modal for writing long prompts. Opens when the composer's
+// expand button is pressed. ⌘⏎ sends and dismisses.
+
+struct ExpandedComposerEditor: View {
+    @Binding var text: String
+    let onSend: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "square.and.pencil")
+                    .foregroundStyle(Color.kilnAccent)
+                Text("Compose")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.kilnText)
+                Spacer()
+                Text("\(text.count) chars · \(text.split(separator: " ").count) words")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+
+            TextEditor(text: $text)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.kilnText)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .frame(minHeight: 360, idealHeight: 420)
+                .background(Color.kilnSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorder, lineWidth: 1))
+
+            HStack {
+                Text("⌘⏎ send · Esc close")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.kilnSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .keyboardShortcut(.cancelAction)
+                Button {
+                    dismiss()
+                    onSend()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 12))
+                        Text("Send")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.kilnBg)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.kilnAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 640, minHeight: 520)
+        .background(Color.kilnBg)
+    }
+}
+
+// MARK: - Rate Limit Meter
+//
+// A compact indicator in the composer toolbar that tracks tokens-per-5min
+// against a user-configurable soft cap. Turns amber at 70%, red when
+// throttled. Tooltip explains what it's measuring.
+
+struct RateLimitMeter: View {
+    @ObservedObject private var tracker: RateLimitTracker = .shared
+    @State private var now: Date = .now
+
+    private var color: Color {
+        if tracker.isRateLimited { return Color.kilnError }
+        let r = tracker.usageRatio
+        if r >= 1.0 { return Color.kilnError }
+        if r >= 0.7 { return Color(hex: 0xF59E0B) }
+        return Color.kilnTextTertiary
+    }
+
+    private var label: String {
+        if tracker.isRateLimited {
+            if let remaining = tracker.cooldownRemaining {
+                return "cooling \(remaining)s"
+            }
+            return "rate limited"
+        }
+        let pct = Int(tracker.usageRatio * 100)
+        return "\(pct)%"
+    }
+
+    private var shouldShow: Bool {
+        tracker.isRateLimited || tracker.tokensLastFiveMin > 0
+    }
+
+    var body: some View {
+        if shouldShow {
+            HStack(spacing: 4) {
+                Image(systemName: tracker.isRateLimited ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
+                    .font(.system(size: 9))
+                    .foregroundStyle(color)
+                Text(label)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(color)
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(tracker.isRateLimited ? Color.kilnError.opacity(0.12) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .help(helpText)
+            .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+                // Force a redraw so the cooldown counter ticks.
+                now = .now
+            }
+            .onTapGesture {
+                if tracker.isRateLimited { tracker.clearRateLimited() }
+            }
+        }
+    }
+
+    private var helpText: String {
+        if tracker.isRateLimited {
+            return "Claude returned a rate-limit error recently. Click to dismiss."
+        }
+        let used = tracker.tokensLastFiveMin
+        let cap = tracker.softCapTokensPerFiveMin
+        return "Rate meter: \(used.formatted()) / \(cap.formatted()) tokens in the last 5 minutes. Configurable in settings."
+    }
+}

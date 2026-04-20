@@ -1,0 +1,1541 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab: SettingsTab = .settings
+
+    enum SettingsTab: String, CaseIterable, Identifiable {
+        case settings, stats
+        var id: String { rawValue }
+        var label: String { self == .settings ? "Settings" : "Stats" }
+        var icon: String { self == .settings ? "gearshape" : "chart.bar.fill" }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header with tab switcher
+            HStack {
+                Text(tab == .settings ? store.settings.language.ui.settings : "Stats")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.kilnText)
+
+                Spacer().frame(width: 16)
+
+                HStack(spacing: 2) {
+                    ForEach(SettingsTab.allCases) { t in
+                        let selected = tab == t
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) { tab = t }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: t.icon)
+                                    .font(.system(size: 10))
+                                Text(t.label)
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 24, height: 24)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+
+            Rectangle().fill(Color.kilnBorder).frame(height: 1)
+
+            if tab == .stats {
+                StatsView()
+            } else {
+                settingsScroll
+            }
+        }
+        .frame(width: 540, height: 560)
+        .background(Color.kilnBg)
+    }
+
+    private var settingsScroll: some View {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Defaults
+                    SettingsSection(title: store.settings.language.ui.defaults) {
+                        // Default model
+                        SettingsRow(label: store.settings.language.ui.modelLabel) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 2) {
+                                    ForEach(ClaudeModel.allCases) { model in
+                                        let selected = store.settings.defaultModel == model
+                                        Button {
+                                            store.settings.defaultModel = model
+                                            store.saveSettings()
+                                        } label: {
+                                            Text(model.label)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 5)
+                                                .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help(model.fullId)
+                                    }
+                                }
+                                Text(store.settings.defaultModel.fullId)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+                            }
+                        }
+
+                        // Default mode
+                        SettingsRow(label: store.settings.language.ui.modeLabel) {
+                            HStack(spacing: 2) {
+                                ForEach(SessionMode.allCases) { mode in
+                                    let selected = store.settings.defaultMode == mode
+                                    Button {
+                                        store.settings.defaultMode = mode
+                                        store.saveSettings()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: mode.icon)
+                                                .font(.system(size: 9))
+                                            Text(mode.label)
+                                                .font(.system(size: 11, weight: .medium))
+                                        }
+                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 5)
+                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // Default permissions
+                        SettingsRow(label: store.settings.language.ui.permissionsLabel) {
+                            HStack(spacing: 2) {
+                                ForEach(PermissionMode.allCases) { perm in
+                                    let selected = store.settings.defaultPermissions == perm
+                                    Button {
+                                        store.settings.defaultPermissions = perm
+                                        store.saveSettings()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: perm.icon)
+                                                .font(.system(size: 9))
+                                            Text(perm.label)
+                                                .font(.system(size: 11, weight: .medium))
+                                        }
+                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 5)
+                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // Default working directory
+                        SettingsRow(label: store.settings.language.ui.workDir) {
+                            HStack(spacing: 8) {
+                                Text(store.settings.defaultWorkDir)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Color.kilnTextSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Button(store.settings.language.ui.browse) {
+                                    let panel = NSOpenPanel()
+                                    panel.canChooseDirectories = true
+                                    panel.canChooseFiles = false
+                                    panel.directoryURL = URL(fileURLWithPath: store.settings.defaultWorkDir)
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        store.settings.defaultWorkDir = url.path
+                                        store.saveSettings()
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.kilnText)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Color.kilnSurfaceElevated)
+                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                            }
+                        }
+                    }
+
+                    // Language
+                    SettingsSection(title: store.settings.language.ui.language) {
+                        SettingsRow(label: store.settings.language.ui.languageLabel) {
+                            HStack(spacing: 2) {
+                                ForEach(AppLanguage.allCases) { lang in
+                                    let selected = store.settings.language == lang
+                                    Button {
+                                        store.settings.language = lang
+                                        store.saveSettings()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(lang.flag)
+                                                .font(.system(size: 12))
+                                            Text(lang.label)
+                                                .font(.system(size: 10, weight: .medium))
+                                        }
+                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        Text(store.settings.language.ui.langDescription)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.kilnTextTertiary)
+                    }
+
+                    // Engram
+                    SettingsSection(title: store.settings.language.ui.memory) {
+                        SettingsRow(label: store.settings.language.ui.enableEngram) {
+                            Toggle("", isOn: Binding(
+                                get: { store.settings.useEngram },
+                                set: { store.settings.useEngram = $0; store.saveSettings() }
+                            ))
+                            .toggleStyle(.switch)
+                            .tint(Color.kilnAccent)
+                        }
+
+                        if store.settings.useEngram {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(store.settings.language.ui.systemPrompt)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Color.kilnTextSecondary)
+
+                                TextEditor(text: Binding(
+                                    get: { store.settings.systemPrompt },
+                                    set: { store.settings.systemPrompt = $0 }
+                                ))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Color.kilnText)
+                                .scrollContentBackground(.hidden)
+                                .padding(8)
+                                .frame(minHeight: 120)
+                                .background(Color.kilnBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorder, lineWidth: 1))
+
+                                HStack {
+                                    Button(store.settings.language.ui.resetToDefault) {
+                                        store.settings.systemPrompt = KilnSettings.defaultSystemPrompt
+                                        store.saveSettings()
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+
+                                    Spacer()
+
+                                    Button(store.settings.language.ui.save) {
+                                        store.saveSettings()
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Color.kilnAccent)
+                                }
+                            }
+                        }
+                    }
+
+                    // Appearance
+                    appearanceSection
+
+                    // Chat
+                    chatSection
+
+                    // Composer
+                    composerSection
+
+                    // MCP servers
+                    mcpSection
+
+                    // Advanced
+                    advancedSection
+
+                    // Notifications
+                    notificationsSection
+
+                    // Keyboard shortcuts
+                    shortcutsSection
+
+                    // Remote Control
+                    remoteControlSection
+
+                    // Warden Tunnel (expose Kiln / dev servers publicly)
+                    wardenTunnelSection
+
+                    // Live view of every running tunnel (Kiln + sessions)
+                    allTunnelsSection
+
+                    // Easter egg
+                    SettingsSection(title: "MISC") {
+                        // Export every session as a zip of markdown files.
+                        HStack {
+                            Text("Export all")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.kilnTextSecondary)
+                                .frame(width: 120, alignment: .leading)
+                            Spacer()
+                            Text("\(store.sessions.count) sessions")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                            Button("Export zip") {
+                                guard let zipURL = store.exportAllSessionsAsZip() else { return }
+                                let panel = NSSavePanel()
+                                panel.allowedContentTypes = [.zip]
+                                panel.nameFieldStringValue = "kiln-sessions-\(ISO8601DateFormatter().string(from: .now).prefix(10)).zip"
+                                if panel.runModal() == .OK, let dest = panel.url {
+                                    try? FileManager.default.removeItem(at: dest)
+                                    try? FileManager.default.copyItem(at: zipURL, to: dest)
+                                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.kilnAccentMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+
+                    }
+
+                    // About
+                    SettingsSection(title: store.settings.language.ui.about) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.kilnAccent, Color.kilnAccent.opacity(0.6)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 20, weight: .heavy))
+                                    .foregroundStyle(Color.kilnBg)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Kiln Code")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.kilnText)
+                                Text(store.settings.language.ui.tagline)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+                                Text(verbatim: "© \(Calendar.current.component(.year, from: .now)) Raya Creations")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+                            }
+                            Spacer()
+                            Text("v0.1.0")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                        }
+                    }
+                }
+                .padding(24)
+            }
+    }
+
+    // MARK: - Appearance
+
+    private var accentPresets: [(String, String)] {
+        [("f97316", "Orange"), ("ef4444", "Red"), ("eab308", "Yellow"),
+         ("22c55e", "Green"), ("3b82f6", "Blue"), ("a855f7", "Purple"),
+         ("ec4899", "Pink"), ("14b8a6", "Teal"), ("64748b", "Slate")]
+    }
+
+    @ViewBuilder
+    private var appearanceSection: some View {
+        SettingsSection(title: "APPEARANCE") {
+            // Identity — avatar + display name, shown on every user message.
+            SettingsRow(label: "You") {
+                UserIdentityEditor()
+                Spacer()
+            }
+
+            SettingsRow(label: "Accent") {
+                HStack(spacing: 6) {
+                    ForEach(accentPresets, id: \.0) { (hex, name) in
+                        let selected = store.settings.accentHex.lowercased() == hex.lowercased()
+                        Button {
+                            store.settings.accentHex = hex
+                            store.saveSettings()
+                        } label: {
+                            Circle()
+                                .fill(Color(hexString: hex))
+                                .frame(width: 20, height: 20)
+                                .overlay(Circle().stroke(selected ? Color.kilnText : Color.clear, lineWidth: 2))
+                                .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .help(name)
+                    }
+                }
+                Spacer()
+                TextField("hex", text: Binding(
+                    get: { store.settings.accentHex },
+                    set: { store.settings.accentHex = $0; store.saveSettings() }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 10, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .frame(width: 80)
+                .background(Color.kilnBg)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.kilnBorder, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+
+            SettingsRow(label: "Text size") {
+                pickRow(options: FontScale.allCases, current: store.settings.fontScale) { v in
+                    store.settings.fontScale = v; store.saveSettings()
+                } label: { $0.label }
+                Spacer()
+            }
+
+            SettingsRow(label: "Density") {
+                pickRow(options: Density.allCases, current: store.settings.density) { v in
+                    store.settings.density = v; store.saveSettings()
+                } label: { $0.label }
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Chat
+
+    @ViewBuilder
+    private var chatSection: some View {
+        SettingsSection(title: "CHAT") {
+            SettingsRow(label: "Avatars") {
+                Toggle("", isOn: Binding(
+                    get: { store.settings.showAvatars },
+                    set: { store.settings.showAvatars = $0; store.saveSettings() }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            SettingsRow(label: "Timestamps") {
+                pickRow(options: TimestampDisplay.allCases, current: store.settings.showTimestamps) { v in
+                    store.settings.showTimestamps = v; store.saveSettings()
+                } label: { $0.label }
+                Spacer()
+            }
+
+            SettingsRow(label: "Auto-scroll") {
+                Toggle("", isOn: Binding(
+                    get: { store.settings.autoScroll },
+                    set: { store.settings.autoScroll = $0; store.saveSettings() }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+                Text("Scroll to bottom as Claude streams")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+
+            SettingsRow(label: "Thinking") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.thinkingCollapsedByDefault },
+                    set: { store.settings.thinkingCollapsedByDefault = $0; store.saveSettings() }
+                )) {
+                    Text("Collapsed by default")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            SettingsRow(label: "Follow-ups") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.showFollowUpChips },
+                    set: { store.settings.showFollowUpChips = $0; store.saveSettings() }
+                )) {
+                    Text("Show suggestion chips in briefings")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Composer
+
+    @ViewBuilder
+    private var composerSection: some View {
+        SettingsSection(title: "COMPOSER") {
+            SettingsRow(label: "Send key") {
+                pickRow(options: SendKey.allCases, current: store.settings.sendKey) { v in
+                    store.settings.sendKey = v; store.saveSettings()
+                } label: { $0.label }
+                Spacer()
+            }
+
+            Text(store.settings.sendKey.subtitle)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.kilnTextTertiary)
+
+            SettingsRow(label: "Hint strip") {
+                pickRow(options: HintStripMode.allCases, current: store.settings.hintStripMode) { v in
+                    store.settings.hintStripMode = v; store.saveSettings()
+                } label: { $0.label }
+                Spacer()
+            }
+
+            SettingsRow(label: "Spell check") {
+                Toggle("", isOn: Binding(
+                    get: { store.settings.spellCheck },
+                    set: { store.settings.spellCheck = $0; store.saveSettings() }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            SettingsRow(label: "Placeholder") {
+                TextField(store.settings.language.ui.messagePlaceholder, text: Binding(
+                    get: { store.settings.composerPlaceholder },
+                    set: { store.settings.composerPlaceholder = $0; store.saveSettings() }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+        }
+    }
+
+    // MARK: - MCP Servers
+
+    @State private var mcpServers: [MCPServerInfo] = []
+
+    @ViewBuilder
+    private var mcpSection: some View {
+        SettingsSection(title: "MCP SERVERS") {
+            if mcpServers.isEmpty {
+                HStack {
+                    Text("No MCP servers found in \(MCPServerReader.claudeSettingsPath)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                    Spacer()
+                    Button("Reload") {
+                        mcpServers = MCPServerReader.loadAll()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.kilnAccent)
+                }
+            } else {
+                ForEach(mcpServers) { server in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: server.disabled ? "circle" : "circle.fill")
+                                .font(.system(size: 7))
+                                .foregroundStyle(server.disabled ? Color.kilnTextTertiary : Color.kilnSuccess)
+                            Text(server.name)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.kilnText)
+                            Text(server.kind)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.kilnSurface)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Spacer()
+                        }
+                        if let cmd = server.command {
+                            Text("\(cmd) \(server.args.joined(separator: " "))")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        if let u = server.url {
+                            Text(u)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        if !server.env.isEmpty {
+                            Text("env: \(server.env.keys.sorted().joined(separator: ", "))")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(Color.kilnTextTertiary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    if server.id != mcpServers.last?.id {
+                        Rectangle().fill(Color.kilnBorderSubtle).frame(height: 1)
+                    }
+                }
+                HStack {
+                    Button {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: MCPServerReader.claudeSettingsPath))
+                    } label: {
+                        Text("Edit ~/.claude.json")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Button("Reload") {
+                        mcpServers = MCPServerReader.loadAll()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .onAppear { mcpServers = MCPServerReader.loadAll() }
+    }
+
+    // MARK: - Advanced
+
+    @ViewBuilder
+    private var advancedSection: some View {
+        SettingsSection(title: "ADVANCED") {
+            SettingsRow(label: "Undo send") {
+                HStack(spacing: 8) {
+                    Stepper(value: Binding(
+                        get: { store.settings.undoSendWindow },
+                        set: { store.settings.undoSendWindow = max(0, min(30, $0)); store.saveSettings() }
+                    ), in: 0...30) {
+                        Text(store.settings.undoSendWindow == 0 ? "Off" : "\(store.settings.undoSendWindow)s")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color.kilnText)
+                    }
+                    .controlSize(.small)
+                }
+                Spacer()
+                Text("Delay before messages actually send")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+
+            SettingsRow(label: "Rate meter") {
+                HStack(spacing: 6) {
+                    TextField("", value: Binding(
+                        get: { UserDefaults.standard.integer(forKey: "rateLimit.softCap") == 0 ? 500_000 : UserDefaults.standard.integer(forKey: "rateLimit.softCap") },
+                        set: { UserDefaults.standard.set(max(10_000, $0), forKey: "rateLimit.softCap") }
+                    ), format: .number)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.kilnText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.kilnBg)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .frame(width: 110)
+                    Text("tokens / 5 min")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+                Spacer()
+                Text("Soft cap for the composer's rate meter. Default 500K.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+
+            SettingsRow(label: "Repo info") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.enableRepoAwareness },
+                    set: { store.settings.enableRepoAwareness = $0; store.saveSettings() }
+                )) {
+                    Text("Show git branch + dirty status in sidebar")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            SettingsRow(label: "Token heatmap") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.showTokenHeatmap },
+                    set: { store.settings.showTokenHeatmap = $0; store.saveSettings() }
+                )) {
+                    Text("Color-code message bars by estimated size")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("On-complete shell")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                TextEditor(text: Binding(
+                    get: { store.settings.onCompleteShellCommand },
+                    set: { store.settings.onCompleteShellCommand = $0 }
+                ))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(minHeight: 60)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.kilnBorder, lineWidth: 1))
+                Text("Runs when Claude finishes. Env: KILN_SESSION_NAME, KILN_WORKDIR, KILN_LAST_ASSISTANT_TEXT, …")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                HStack {
+                    Spacer()
+                    Button("Save") { store.saveSettings() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.kilnAccent)
+                }
+            }
+        }
+    }
+
+    // MARK: - Notifications
+
+    @ViewBuilder
+    private var notificationsSection: some View {
+        SettingsSection(title: "NOTIFICATIONS") {
+            SettingsRow(label: "On completion") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.notifyOnCompletion },
+                    set: { store.settings.notifyOnCompletion = $0; store.saveSettings() }
+                )) {
+                    Text("Notify when Claude finishes")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+            }
+
+            SettingsRow(label: "Sound") {
+                Toggle(isOn: Binding(
+                    get: { store.settings.notifySound },
+                    set: { store.settings.notifySound = $0; store.saveSettings() }
+                )) {
+                    Text("Play sound with notification")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                .disabled(!store.settings.notifyOnCompletion)
+                Spacer()
+            }
+
+            Text("Notifications only fire when Kiln is not the frontmost app.")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.kilnTextTertiary)
+        }
+    }
+
+    // MARK: - Keyboard shortcuts reference
+
+    private var shortcutRows: [(String, String)] {
+        [("⌘N", "New session"),
+         ("⌘K", "Command palette"),
+         ("⌘⇧F", "Search messages"),
+         ("⌘1 / ⌘2", "Code / Chat sidebar"),
+         ("⌘[ / ⌘]", "Previous / next session"),
+         ("⌘/", "Snippets"),
+         ("⌘,", "Settings"),
+         ("⌘⇧E", "Export chat"),
+         ("⌘⇧R", "Retry last"),
+         ("⌘.", "Interrupt"),
+         ("⌘W", "Close session")]
+    }
+
+    private var shortcutsSection: some View {
+        SettingsSection(title: "KEYBOARD SHORTCUTS") {
+            VStack(spacing: 4) {
+                ForEach(shortcutRows, id: \.0) { row in
+                    HStack {
+                        Text(row.0)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.kilnTextSecondary)
+                            .frame(width: 80, alignment: .leading)
+                        Text(row.1)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.kilnText)
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    // Helper — renders a horizontal pill picker for an enum.
+    @ViewBuilder
+    private func pickRow<T: Hashable>(options: [T], current: T, set: @escaping (T) -> Void, label: @escaping (T) -> String) -> some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { opt in
+                let selected = opt == current
+                Button { set(opt) } label: {
+                    Text(label(opt))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Remote Control Section
+
+    @ViewBuilder
+    private var remoteControlSection: some View {
+        SettingsSection(title: "REMOTE CONTROL") {
+            SettingsRow(label: "Enable") {
+                Toggle("", isOn: Binding(
+                    get: { store.remoteServer.isRunning },
+                    set: { enabled in
+                        UserDefaults.standard.set(enabled, forKey: "remote.enabled")
+                        if enabled { store.remoteServer.start() } else { store.remoteServer.stop() }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+
+                Spacer()
+
+                if let err = store.remoteServer.lastError {
+                    Text(err)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else if store.remoteServer.isRunning {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("running").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                }
+            }
+
+            SettingsRow(label: "Port") {
+                TextField("8421", text: Binding(
+                    get: { String(store.remoteServer.port) },
+                    set: { newVal in
+                        if let p = UInt16(newVal.trimmingCharacters(in: .whitespaces)) {
+                            store.remoteServer.port = p
+                            UserDefaults.standard.set(Int(p), forKey: "remote.port")
+                        }
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .frame(width: 90)
+
+                Spacer()
+            }
+
+            SettingsRow(label: "Token") {
+                SecureField("optional bearer token", text: Binding(
+                    get: { store.remoteServer.token },
+                    set: {
+                        store.remoteServer.token = $0
+                        UserDefaults.standard.set($0, forKey: "remote.token")
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+
+                Button {
+                    let t = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                    store.remoteServer.token = t
+                    UserDefaults.standard.set(t, forKey: "remote.token")
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .help("Generate new token")
+            }
+
+            SettingsRow(label: "Access") {
+                HStack(spacing: 2) {
+                    ForEach(RemoteAccessLevel.allCases, id: \.self) { level in
+                        let selected = store.remoteServer.accessLevel == level
+                        let (label, icon): (String, String) = {
+                            switch level {
+                            case .loopback: return ("local", "lock.shield")
+                            case .lan: return ("lan", "wifi")
+                            case .tailscale: return ("tailscale", "network")
+                            }
+                        }()
+                        Button {
+                            store.remoteServer.accessLevel = level
+                            store.remoteServer.allowLAN = (level != .loopback)
+                            UserDefaults.standard.set(level.rawValue, forKey: "remote.accessLevel")
+                            UserDefaults.standard.set(level != .loopback, forKey: "remote.allowLAN")
+                            if store.remoteServer.isRunning { store.remoteServer.start() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: icon).font(.system(size: 9))
+                                Text(label).font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Spacer()
+            }
+
+            // Tailscale status
+            if store.remoteServer.accessLevel == .tailscale {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(tailscaleStatusColor)
+                        .frame(width: 6, height: 6)
+                    Text("tailscale: \(store.remoteServer.tailscaleStatus)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                    Spacer()
+                    Button("Refresh") {
+                        Task { await store.remoteServer.refreshTailscale() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.kilnAccent)
+                }
+                if store.remoteServer.tailscaleStatus == "absent" {
+                    Text("Install Tailscale from tailscale.com, then log in to get a tailnet IP.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                } else if store.remoteServer.tailscaleStatus == "installed" {
+                    Text("Tailscale is installed but not logged in. Run: tailscale up")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+            }
+
+            // URL display
+            VStack(alignment: .leading, spacing: 6) {
+                Text("URLs")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .tracking(0.5)
+
+                urlRow(label: "local", url: "http://127.0.0.1:\(store.remoteServer.port)")
+
+                if store.remoteServer.accessLevel != .loopback, let lan = RemoteControlServer.localIPv4() {
+                    urlRow(label: "lan", url: "http://\(lan):\(store.remoteServer.port)")
+                }
+
+                if let ts = store.remoteServer.tailscaleIP {
+                    urlRow(label: "ts", url: "http://\(ts):\(store.remoteServer.port)")
+                }
+
+                Text("Tailscale gives you a global URL that works from any device on your tailnet. LAN is local network only. Loopback is this Mac only.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    // MARK: - Warden Tunnel Section
+
+    /// Exposes a publicly-reachable HTTPS URL for the Kiln remote server via
+    /// the user's own warden-tunnel-server deployment. Config is stored in
+    /// `WardenTunnelService.config` (UserDefaults) and loaded on launch.
+    @ViewBuilder
+    private var wardenTunnelSection: some View {
+        SettingsSection(title: "WARDEN TUNNEL") {
+            // Config — server, domain, scheme, psk path
+            SettingsRow(label: "Server") {
+                TextField("tunnel.example.com", text: Binding(
+                    get: { store.wardenTunnels.config.server },
+                    set: {
+                        store.wardenTunnels.config.server = $0
+                        store.wardenTunnels.saveConfig()
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+            }
+
+            SettingsRow(label: "Domain") {
+                TextField("example.com", text: Binding(
+                    get: { store.wardenTunnels.config.domain },
+                    set: {
+                        store.wardenTunnels.config.domain = $0
+                        store.wardenTunnels.saveConfig()
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+            }
+
+            SettingsRow(label: "Scheme") {
+                Picker("", selection: Binding(
+                    get: { store.wardenTunnels.config.scheme.isEmpty ? "wss" : store.wardenTunnels.config.scheme },
+                    set: {
+                        store.wardenTunnels.config.scheme = $0
+                        store.wardenTunnels.saveConfig()
+                    }
+                )) {
+                    Text("wss").tag("wss")
+                    Text("ws").tag("ws")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+                Spacer()
+            }
+
+            SettingsRow(label: "PSK file") {
+                TextField("~/.config/warden/psk", text: Binding(
+                    get: { store.wardenTunnels.config.pskPath },
+                    set: {
+                        store.wardenTunnels.config.pskPath = $0
+                        store.wardenTunnels.saveConfig()
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.allowsMultipleSelection = false
+                    panel.canChooseFiles = true
+                    panel.canChooseDirectories = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        store.wardenTunnels.config.pskPath = url.path
+                        store.wardenTunnels.saveConfig()
+                    }
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+            }
+
+            SettingsRow(label: "Insecure TLS") {
+                Toggle("", isOn: Binding(
+                    get: { store.wardenTunnels.config.insecure },
+                    set: {
+                        store.wardenTunnels.config.insecure = $0
+                        store.wardenTunnels.saveConfig()
+                    }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                Spacer()
+                Text("dev only — skips TLS verification")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+            }
+
+            Divider().background(Color.kilnBorderSubtle).padding(.vertical, 6)
+
+            // Kiln self-tunnel
+            let selfKey = TunnelOwner.kilnSelf.key
+            let selfState = store.wardenTunnels.tunnels[selfKey]
+
+            SettingsRow(label: "Tunnel Kiln") {
+                Toggle("", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "warden.tunnelKiln") },
+                    set: { enabled in
+                        UserDefaults.standard.set(enabled, forKey: "warden.tunnelKiln")
+                        if enabled {
+                            let sub = UserDefaults.standard.string(forKey: "warden.kilnSub").flatMap { $0.isEmpty ? nil : $0 }
+                            store.wardenTunnels.start(
+                                owner: .kilnSelf,
+                                target: "127.0.0.1:\(store.remoteServer.port)",
+                                sub: sub
+                            )
+                        } else {
+                            store.wardenTunnels.stop(owner: .kilnSelf)
+                        }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                .disabled(!store.wardenTunnels.config.isConfigured)
+
+                Spacer()
+
+                if let s = selfState {
+                    switch s.status {
+                    case .connecting:
+                        HStack(spacing: 4) {
+                            ProgressView().scaleEffect(0.5).frame(width: 14, height: 14)
+                            Text("connecting").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                        }
+                    case .ready:
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                            Text("up • \(s.requestCount) req").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                        }
+                    case .failed(let msg):
+                        Text(msg)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .lineLimit(1).truncationMode(.middle)
+                    case .idle:
+                        Text("idle").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                }
+            }
+
+            SettingsRow(label: "Subdomain") {
+                TextField("auto (random)", text: Binding(
+                    get: { UserDefaults.standard.string(forKey: "warden.kilnSub") ?? "" },
+                    set: { UserDefaults.standard.set($0, forKey: "warden.kilnSub") }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .frame(maxWidth: 240)
+                Spacer()
+            }
+
+            if let s = selfState, case .ready(let url) = s.status {
+                VStack(alignment: .leading, spacing: 6) {
+                    urlRow(label: "public", url: url)
+                    if !store.remoteServer.token.isEmpty {
+                        urlRow(label: "with token", url: "\(url)/?token=\(store.remoteServer.token)")
+                    }
+                }
+                .padding(.top, 6)
+            }
+
+            if !store.wardenTunnels.config.isConfigured {
+                Text("Configure a tunnel server + PSK above, then flip Tunnel Kiln on. Your server can be anywhere — warden-tunnel-server is a ~500 LoC Go binary that runs on any VPS.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    /// Unified list of every tunnel the service is currently managing —
+    /// Kiln's own remote server plus one entry per session that has its
+    /// tunnel toggle flipped on. Lets the user see everything at a glance
+    /// and kill any of them without hunting through per-session panels.
+    private var allTunnelsSection: some View {
+        SettingsSection(title: "ACTIVE TUNNELS") {
+            let entries = store.wardenTunnels.tunnels.values.sorted { a, b in
+                // Kiln-self first, then sessions alphabetically by target.
+                if a.owner == .kilnSelf { return true }
+                if b.owner == .kilnSelf { return false }
+                return a.target < b.target
+            }
+
+            if entries.isEmpty {
+                Text("No tunnels running. Flip \"Tunnel Kiln\" above or open a session's Tunnel panel to expose a dev server.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(entries) { entry in
+                        tunnelRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tunnelRow(_ s: TunnelState) -> some View {
+        let title: String = {
+            switch s.owner {
+            case .kilnSelf:
+                return "Kiln (remote control)"
+            case .session(let id):
+                if let name = store.sessions.first(where: { $0.id == id })?.name, !name.isEmpty {
+                    return name
+                }
+                return "session \(id.prefix(8))"
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: s.owner == .kilnSelf ? "gearshape.circle" : "network")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.kilnTextSecondary)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.kilnText)
+                    .lineLimit(1).truncationMode(.tail)
+
+                Text("→ \(s.target)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .lineLimit(1).truncationMode(.middle)
+
+                Spacer()
+
+                switch s.status {
+                case .connecting:
+                    HStack(spacing: 4) {
+                        ProgressView().scaleEffect(0.5).frame(width: 12, height: 12)
+                        Text("connecting").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                case .ready:
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("\(s.requestCount) req").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                case .failed(let msg):
+                    Text(msg)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .lineLimit(1).truncationMode(.middle)
+                case .idle:
+                    Text("idle").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                }
+
+                Button {
+                    // Clean stop via the service; for sessions also clear
+                    // the persisted "enabled" flag so it stays down across
+                    // restarts — matches what the per-session panel does.
+                    switch s.owner {
+                    case .kilnSelf:
+                        UserDefaults.standard.set(false, forKey: "warden.tunnelKiln")
+                        store.wardenTunnels.stop(owner: .kilnSelf)
+                    case .session(let id):
+                        store.stopSessionTunnel(sessionId: id)
+                    }
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .help("Stop tunnel")
+            }
+
+            if case .ready(let url) = s.status {
+                HStack(spacing: 6) {
+                    Text(url)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
+
+                    Spacer()
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(url, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.kilnTextSecondary)
+                            .frame(width: 22, height: 22)
+                            .background(Color.kilnSurfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy URL")
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.kilnSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.kilnBorderSubtle, lineWidth: 1))
+    }
+
+    private var tailscaleStatusColor: Color {
+        switch store.remoteServer.tailscaleStatus {
+        case "active": return .green
+        case "installed": return .yellow
+        case "absent": return Color.kilnTextTertiary
+        case "error": return Color.kilnError
+        default: return Color.kilnTextTertiary
+        }
+    }
+
+    @ViewBuilder
+    private func urlRow(label: String, url: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .tracking(0.5)
+                .frame(width: 32, alignment: .leading)
+
+            Text(url)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.kilnText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+
+            Button {
+                NSPasteboard.general.clearContents()
+                var s = url
+                if !store.remoteServer.token.isEmpty {
+                    s += "?t=\(store.remoteServer.token)"
+                }
+                NSPasteboard.general.setString(s, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.kilnSurfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .help("Copy URL with token")
+        }
+    }
+}
+
+// MARK: - Helpers
+
+struct SettingsSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .tracking(1)
+
+            VStack(alignment: .leading, spacing: 10) {
+                content
+            }
+            .padding(16)
+            .background(Color.kilnSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.kilnBorder, lineWidth: 1))
+        }
+    }
+}
+
+struct SettingsRow<Content: View>: View {
+    let label: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.kilnTextSecondary)
+                .frame(width: 90, alignment: .leading)
+            content
+        }
+    }
+}
+
+// MARK: - User Identity Editor
+//
+// Small settings UI that lets the user pick a custom avatar image and a
+// display name. Both are surfaced in every user message throughout the
+// chat. Uses AvatarStore so the NSImage cache stays hot.
+
+struct UserIdentityEditor: View {
+    @EnvironmentObject var store: AppStore
+    @ObservedObject private var avatars: AvatarStore = .shared
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Avatar preview + pick/clear controls
+            ZStack {
+                Circle()
+                    .fill(Color.kilnSurfaceElevated)
+                    .frame(width: 40, height: 40)
+                if let img = avatars.avatar {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 40, height: 40)
+                        .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+            }
+            .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
+            .onHover { hovering = $0 }
+            .onTapGesture { pickAvatar() }
+            .overlay {
+                if hovering {
+                    Circle()
+                        .fill(Color.black.opacity(0.5))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white)
+                        )
+                        .allowsHitTesting(false)
+                }
+            }
+            .help("Click to choose an image")
+
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Display name (default: You)", text: Binding(
+                    get: { store.settings.userDisplayName },
+                    set: { store.settings.userDisplayName = $0; store.saveSettings() }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.kilnBg)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .frame(width: 200)
+
+                HStack(spacing: 6) {
+                    Button(avatars.avatar == nil ? "Choose avatar" : "Change") { pickAvatar() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.kilnAccent)
+                    if avatars.avatar != nil {
+                        Text("·").foregroundStyle(Color.kilnTextTertiary)
+                        Button("Remove", role: .destructive) { clearAvatar() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.kilnError)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pickAvatar() {
+        if let newName = AvatarStore.shared.pickAndImport() {
+            // Clean up the old file so we don't accumulate stale avatars.
+            let old = store.settings.userAvatarFilename
+            if !old.isEmpty && old != newName {
+                let oldURL = FileManager.default
+                    .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                    .appendingPathComponent("Kiln/avatars")
+                    .appendingPathComponent(old)
+                try? FileManager.default.removeItem(at: oldURL)
+            }
+            store.settings.userAvatarFilename = newName
+            store.saveSettings()
+        }
+    }
+
+    private func clearAvatar() {
+        AvatarStore.shared.clear(filename: store.settings.userAvatarFilename)
+        store.settings.userAvatarFilename = ""
+        store.saveSettings()
+    }
+}
