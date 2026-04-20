@@ -70,6 +70,10 @@ final class AppStore: ObservableObject {
 
     // Overlays
     @Published var showCommandPalette = false
+    @Published var showQuickOpen = false
+    /// When non-nil, RightPanel's FileTreeView opens this absolute path
+    /// as a tab. Cleared after consumption.
+    @Published var quickOpenRequest: String?
     @Published var showGlobalSearch = false
     /// In-session find bar visibility (⌘F). Search text lives on ChatView.
     @Published var showInSessionFind = false

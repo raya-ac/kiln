@@ -387,6 +387,14 @@ struct FileTreeView: View {
         // tuple.
         .onChange(of: toolCallSignature) { _, _ in syncWithActiveToolCalls() }
         .onChange(of: liveInputSignature) { _, _ in syncLiveWriteContent() }
+        .onChange(of: store.quickOpenRequest) { _, new in
+            // Quick Open hands us an absolute path through the store; open it
+            // here, then clear the request so re-selecting the same file fires
+            // onChange again.
+            guard let path = new else { return }
+            openFile(at: path)
+            DispatchQueue.main.async { store.quickOpenRequest = nil }
+        }
         .onAppear {
             syncWithActiveToolCalls()
             syncLiveWriteContent()

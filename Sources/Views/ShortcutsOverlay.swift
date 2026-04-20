@@ -12,6 +12,7 @@ struct ShortcutsOverlay: View {
     private let groups: [(String, [(String, String)])] = [
         ("Navigation", [
             ("⌘K", "Command palette"),
+            ("⌘P", "Quick open file"),
             ("⌘⇧F", "Search all messages"),
             ("⌘F", "Find in current session"),
             ("⌘?", "This overlay"),

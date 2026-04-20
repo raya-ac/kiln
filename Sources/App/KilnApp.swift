@@ -33,6 +33,11 @@ struct KilnApp: App {
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
+                Button("Quick Open…") {
+                    store.showQuickOpen = true
+                }
+                .keyboardShortcut("p", modifiers: .command)
+
                 Button("Search Messages…") {
                     store.showGlobalSearch = true
                 }

@@ -274,6 +274,22 @@ struct ContentView: View {
                 .zIndex(10)
             }
 
+            if store.showQuickOpen {
+                ZStack {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture { store.showQuickOpen = false }
+                    VStack {
+                        Spacer().frame(height: 96)
+                        QuickOpenView()
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        Spacer()
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(10)
+            }
+
             if store.showShortcutsOverlay {
                 ZStack {
                     Color.black.opacity(0.4)
