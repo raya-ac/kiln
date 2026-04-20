@@ -141,23 +141,38 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 6. Optional codesign.
+# 6. Codesign. A Developer ID identity is preferred (enables notarization +
+# Gatekeeper approval for downloaded builds), but we ALWAYS fall back to an
+# ad-hoc seal (`-s -`). Without any codesign pass the linker-signed Mach-O
+# is left with a malformed resource seal — macOS then refuses to launch it
+# with "code has no resources but signature indicates they must be present".
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
-  if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
-    find "$APP/Contents/Frameworks/Sparkle.framework" -name '*.app' -o -name '*.xpc' \
-      | while read -r helper; do
-        codesign --force --options runtime --timestamp \
-          --sign "$CODESIGN_IDENTITY" "$helper"
-      done
-    codesign --force --options runtime --timestamp \
-      --sign "$CODESIGN_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
-  fi
-  codesign --force --deep --options runtime --timestamp \
-    --entitlements "$ROOT/scripts/Kiln.entitlements" \
-    --sign "$CODESIGN_IDENTITY" "$APP"
-  echo "signed with: $CODESIGN_IDENTITY"
+  IDENTITY="$CODESIGN_IDENTITY"
+  EXTRA_OPTS=(--options runtime --timestamp)
+  ENTITLEMENTS_OPT=(--entitlements "$ROOT/scripts/Kiln.entitlements")
+  echo "signing with: $IDENTITY"
 else
-  echo "skipping codesign (CODESIGN_IDENTITY not set)"
+  IDENTITY="-"
+  EXTRA_OPTS=()
+  ENTITLEMENTS_OPT=()
+  echo "signing ad-hoc (no CODESIGN_IDENTITY set)"
+fi
+
+if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
+  find "$APP/Contents/Frameworks/Sparkle.framework" \( -name '*.app' -o -name '*.xpc' \) \
+    | while read -r helper; do
+      codesign --force "${EXTRA_OPTS[@]}" --sign "$IDENTITY" "$helper"
+    done
+  codesign --force "${EXTRA_OPTS[@]}" --sign "$IDENTITY" \
+    "$APP/Contents/Frameworks/Sparkle.framework"
+fi
+codesign --force --deep "${EXTRA_OPTS[@]}" "${ENTITLEMENTS_OPT[@]}" \
+  --sign "$IDENTITY" "$APP"
+
+# Sanity check: the bundle should be fully sealed now.
+if ! codesign --verify --verbose=2 "$APP" 2>&1 | tail -5; then
+  echo "error: codesign verification failed for $APP" >&2
+  exit 1
 fi
 
 # 7. Zip the bundle. Filename carries the arch so Sparkle's generate_appcast
