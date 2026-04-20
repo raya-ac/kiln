@@ -739,9 +739,9 @@ struct LiveAssistantRow: View {
                     Circle()
                         .fill(Color.kilnAccentMuted)
                         .frame(width: 26, height: 26)
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 11, weight: .semibold))
+                    ClaudeMark()
                         .foregroundStyle(Color.kilnAccent)
+                        .frame(width: 14, height: 14)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -1844,12 +1844,42 @@ struct InSessionFindBar: View {
     }
 }
 
+// MARK: - Claude brand mark
+//
+// Wraps the bundled Anthropic Claude starburst PNG as a template-rendered
+// Image so it tints with the current foreground color. The PNG lives at
+// Sources/App/Resources/ClaudeMark.png and is a white silhouette with an
+// alpha mask — set `.foregroundStyle(...)` at the call site to colour it.
+
+struct ClaudeMark: View {
+    var body: some View {
+        if let url = Bundle.module.url(forResource: "ClaudeMark", withExtension: "png"),
+           let img = NSImage(contentsOf: url) {
+            let templated: NSImage = {
+                let copy = img.copy() as! NSImage
+                copy.isTemplate = true
+                return copy
+            }()
+            Image(nsImage: templated)
+                .resizable()
+                .renderingMode(.template)
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+        } else {
+            // Resource missing — fall back so the UI doesn't blank out.
+            Image(systemName: "sparkle")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        }
+    }
+}
+
 // MARK: - User / Claude Avatar
 //
-// 26pt circle rendered on every message row. Claude's side stays as the
-// accent-tinted sparkle glyph. The user's side shows a custom image when
-// one is set (from AvatarStore), otherwise falls back to the person.fill
-// icon. Reacts live when the user picks a new avatar.
+// 26pt circle rendered on every message row. Claude's side shows the
+// accent-tinted Claude starburst. The user's side shows a custom image
+// when one is set (from AvatarStore), otherwise falls back to the
+// person.fill icon. Reacts live when the user picks a new avatar.
 
 struct UserClaudeAvatar: View {
     let isUser: Bool
@@ -1867,10 +1897,14 @@ struct UserClaudeAvatar: View {
                     .aspectRatio(contentMode: .fill)
                     .frame(width: 26, height: 26)
                     .clipShape(Circle())
-            } else {
-                Image(systemName: isUser ? "person.fill" : "sparkle")
+            } else if isUser {
+                Image(systemName: "person.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isUser ? Color.kilnTextSecondary : Color.kilnAccent)
+                    .foregroundStyle(Color.kilnTextSecondary)
+            } else {
+                ClaudeMark()
+                    .foregroundStyle(Color.kilnAccent)
+                    .frame(width: 14, height: 14)
             }
         }
         .overlay(Circle().stroke(Color.kilnBorder, lineWidth: isUser && avatars.avatar != nil ? 1 : 0))

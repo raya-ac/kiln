@@ -1222,6 +1222,21 @@ final class AppStore: ObservableObject {
 
     /// Switch to the next / previous session (in the current sidebar tab,
     /// wrapping at the ends). Used by ⌘[ and ⌘].
+    /// Swap the `.chat` and `.tools` slots in the persisted panel order.
+    /// When tools (the editor/right panel) sits in the middle slot it takes
+    /// the flex-center position and chat docks to the side — the inverse
+    /// of the default layout. Writes directly to UserDefaults so that the
+    /// @AppStorage binding in ContentView picks it up.
+    func toggleEditorAsMain() {
+        let key = "panelOrder"
+        let raw = UserDefaults.standard.string(forKey: key) ?? "sessions,chat,tools"
+        var order = raw.split(separator: ",").map(String.init)
+        guard let ci = order.firstIndex(of: "chat"),
+              let ti = order.firstIndex(of: "tools") else { return }
+        order.swapAt(ci, ti)
+        UserDefaults.standard.set(order.joined(separator: ","), forKey: key)
+    }
+
     func navigateSession(direction: Int) {
         let list = sortedSessions.filter { $0.kind == selectedSidebarTab && !$0.isArchived }
         guard !list.isEmpty else { return }

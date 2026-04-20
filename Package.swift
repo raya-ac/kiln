@@ -32,6 +32,8 @@ let package = Package(
                 // checked in — only .gitkeep lives under monaco/ by default.
                 .copy("App/Resources/editor"),
                 .copy("App/Resources/monaco"),
+                // Claude brand mark, used as the assistant-side chat avatar.
+                .copy("App/Resources/ClaudeMark.png"),
             ]
         ),
         .testTarget(

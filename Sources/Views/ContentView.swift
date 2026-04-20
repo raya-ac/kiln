@@ -16,6 +16,10 @@ struct ContentView: View {
     @AppStorage("panelOrder") private var panelOrderRaw: String = "sessions,chat,tools"
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 220
     @AppStorage("rightPanelWidth") private var rightPanelWidth: Double = 420
+    /// Width of the chat panel when it's demoted from the center flex slot
+    /// into a sidebar position (i.e. the user dragged `.tools` into the
+    /// middle so the editor is main and chat lives on the side).
+    @AppStorage("chatSideWidth") private var chatSideWidth: Double = 460
     @AppStorage("sidebarCollapsed") private var sidebarCollapsed: Bool = false
     @AppStorage("rightPanelCollapsed") private var rightPanelCollapsed: Bool = false
 
@@ -28,6 +32,14 @@ struct ContentView: View {
     /// Minimum chat column width — prevents the right/left panels from being
     /// resized so wide they cover the chat and its toolbar. Enforced live.
     private let chatMin: Double = 420
+    /// Minimum width for the tools/editor slot when it's in the center flex
+    /// position. Monaco + the tabbed header need more room than chat does.
+    private let toolsCenterMin: Double = 520
+    /// Chat when docked to a side sidebar: narrower than its center form.
+    private let chatSideMin: Double = 360
+    private let chatSideMax: Double = 720
+    /// Width of a collapsed-rail slot.
+    private let railWidth: Double = 36
 
     @State private var dragTargetSlot: PanelSlot?
 
@@ -64,44 +76,132 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Position-based layout helpers
+    //
+    // Any visible slot can sit in the flex (center) position — that's what
+    // lets the user promote the editor (`.tools`) to main and demote chat
+    // to a sidebar. The flex slot is always at index `min(1, count - 1)`:
+    //   1 visible:  [flex]
+    //   2 visible:  [side, flex]
+    //   3 visible:  [side, flex, side]
+
+    private func flexIndex(for slots: [PanelSlot]) -> Int {
+        min(1, max(0, slots.count - 1))
+    }
+
+    /// Persisted width when this slot is docked as a sidebar.
+    private func sideWidth(for slot: PanelSlot) -> Double {
+        switch slot {
+        case .sessions: return sidebarWidth
+        case .chat:     return chatSideWidth
+        case .tools:    return rightPanelWidth
+        }
+    }
+
+    private func setSideWidth(_ w: Double, for slot: PanelSlot) {
+        switch slot {
+        case .sessions: sidebarWidth = w
+        case .chat:     chatSideWidth = w
+        case .tools:    rightPanelWidth = w
+        }
+    }
+
+    private func sideMin(for slot: PanelSlot) -> Double {
+        switch slot {
+        case .sessions: return sidebarMin
+        case .chat:     return chatSideMin
+        case .tools:    return rightMin
+        }
+    }
+
+    private func sideMax(for slot: PanelSlot) -> Double {
+        switch slot {
+        case .sessions: return sidebarMax
+        case .chat:     return chatSideMax
+        case .tools:    return rightMax
+        }
+    }
+
+    /// Minimum width this slot needs when it's the flex (center) slot.
+    private func centerMin(for slot: PanelSlot) -> Double {
+        switch slot {
+        case .sessions: return sidebarMax        // sessions center is odd; just clamp to its max side width
+        case .chat:     return chatMin
+        case .tools:    return toolsCenterMin
+        }
+    }
+
+    /// Chat doesn't collapse to a rail — user can drag it out of view instead.
+    private func isCollapsed(_ slot: PanelSlot) -> Bool {
+        switch slot {
+        case .sessions: return sidebarCollapsed
+        case .chat:     return false
+        case .tools:    return rightPanelCollapsed
+        }
+    }
+
+    /// Resolve widths for every visible slot. The flex slot takes whatever's
+    /// left after side slots reserve theirs; side slots get shrunk
+    /// proportionally if they'd push the flex slot below its minimum.
+    private func resolveWidths(slots: [PanelSlot], available: Double) -> [Double] {
+        if slots.isEmpty { return [] }
+        if slots.count == 1 { return [available] }
+        let flex = flexIndex(for: slots)
+        let flexSlot = slots[flex]
+        let fMin = centerMin(for: flexSlot)
+        var widths = [Double](repeating: 0, count: slots.count)
+
+        if slots.count == 2 {
+            let sideIdx = flex == 0 ? 1 : 0
+            let sideSlot = slots[sideIdx]
+            let raw: Double = isCollapsed(sideSlot) ? railWidth : sideWidth(for: sideSlot)
+            let clamped = min(raw, max(0, available - fMin))
+            widths[sideIdx] = clamped
+            widths[flex] = max(fMin, available - clamped)
+            return widths
+        }
+
+        // 3 slots: sides at 0 and 2, flex at 1.
+        let leftSlot = slots[0]
+        let rightSlot = slots[2]
+        let rawLeft: Double = isCollapsed(leftSlot) ? railWidth : sideWidth(for: leftSlot)
+        let rawRight: Double = isCollapsed(rightSlot) ? railWidth : sideWidth(for: rightSlot)
+        let leftFloor: Double = isCollapsed(leftSlot) ? railWidth : sideMin(for: leftSlot)
+        let rightFloor: Double = isCollapsed(rightSlot) ? railWidth : sideMin(for: rightSlot)
+
+        let left = min(rawLeft, max(leftFloor, available - fMin - rightFloor))
+        let right = min(rawRight, max(rightFloor, available - left - fMin))
+        let mid = max(fMin, available - left - right)
+
+        widths[0] = left
+        widths[1] = mid
+        widths[2] = right
+        return widths
+    }
+
     var body: some View {
         GeometryReader { geo in
-            // Compute effective widths for this frame, then write them back
-            // into state *once* per change (avoids re-render loops). Using
-            // task(id:) so mutations happen off the current render pass.
             let totalWidth = geo.size.width
-            let railWidth: Double = 36
             let dividerWidth: Double = 8
             let slots = visibleSlots
-            let slotCount = Double(slots.count)
-            let availableForPanels = max(0, totalWidth - dividerWidth * (slotCount - 1))
-
-            // Only reserve space for panels that are actually visible. When
-            // switching from a code session (tools visible) to a chat session
-            // (tools hidden), the freed space flows into the chat column.
-            let sessionsVisible = slots.contains(.sessions)
-            let toolsVisible = slots.contains(.tools)
-            let leftReserved: Double = sessionsVisible ? (sidebarCollapsed ? railWidth : min(sidebarWidth, availableForPanels - (toolsVisible ? (rightPanelCollapsed ? railWidth : rightMin) : 0) - chatMin)) : 0
-            let rightReserved: Double = toolsVisible ? (rightPanelCollapsed ? railWidth : min(rightPanelWidth, availableForPanels - leftReserved - chatMin)) : 0
-            let leftUsed = leftReserved
-            let rightUsed = rightReserved
-            let chatUsed = max(chatMin, availableForPanels - leftUsed - rightUsed)
+            let slotCount = max(1, slots.count)
+            let availableForPanels = max(0, totalWidth - dividerWidth * Double(slotCount - 1))
+            let widths = resolveWidths(slots: slots, available: availableForPanels)
 
             HStack(spacing: 0) {
-                let slots = visibleSlots
                 ForEach(Array(slots.enumerated()), id: \.element) { idx, slot in
-                    renderSlot(slot, chatWidth: chatUsed, leftWidth: leftUsed, rightWidth: rightUsed)
+                    renderSlot(slot, width: idx < widths.count ? widths[idx] : 0)
 
-                if idx < slots.count - 1 {
-                    let leftSlot = slot
-                    let rightSlot = slots[idx + 1]
-                    ResizableDivider(
-                        collapseSide: dividerCollapseSide(left: leftSlot, right: rightSlot),
-                        showCollapseButton: dividerShouldShowCollapseButton(left: leftSlot, right: rightSlot),
-                        onDrag: { delta in handleDrag(leftSlot: leftSlot, rightSlot: rightSlot, delta: delta) },
-                        onCollapse: { collapseAdjacentPanel(left: leftSlot, right: rightSlot) }
-                    )
-                }
+                    if idx < slots.count - 1 {
+                        let leftSlot = slot
+                        let rightSlot = slots[idx + 1]
+                        ResizableDivider(
+                            collapseSide: dividerCollapseSide(left: leftSlot, right: rightSlot),
+                            showCollapseButton: dividerShouldShowCollapseButton(left: leftSlot, right: rightSlot),
+                            onDrag: { delta in handleDrag(leftSlot: leftSlot, rightSlot: rightSlot, delta: delta) },
+                            onCollapse: { collapseAdjacentPanel(left: leftSlot, right: rightSlot) }
+                        )
+                    }
                 }
             }
         } // GeometryReader
@@ -200,7 +300,7 @@ struct ContentView: View {
     // MARK: - Slot rendering
 
     @ViewBuilder
-    private func renderSlot(_ slot: PanelSlot, chatWidth: Double, leftWidth: Double, rightWidth: Double) -> some View {
+    private func renderSlot(_ slot: PanelSlot, width: Double) -> some View {
         switch slot {
         case .sessions:
             if sidebarCollapsed {
@@ -214,7 +314,7 @@ struct ContentView: View {
             } else {
                 draggablePanel(slot: .sessions) {
                     SidebarView()
-                        .frame(width: leftWidth)
+                        .frame(width: width)
                 }
             }
 
@@ -222,12 +322,12 @@ struct ContentView: View {
             if store.activeSession != nil || store.playingVideo != nil {
                 draggablePanel(slot: .chat) {
                     MainTabbedView()
-                        .frame(width: chatWidth)
+                        .frame(width: width)
                         .frame(maxHeight: .infinity)
                 }
             } else {
                 EmptyStateView()
-                    .frame(width: chatWidth)
+                    .frame(width: width)
                     .frame(maxHeight: .infinity)
             }
 
@@ -243,20 +343,19 @@ struct ContentView: View {
             } else {
                 draggablePanel(slot: .tools) {
                     RightPanel()
-                        .frame(width: rightWidth)
+                        .frame(width: width)
                         .clipped()
                 }
             }
         }
     }
 
+    /// Collapsed-rail chevron points toward the flex (center) slot — that's
+    /// where the expanded content would appear.
     private func railSide(for slot: PanelSlot) -> CollapsedRail.Side {
-        // Point the chevron toward where its expanded content would appear —
-        // i.e., toward the chat, which is wherever the chat slot currently sits.
-        guard let myIdx = visibleSlots.firstIndex(of: slot),
-              let chatIdx = visibleSlots.firstIndex(of: .chat)
-        else { return .left }
-        return chatIdx > myIdx ? .left : .right
+        let slots = visibleSlots
+        guard let myIdx = slots.firstIndex(of: slot) else { return .left }
+        return flexIndex(for: slots) > myIdx ? .left : .right
     }
 
     // MARK: - Drag + drop for reordering
@@ -287,57 +386,72 @@ struct ContentView: View {
     }
 
     // MARK: - Divider resize logic
+    //
+    // Dragging a divider always resizes the adjacent *side* slot (the flex
+    // slot absorbs the rest). Positive delta = divider moved right → grows
+    // the slot on its left, shrinks the slot on its right.
 
     private func handleDrag(leftSlot: PanelSlot, rightSlot: PanelSlot, delta: CGFloat) {
-        // Prefer resizing a fixed-width panel. Chat is flexible.
-        switch (leftSlot, rightSlot) {
-        case (.chat, .tools):
-            rightPanelWidth = clamp(rightPanelWidth - Double(delta), rightMin, rightMax)
-        case (.chat, .sessions):
-            sidebarWidth = clamp(sidebarWidth - Double(delta), sidebarMin, sidebarMax)
-        case (.tools, .chat):
-            rightPanelWidth = clamp(rightPanelWidth + Double(delta), rightMin, rightMax)
-        case (.sessions, .chat):
-            sidebarWidth = clamp(sidebarWidth + Double(delta), sidebarMin, sidebarMax)
-        case (.sessions, .tools), (.tools, .sessions):
-            // Two fixed panels adjacent — resize the left one
-            if leftSlot == .sessions {
-                sidebarWidth = clamp(sidebarWidth + Double(delta), sidebarMin, sidebarMax)
-            } else {
-                rightPanelWidth = clamp(rightPanelWidth + Double(delta), rightMin, rightMax)
-            }
-        default:
-            break
+        let slots = visibleSlots
+        guard let leftIdx = slots.firstIndex(of: leftSlot),
+              let rightIdx = slots.firstIndex(of: rightSlot) else { return }
+        let flex = flexIndex(for: slots)
+
+        if leftIdx == flex {
+            // Right side is the fixed one — shrink on positive delta.
+            let neu = clamp(sideWidth(for: rightSlot) - Double(delta),
+                            sideMin(for: rightSlot), sideMax(for: rightSlot))
+            setSideWidth(neu, for: rightSlot)
+        } else if rightIdx == flex {
+            // Left side is the fixed one — grow on positive delta.
+            let neu = clamp(sideWidth(for: leftSlot) + Double(delta),
+                            sideMin(for: leftSlot), sideMax(for: leftSlot))
+            setSideWidth(neu, for: leftSlot)
+        } else {
+            // Neither neighbour is flex — unreachable with the current
+            // flexIndex rule (1 <= flex < count), but be defensive.
+            let neu = clamp(sideWidth(for: leftSlot) + Double(delta),
+                            sideMin(for: leftSlot), sideMax(for: leftSlot))
+            setSideWidth(neu, for: leftSlot)
         }
     }
 
     private func dividerCollapseSide(left: PanelSlot, right: PanelSlot) -> ResizableDivider.CollapseSide {
-        // Chevron points toward the panel that would be collapsed.
-        if left == .chat { return .right }
-        if right == .chat { return .left }
-        // Two fixed panels — point toward the left one by default
-        return .left
+        // Chevron points toward the panel that would be collapsed (the side slot).
+        let slots = visibleSlots
+        guard let leftIdx = slots.firstIndex(of: left) else { return .left }
+        return leftIdx == flexIndex(for: slots) ? .right : .left
     }
 
     private func dividerShouldShowCollapseButton(left: PanelSlot, right: PanelSlot) -> Bool {
-        left != .chat || right != .chat
+        // Only the side slot can collapse to a rail, and chat doesn't have
+        // a rail form — hide the chevron if the target would be chat.
+        let slots = visibleSlots
+        guard let leftIdx = slots.firstIndex(of: left),
+              let rightIdx = slots.firstIndex(of: right) else { return false }
+        let flex = flexIndex(for: slots)
+        let target: PanelSlot
+        if leftIdx == flex { target = right }
+        else if rightIdx == flex { target = left }
+        else { return false }
+        return target != .chat
     }
 
     private func collapseAdjacentPanel(left: PanelSlot, right: PanelSlot) {
-        // Collapse the fixed-width panel adjacent to this divider.
+        let slots = visibleSlots
+        guard let leftIdx = slots.firstIndex(of: left),
+              let rightIdx = slots.firstIndex(of: right) else { return }
+        let flex = flexIndex(for: slots)
         let target: PanelSlot
-        if left == .chat {
-            target = right
-        } else if right == .chat {
-            target = left
-        } else {
-            target = left
-        }
+        if leftIdx == flex { target = right }
+        else if rightIdx == flex { target = left }
+        else { return }
+
         withAnimation(.easeInOut(duration: 0.18)) {
             switch target {
             case .sessions: sidebarCollapsed = true
             case .tools: rightPanelCollapsed = true
-            case .chat: break
+            case .chat: break  // chat has no rail form
             }
         }
     }
