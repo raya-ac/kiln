@@ -1,0 +1,3 @@
+# The `vs/` sibling is fetched by scripts/fetch-monaco.sh (or `make monaco`)
+# and not checked in — this file exists so SPM's resource declaration has a
+# stable path on fresh clones.
