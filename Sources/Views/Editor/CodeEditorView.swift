@@ -10,6 +10,15 @@ import WebKit
 //
 // Public API is unchanged from the previous NSTextView implementation so
 // RightPanel (and any other callsite) compiles without edits.
+//
+// Guardrails (after an earlier crashy build):
+//   * No private KVC. `allowFileAccessFromFileURLs` etc. are removed —
+//     `loadFileURL:allowingReadAccessTo:` is enough for sibling <script>
+//     loads. `drawsBackground` is replaced by `underPageBackgroundColor`.
+//   * Host loading is deferred to `updateNSView` via async dispatch so any
+//     exception never propagates inside a SwiftUI/AppKit layout pass.
+//   * If the runtime hasn't been fetched yet we render an inline HTML
+//     message instead of failing silently; user knows to run `make monaco`.
 
 struct CodeEditorView: NSViewRepresentable {
     @Binding var text: String
@@ -24,22 +33,30 @@ struct CodeEditorView: NSViewRepresentable {
         let ucc = WKUserContentController()
         ucc.add(context.coordinator, name: "kiln")
         config.userContentController = ucc
-        // Allow file:// pages loaded via loadFileURL: to read sibling assets.
-        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
-        config.preferences.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
 
         let web = WKWebView(frame: .zero, configuration: config)
-        web.setValue(false, forKey: "drawsBackground")   // avoid white flash on load
+        // Match Monaco's dark theme so there's no white flash on first paint.
+        web.underPageBackgroundColor = NSColor(red: 0x1a/255.0, green: 0x1a/255.0, blue: 0x1a/255.0, alpha: 1)
         web.navigationDelegate = context.coordinator
         context.coordinator.webView = web
-
-        loadHost(into: web)
         return web
     }
 
     func updateNSView(_ web: WKWebView, context: Context) {
         let coord = context.coordinator
         coord.parent = self
+
+        // Defer initial load off the current layout pass. Loading a file URL
+        // synchronously inside makeNSView raised under macOS 26's layout
+        // engine. Dispatching to main gets us past the current commit.
+        if !coord.loadRequested {
+            coord.loadRequested = true
+            DispatchQueue.main.async { [weak coord, weak web] in
+                guard let coord, let web else { return }
+                Self.loadHost(into: web, coord: coord)
+            }
+        }
+
         guard coord.ready else { return }
         coord.push(text: text, language: Self.monacoLanguage(for: language), editable: isEditable)
     }
@@ -48,15 +65,57 @@ struct CodeEditorView: NSViewRepresentable {
         web.configuration.userContentController.removeScriptMessageHandler(forName: "kiln")
     }
 
-    private func loadHost(into web: WKWebView) {
-        guard let url = Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "App/Resources/editor")
-                ?? Bundle.module.url(forResource: "index", withExtension: "html") else {
+    private static func loadHost(into web: WKWebView, coord: Coordinator) {
+        // Find the editor host page bundled by SPM.
+        let candidates = [
+            Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "App/Resources/editor"),
+            Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "editor"),
+            Bundle.module.url(forResource: "index", withExtension: "html"),
+        ]
+        guard let url = candidates.compactMap({ $0 }).first else {
+            web.loadHTMLString(Self.fallbackHTML(
+                title: "Editor resources missing",
+                body: "Could not find <code>App/Resources/editor/index.html</code> in the app bundle.<br>Rebuild with <code>swift build</code>."
+            ), baseURL: nil)
             return
         }
-        // Grant read access to the bundle resource root so Monaco's ../monaco/vs/
-        // relative load resolves. Walk two parents up from the host html.
+
+        // Check that the Monaco runtime was fetched. The host page expects
+        // `../monaco/vs/loader.js` relative to itself.
+        let vsLoader = url
+            .deletingLastPathComponent()           // editor/
+            .deletingLastPathComponent()           // Resources bundle root
+            .appendingPathComponent("monaco/vs/loader.js")
+        if !FileManager.default.fileExists(atPath: vsLoader.path) {
+            web.loadHTMLString(Self.fallbackHTML(
+                title: "Monaco runtime missing",
+                body: "Run <code>make monaco</code> once to fetch the editor runtime (~13 MB), then rebuild."
+            ), baseURL: nil)
+            return
+        }
+
+        // Grant read access to the bundle resource root so Monaco's
+        // `../monaco/vs/` relative load resolves.
         let root = url.deletingLastPathComponent().deletingLastPathComponent()
         web.loadFileURL(url, allowingReadAccessTo: root)
+        coord.hostLoaded = true
+    }
+
+    /// Themed error card — same palette as the Monaco dark theme so the
+    /// editor pane doesn't flash bright when resources are missing.
+    private static func fallbackHTML(title: String, body: String) -> String {
+        """
+        <!doctype html>
+        <html><head><meta charset="utf-8"><style>
+          html, body { height: 100%; margin: 0; background: #1a1a1a; color: #e6e6e6;
+            font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+          .card { padding: 24px 28px; max-width: 520px; margin: 40px auto; }
+          h1 { font-size: 14px; color: #ff7a45; margin: 0 0 8px; letter-spacing: 0.02em; }
+          p { color: #9a9a9a; margin: 0; line-height: 1.55; }
+          code { background: #262626; padding: 1px 6px; border-radius: 3px; color: #e6e6e6; }
+        </style></head>
+        <body><div class="card"><h1>\(title)</h1><p>\(body)</p></div></body></html>
+        """
     }
 
     // MARK: - Language mapping
@@ -116,6 +175,8 @@ struct CodeEditorView: NSViewRepresentable {
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var parent: CodeEditorView
         weak var webView: WKWebView?
+        var loadRequested = false
+        var hostLoaded = false
         var ready = false
         private var lastPushedText: String = ""
         private var lastPushedLang: String = ""
