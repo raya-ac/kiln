@@ -1,0 +1,141 @@
+<!doctype html>
+<!--
+  Monaco host page. Loaded by CodeEditorView.swift via loadFileURL:. The
+  AMD loader lives one directory up at ../monaco/vs/loader.js; everything
+  is served off disk so there's no network round-trip and no CORS surface.
+
+  Bridge:
+    Swift  → JS   kiln.setText(text)
+                   kiln.setLanguage(lang)
+                   kiln.setEditable(bool)
+                   kiln.setTheme('kiln-dark' | 'kiln-light')
+    JS     → Swift  webkit.messageHandlers.kiln.postMessage({ kind, ... })
+                     kind: 'ready'    — loader finished, editor is up
+                     kind: 'change'   — { text } — user typed
+                     kind: 'save'     — ⌘S pressed
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body, #editor {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1e1e1e;
+      }
+      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <script src="../monaco/vs/loader.js"></script>
+    <script>
+      // Loader can't talk to the file:// paths we're serving from without
+      // this shim — it expects absolute URLs for worker construction.
+      var baseUrl = new URL('../monaco/', document.baseURI).href;
+      require.config({ paths: { vs: baseUrl + 'vs' } });
+
+      // Workers don't work out of the box from file:// — route them through
+      // a blob so Monaco still gets its language services off the main
+      // thread without needing an HTTP server.
+      self.MonacoEnvironment = {
+        getWorkerUrl: function (_workerId, _label) {
+          return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(
+            'self.MonacoEnvironment = { baseUrl: "' + baseUrl + '" };' +
+            'importScripts("' + baseUrl + 'vs/base/worker/workerMain.js");'
+          );
+        }
+      };
+
+      function post(msg) {
+        try { window.webkit.messageHandlers.kiln.postMessage(msg); } catch (_) {}
+      }
+
+      require(['vs/editor/editor.main'], function () {
+        // Dark theme tuned to the Kiln palette (roughly matches the
+        // sidebar/surface tokens in Theme.swift).
+        monaco.editor.defineTheme('kiln-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [],
+          colors: {
+            'editor.background': '#1a1a1a',
+            'editor.foreground': '#e6e6e6',
+            'editorLineNumber.foreground': '#4a4a4a',
+            'editorLineNumber.activeForeground': '#9a9a9a',
+            'editor.selectionBackground': '#3a3a3a',
+            'editor.lineHighlightBackground': '#222222',
+            'editorCursor.foreground': '#ff7a45',
+            'editorGutter.background': '#1a1a1a',
+            'editorIndentGuide.background': '#262626',
+            'editorIndentGuide.activeBackground': '#3a3a3a'
+          }
+        });
+        monaco.editor.defineTheme('kiln-light', {
+          base: 'vs',
+          inherit: true,
+          rules: [],
+          colors: {
+            'editor.background': '#ffffff',
+            'editor.foreground': '#1a1a1a',
+            'editorCursor.foreground': '#ff7a45'
+          }
+        });
+
+        var editor = monaco.editor.create(document.getElementById('editor'), {
+          value: '',
+          language: 'plaintext',
+          theme: 'kiln-dark',
+          automaticLayout: true,
+          fontFamily: 'ui-monospace, SF Mono, Menlo, Monaco, monospace',
+          fontSize: 13,
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          smoothScrolling: true,
+          renderLineHighlight: 'line',
+          roundedSelection: false,
+          tabSize: 4,
+          wordWrap: 'off',
+          bracketPairColorization: { enabled: true },
+          guides: { bracketPairs: true, indentation: true }
+        });
+
+        // ⌘S → Swift. Monaco swallows the browser default, so we have to
+        // register it explicitly.
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+          post({ kind: 'save' });
+        });
+
+        var suppressChange = false;
+        editor.getModel().onDidChangeContent(function () {
+          if (suppressChange) return;
+          post({ kind: 'change', text: editor.getValue() });
+        });
+
+        window.kiln = {
+          setText: function (text) {
+            if (editor.getValue() === text) return;
+            suppressChange = true;
+            editor.setValue(text);
+            suppressChange = false;
+          },
+          setLanguage: function (lang) {
+            var model = editor.getModel();
+            if (model) monaco.editor.setModelLanguage(model, lang || 'plaintext');
+          },
+          setEditable: function (editable) {
+            editor.updateOptions({ readOnly: !editable });
+          },
+          setTheme: function (name) {
+            monaco.editor.setTheme(name || 'kiln-dark');
+          }
+        };
+
+        post({ kind: 'ready' });
+      });
+    </script>
+  </body>
+</html>
