@@ -4,6 +4,21 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.4.3] — 2026-04-21
+
+### Added
+- **`@file` picker in the composer** — type `@` anywhere in your prompt
+  and a file-reference picker appears, listing files from the active
+  session's workdir. Typing filters fuzzy-style (subsequence match with
+  bonuses for prefix, word-boundary, and filename hits). Arrow keys
+  navigate, Return/Tab picks, Esc cancels. Selecting inserts
+  `@relative/path` — Claude Code treats the `@` prefix as a file
+  reference, so the result is a direct handoff, no copy-paste dance.
+- **Skips the noise** — the picker walks the workdir once (cached for
+  10 s, re-walks on stale), pruning `.git`, `node_modules`, `build`,
+  virtualenvs, IDE metadata and the usual suspects so a monorepo
+  doesn't drown the dropdown.
+
 ## [1.4.2] — 2026-04-21
 
 Everything-under-the-sun edition for the editor. If you can name it, Kiln

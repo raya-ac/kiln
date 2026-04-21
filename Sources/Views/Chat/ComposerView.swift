@@ -13,6 +13,10 @@ struct ComposerView: View {
     /// command popup. Selection state lives here so arrow keys can navigate.
     @State private var slashSelectedIndex: Int = 0
 
+    /// `@file` picker selection — mirrors slashSelectedIndex but for the
+    /// file-reference popup. Reset to 0 whenever the query changes.
+    @State private var atSelectedIndex: Int = 0
+
     /// Prompt history navigation: index into `PromptHistoryStore.entries`.
     /// -1 means "not browsing history"; 0 = most recent prompt.
     @State private var historyIndex: Int = -1
@@ -41,6 +45,18 @@ struct ComposerView: View {
                     matches: matches,
                     selected: $slashSelectedIndex,
                     onPick: { cmd in insertSlashCommand(cmd) }
+                )
+            }
+
+            // @file picker — appears inline when the user types `@<query>`
+            // anywhere in the input. Slash popup wins when both are active
+            // (you can't start input with `/` and also have an `@` token,
+            // so the conflict is theoretical, but be explicit).
+            if slashMatches == nil, let atMatches = atMatches, !atMatches.isEmpty {
+                AtFilePopup(
+                    matches: atMatches,
+                    selected: $atSelectedIndex,
+                    onPick: { path in insertAtFile(path) }
                 )
             }
 
@@ -121,6 +137,11 @@ struct ComposerView: View {
                                 insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
                                 return
                             }
+                            // @file popup — Enter picks the highlighted path.
+                            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
+                                return
+                            }
                             if store.settings.sendKey == .enter { send() }
                             else { input += "\n" }
                         }
@@ -143,11 +164,19 @@ struct ComposerView: View {
                         .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .tiff]) { providers in
                             handlePaste(providers)
                         }
-                        .onChange(of: input) { _, _ in slashSelectedIndex = 0 }
+                        .onChange(of: input) { _, _ in
+                            slashSelectedIndex = 0
+                            atSelectedIndex = 0
+                        }
                         .onKeyPress(.upArrow) {
                             // Slash popup takes priority.
                             if let matches = slashMatches, !matches.isEmpty {
                                 slashSelectedIndex = max(0, slashSelectedIndex - 1)
+                                return .handled
+                            }
+                            // @file popup — up/down within the match list.
+                            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                                atSelectedIndex = max(0, atSelectedIndex - 1)
                                 return .handled
                             }
                             // History recall — only when input is empty or already browsing.
@@ -164,6 +193,10 @@ struct ComposerView: View {
                                 slashSelectedIndex = min(matches.count - 1, slashSelectedIndex + 1)
                                 return .handled
                             }
+                            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                                atSelectedIndex = min(atMatchList.count - 1, atSelectedIndex + 1)
+                                return .handled
+                            }
                             guard historyIndex >= 0 else { return .ignored }
                             let entries = PromptHistoryStore.shared.entries
                             historyIndex -= 1
@@ -178,6 +211,16 @@ struct ComposerView: View {
                         .onKeyPress(.escape) {
                             // Clear the / at the front to dismiss the popup.
                             if slashMatches != nil { input = ""; return .handled }
+                            // @file popup — escape removes the trailing
+                            // `@query` token so the user drops back to
+                            // normal typing without losing prior text.
+                            if let token = AtTokenScanner.current(in: input),
+                               atMatches != nil {
+                                input = AtTokenScanner.replace(token, with: "", in: input)
+                                    .replacingOccurrences(of: "@  ", with: " ")
+                                    .trimmingCharacters(in: .whitespaces)
+                                return .handled
+                            }
                             // Exit history browse mode cleanly.
                             if historyIndex >= 0 {
                                 input = savedDraft
@@ -188,9 +231,15 @@ struct ComposerView: View {
                             return .ignored
                         }
                         .onKeyPress(.tab) {
-                            guard let matches = slashMatches, !matches.isEmpty else { return .ignored }
-                            insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
-                            return .handled
+                            if let matches = slashMatches, !matches.isEmpty {
+                                insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
+                                return .handled
+                            }
+                            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
+                                return .handled
+                            }
+                            return .ignored
                         }
                 }
                 .padding(.horizontal, 14)
@@ -346,6 +395,32 @@ struct ComposerView: View {
     private func insertSlashCommand(_ cmd: SlashCommand) {
         input = cmd.label + " "
         slashSelectedIndex = 0
+        isFocused = true
+    }
+
+    /// Fuzzy-matched file list for the in-progress `@` token, or nil if
+    /// no `@` token is active. Pulls files from the active session's
+    /// workdir — switching sessions picks up a new list on next keystroke.
+    private var atMatches: [String]? {
+        guard let token = AtTokenScanner.current(in: input) else { return nil }
+        guard let session = store.activeSession else { return nil }
+        let paths = WorkdirFileIndex.shared.paths(for: session.workDir)
+        guard !paths.isEmpty else { return nil }
+        let ranked = FuzzyScorer.rank(paths: paths, query: token.query, limit: 8)
+        return ranked.isEmpty ? nil : ranked
+    }
+
+    /// Replace the in-progress `@query` token with `@path` and resume
+    /// typing. Preserves the rest of the input (before and after the
+    /// token) exactly. If the token scanner can't locate the token,
+    /// fall back to appending — better than silently doing nothing.
+    private func insertAtFile(_ path: String) {
+        if let token = AtTokenScanner.current(in: input) {
+            input = AtTokenScanner.replace(token, with: path, in: input)
+        } else {
+            input += "@" + path + " "
+        }
+        atSelectedIndex = 0
         isFocused = true
     }
 
