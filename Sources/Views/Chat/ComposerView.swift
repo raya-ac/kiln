@@ -249,10 +249,24 @@ struct ComposerView: View {
                     }
                     Spacer()
                     if !input.isEmpty {
+                        Button {
+                            input = ""
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 9))
+                                Text("clear")
+                                    .font(.system(size: 9))
+                            }
+                            .foregroundStyle(Color.kilnTextTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear the draft")
+
                         Text(composerCountLabel)
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(Color.kilnTextTertiary)
-                            .help("Characters and words in the draft")
+                            .help("Characters, words, and a rough token estimate for the draft")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -348,7 +362,10 @@ struct ComposerView: View {
         let words = input
             .split(whereSeparator: { $0.isWhitespace })
             .count
-        return "\(chars) chars · \(words) words"
+        // Rough token estimate: ~4 chars per token. Not exact for code or
+        // non-English text but close enough to gauge prompt cost at a glance.
+        let toks = max(1, (chars + 3) / 4)
+        return "\(chars) chars · \(words) words · ~\(toks) tok"
     }
 
     private var shouldShowHintStrip: Bool {
@@ -449,6 +466,25 @@ struct ComposerView: View {
             }
         case "/focus":
             store.toggleFocusMode()
+        case "/reload":
+            store.reloadFromDisk()
+        case "/link":
+            if let id = store.activeSessionId { store.copySessionLink(id) }
+        case "/merge":
+            _ = store.bulkMerge()
+        case "/rename":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, let id = store.activeSessionId {
+                store.renameSession(id, name: name)
+            }
+        case "/color":
+            let name = arg.trimmingCharacters(in: .whitespaces).lowercased()
+            guard let id = store.activeSessionId else { break }
+            if name == "none" || name.isEmpty {
+                store.setSessionColor(id, color: nil)
+            } else if SessionColor.color(for: name) != nil {
+                store.setSessionColor(id, color: name)
+            }
         case "/search":
             let q = arg.trimmingCharacters(in: .whitespaces)
             if !q.isEmpty {
@@ -794,7 +830,7 @@ struct ModelPill: View {
 
     private var modelColor: Color {
         switch model {
-        case .opus47, .opus46: Color(hex: 0xD97706)   // deep amber
+        case .opus47: Color(hex: 0xD97706)   // deep amber
         case .sonnet46: Color.kilnAccent
         case .haiku45: Color(hex: 0x8B8B8E)  // muted gray
         }

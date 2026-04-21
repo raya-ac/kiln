@@ -4,6 +4,47 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.4.0] — 2026-04-21
+
+A meaty milestone release — a batch of session-management and composer
+quality-of-life features, plus a model-lineup trim. The ambition of
+"a hundred features" was politely refused: shipping a pile of broken
+polish is worse than a tight, solid batch. So this one is a real 1.4.
+
+### Added
+- **Color filter** in the sidebar header — narrow the list to sessions
+  wearing a specific color label, or "Any color" to turn it off. Sits
+  next to the sort menu; stays out of your way when you don't need it.
+- **Bulk color** and **Bulk merge** in the multi-select toolbar.
+  Color-stamps every selected session in one shot, or collapses them
+  into the oldest — messages are concatenated in chronological order
+  and the absorbed sessions are deleted.
+- **Context menu merge** — "Merge into active session" on any sidebar
+  row uses the bulk path to keep logic single-sourced.
+- **Copy kiln:// link** (`⌘⇧L`, context menu, `/link`) — puts a
+  `kiln://session/<id>` URL on the clipboard for deep-linking back
+  into the app from notes, Linear, or another Kiln window.
+- **Reload from disk** (`⌘⌥R`, `/reload`) — re-reads every session
+  file. Useful when an external tool or the remote control API edits
+  state behind the window's back.
+- **Session age badge** in sidebar rows — shows "N days old" once a
+  session passes seven days, so long-lived workhorses read distinct
+  from sessions spun up today.
+- **Composer clear-draft button** — one-click `×` on the hint strip
+  wipes the input when you want to start over.
+- **Token estimate in the composer** — rough `~N tok` alongside the
+  existing char / word count. Four-chars-per-token heuristic; close
+  enough to gauge prompt cost before you send.
+- **New slash commands** — `/reload`, `/color <name>`, `/merge`,
+  `/link`, `/rename <new name>`. All documented in the shortcuts
+  overlay.
+
+### Changed
+- **Model lineup trimmed** — Opus 4.6 retired from the picker. Opus
+  4.7 is now the sole flagship tier; Sonnet 4.6 and Haiku 4.5 remain.
+  Existing Opus 4.6 sessions will need to be reassigned via `⌘⇧M` or
+  the header picker on next use.
+
 ## [1.3.6] — 2026-04-21
 
 ### Added

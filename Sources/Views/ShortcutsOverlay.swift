@@ -26,6 +26,8 @@ struct ShortcutsOverlay: View {
             ("⌘N", "New session"),
             ("⌘I", "Session info"),
             ("⌘⇧M", "Cycle model on active session"),
+            ("⌘⇧L", "Copy kiln:// link to active session"),
+            ("⌘⌥R", "Reload sessions from disk"),
             ("⌘⇧T", "Session templates"),
             ("⌘⇧E", "Export chat as markdown"),
             ("⌘W", "Close active session"),
@@ -61,6 +63,11 @@ struct ShortcutsOverlay: View {
             ("/settings", "Open settings"),
             ("/memory", "Open engram dashboard"),
             ("/focus", "Toggle focus mode"),
+            ("/reload", "Re-read sessions from disk"),
+            ("/color red|amber|…|none", "Set session color label"),
+            ("/merge", "Merge multi-selected sessions"),
+            ("/link", "Copy kiln:// link to this session"),
+            ("/rename new name", "Rename this session"),
         ]),
     ]
 

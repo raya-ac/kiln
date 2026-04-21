@@ -103,7 +103,7 @@ final class SessionTemplateStore: ObservableObject {
         SessionTemplate(
             name: "Deep build",
             icon: "hammer",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-7",
             kind: "code",
             mode: "build",
             permissions: "bypass"

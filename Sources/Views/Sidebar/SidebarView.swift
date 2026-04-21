@@ -73,6 +73,41 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .help("Archive selected sessions")
 
+            Menu {
+                ForEach(SessionColor.all, id: \.name) { entry in
+                    Button(entry.name.capitalized) {
+                        store.bulkColor(entry.name)
+                    }
+                }
+                Divider()
+                Button("Clear color") { store.bulkColor(nil) }
+            } label: {
+                Image(systemName: "circle.hexagongrid.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.kilnSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Color label for selected sessions")
+
+            Button {
+                _ = store.bulkMerge()
+            } label: {
+                Image(systemName: "arrow.triangle.merge")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.kilnSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help("Merge selected into oldest — concatenates messages chronologically")
+            .disabled(store.selectedSessionIds.count < 2)
+
             Button {
                 store.bulkDelete()
             } label: {
@@ -104,16 +139,21 @@ struct SidebarView: View {
         .background(Color.kilnSurface.opacity(0.6))
     }
 
+    private func matchesColorFilter(_ s: Session) -> Bool {
+        guard let want = store.sidebarColorFilter else { return true }
+        return s.colorLabel == want
+    }
+
     private var filteredGroupedSessions: [(group: String?, sessions: [Session])] {
         let tab = store.selectedSidebarTab
         let base = store.groupedSessions.map { group in
-            (group: group.group, sessions: group.sessions.filter { $0.kind == tab && filterArchived($0) })
+            (group: group.group, sessions: group.sessions.filter { $0.kind == tab && filterArchived($0) && matchesColorFilter($0) })
         }.filter { !$0.sessions.isEmpty }
 
         if searchText.isEmpty { return base }
         let query = searchText.lowercased()
         let filtered = store.sortedSessions.filter { session in
-            session.kind == tab && filterArchived(session) && (
+            session.kind == tab && filterArchived(session) && matchesColorFilter(session) && (
                 session.name.lowercased().contains(query) ||
                 session.workDir.lowercased().contains(query) ||
                 (session.group?.lowercased().contains(query) ?? false) ||
@@ -229,7 +269,45 @@ struct SidebarView: View {
             // Sort control — Pinned sessions always float to the top; this
             // picker just reorders the rest. Kept understated (right-aligned
             // small menu) so it doesn't compete with the tabs or search.
-            HStack {
+            HStack(spacing: 10) {
+                // Color filter — inline dot menu. Shows the currently-filtered
+                // swatch (or a neutral hex grid when off) and lets you narrow
+                // the list to a single label without touching search.
+                Menu {
+                    Button {
+                        store.sidebarColorFilter = nil
+                    } label: {
+                        Label("Any color", systemImage: store.sidebarColorFilter == nil ? "checkmark" : "")
+                    }
+                    Divider()
+                    ForEach(SessionColor.all, id: \.name) { entry in
+                        Button {
+                            store.sidebarColorFilter = entry.name
+                        } label: {
+                            Label(entry.name.capitalized,
+                                  systemImage: store.sidebarColorFilter == entry.name ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        if let active = store.sidebarColorFilter,
+                           let swatch = SessionColor.color(for: active) {
+                            Circle().fill(swatch).frame(width: 7, height: 7)
+                            Text(active.capitalized)
+                                .font(.system(size: 10))
+                        } else {
+                            Image(systemName: "circle.hexagongrid")
+                                .font(.system(size: 8))
+                            Text("Any")
+                                .font(.system(size: 10))
+                        }
+                    }
+                    .foregroundStyle(store.sidebarColorFilter == nil ? Color.kilnTextTertiary : Color.kilnTextSecondary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
                 Spacer()
                 Menu {
                     ForEach(AppStore.SessionSort.allCases, id: \.self) { order in
@@ -751,6 +829,23 @@ struct SessionRow: View {
             }
 
             Button {
+                store.copySessionLink(session.id)
+            } label: {
+                Label("Copy kiln:// link", systemImage: "link")
+            }
+
+            if let activeId = store.activeSessionId, activeId != session.id {
+                Button {
+                    // Merge this session into the active one via the
+                    // multi-select path — saves duplicating the logic.
+                    store.selectedSessionIds = [activeId, session.id]
+                    _ = store.bulkMerge()
+                } label: {
+                    Label("Merge into active session", systemImage: "arrow.triangle.merge")
+                }
+            }
+
+            Button {
                 guard let data = store.exportSessionJSONData(session.id) else { return }
                 let panel = NSSavePanel()
                 panel.allowedContentTypes = [.json]
@@ -840,6 +935,13 @@ struct SessionRow: View {
         }
 
         parts.append(relativeTime(session.createdAt))
+
+        // Session age — distinct from "last active" so long-lived workhorse
+        // sessions read differently from sessions spun up today.
+        let ageDays = Int(Date().timeIntervalSince(session.createdAt) / 86400)
+        if ageDays >= 7 {
+            parts.append("\(ageDays)d old")
+        }
 
         // U+00B7 (·) as the separator — same as before but baked into one string.
         return Text(Image(systemName: "folder"))

@@ -67,6 +67,67 @@ final class AppStore: ObservableObject {
             addTag(tag, to: id)
         }
     }
+
+    /// Stamp a color label on every selected session. `nil` clears.
+    func bulkColor(_ color: String?) {
+        for id in selectedSessionIds {
+            setSessionColor(id, color: color)
+        }
+    }
+
+    /// Collapse every selected session into the oldest one, concatenating
+    /// messages in chronological order and deleting the rest. The
+    /// surviving session is activated. A no-op if fewer than two are
+    /// selected — the user probably didn't mean it.
+    @discardableResult
+    func bulkMerge() -> String? {
+        guard selectedSessionIds.count >= 2 else { return nil }
+        let ids = Array(selectedSessionIds)
+        var ordered: [Session] = []
+        for id in ids {
+            if let s = sessions.first(where: { $0.id == id }) { ordered.append(s) }
+        }
+        ordered.sort(by: { $0.createdAt < $1.createdAt })
+        guard let primary = ordered.first else { return nil }
+        guard let primaryIdx = sessions.firstIndex(where: { $0.id == primary.id }) else { return nil }
+        var updated = sessions[primaryIdx]
+        for s in ordered.dropFirst() {
+            updated.messages.append(contentsOf: s.messages)
+        }
+        updated.messages.sort(by: { $0.timestamp < $1.timestamp })
+        sessions[primaryIdx] = updated
+        Persistence.saveSession(updated)
+        for s in ordered.dropFirst() {
+            deleteSession(s.id)
+        }
+        selectedSessionIds.removeAll()
+        activeSessionId = primary.id
+        return primary.id
+    }
+
+    /// Filter state for the sidebar — when set, only sessions carrying
+    /// this color label render. `nil` = no filter. Lives on the store so
+    /// it persists across sidebar tab flips without redrawing.
+    @Published var sidebarColorFilter: String? = nil
+
+    /// Build a `kiln://session/<id>` URL so another Kiln window (or the
+    /// remote control server) can jump straight to this session.
+    func sessionLink(_ id: String) -> String {
+        "kiln://session/\(id)"
+    }
+
+    /// Copy the kiln:// link for a session onto the clipboard.
+    func copySessionLink(_ id: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sessionLink(id), forType: .string)
+    }
+
+    /// Re-read every session from disk. Useful when external tools (or
+    /// the remote control API) mutate files and the window is stale.
+    func reloadFromDisk() {
+        let fresh = Persistence.loadSessions().map { $0.toSession() }
+        sessions = fresh
+    }
     @Published var showSettings = false
     @Published var selectedSidebarTab: SessionKind = .code
 

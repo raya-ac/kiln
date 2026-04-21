@@ -6,7 +6,6 @@ import SwiftUI
 
 enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     case opus47 = "claude-opus-4-7"
-    case opus46 = "claude-opus-4-6"
     case sonnet46 = "claude-sonnet-4-6"
     case haiku45 = "claude-haiku-4-5-20251001"
 
@@ -18,7 +17,6 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     var label: String {
         switch self {
         case .opus47: "Opus 4.7"
-        case .opus46: "Opus 4.6"
         case .sonnet46: "Sonnet 4.6"
         case .haiku45: "Haiku 4.5"
         }
@@ -26,7 +24,7 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
 
     var shortLabel: String {
         switch self {
-        case .opus47, .opus46: "Opus"
+        case .opus47: "Opus"
         case .sonnet46: "Sonnet"
         case .haiku45: "Haiku"
         }
@@ -34,7 +32,7 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
 
     var tier: String {
         switch self {
-        case .opus47, .opus46: "Flagship"
+        case .opus47: "Flagship"
         case .sonnet46: "Balanced"
         case .haiku45: "Fast"
         }
@@ -43,7 +41,7 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     /// Standard context window in tokens
     var contextWindow: Int {
         switch self {
-        case .opus47, .opus46: 200_000
+        case .opus47: 200_000
         case .sonnet46: 200_000
         case .haiku45: 200_000
         }
@@ -52,7 +50,7 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     /// Extended context (1M for Opus and Sonnet)
     var extendedContextWindow: Int? {
         switch self {
-        case .opus47, .opus46, .sonnet46: 1_000_000
+        case .opus47, .sonnet46: 1_000_000
         default: nil
         }
     }

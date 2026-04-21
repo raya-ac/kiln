@@ -32,6 +32,11 @@ enum SlashCommands {
         .init(id: "search", label: "/search", description: "Search all messages across sessions", kind: .kiln),
         .init(id: "memory", label: "/memory", description: "Open the engram dashboard in your browser", kind: .kiln),
         .init(id: "focus", label: "/focus", description: "Toggle focus mode (hide side panels)", kind: .kiln),
+        .init(id: "reload", label: "/reload", description: "Re-read all sessions from disk", kind: .kiln),
+        .init(id: "color", label: "/color", description: "Set this session's color label — /color red|amber|green|blue|purple|pink|none", kind: .kiln),
+        .init(id: "merge", label: "/merge", description: "Merge selected sessions into the oldest one", kind: .kiln),
+        .init(id: "link", label: "/link", description: "Copy a kiln:// link to this session", kind: .kiln),
+        .init(id: "rename", label: "/rename", description: "Rename this session — /rename new name here", kind: .kiln),
     ]
 
     /// No longer used — kept empty for source compat. Previously held `//`

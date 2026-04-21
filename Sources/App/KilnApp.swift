@@ -65,6 +65,17 @@ struct KilnApp: App {
                 .keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(store.activeSessionId == nil)
 
+                Button("Copy Session Link") {
+                    if let id = store.activeSessionId { store.copySessionLink(id) }
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(store.activeSessionId == nil)
+
+                Button("Reload Sessions from Disk") {
+                    store.reloadFromDisk()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+
                 Button("Archive / Unarchive") {
                     if let id = store.activeSessionId {
                         store.toggleArchiveSession(id)
