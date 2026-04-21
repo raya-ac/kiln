@@ -373,6 +373,16 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
     case fr = "fr"
     case es = "es"
     case ja = "ja"
+    case it = "it"
+    case pt = "pt"
+    case ru = "ru"
+    case ko = "ko"
+    case nl = "nl"
+    case hi = "hi"
+    case ar = "ar"
+    case pl = "pl"
+    case tr = "tr"
+    case sv = "sv"
 
     var id: String { rawValue }
 
@@ -384,21 +394,43 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
         case .fr: "Français"
         case .es: "Español"
         case .ja: "日本語"
+        case .it: "Italiano"
+        case .pt: "Português"
+        case .ru: "Русский"
+        case .ko: "한국어"
+        case .nl: "Nederlands"
+        case .hi: "हिन्दी"
+        case .ar: "العربية"
+        case .pl: "Polski"
+        case .tr: "Türkçe"
+        case .sv: "Svenska"
         }
     }
 
     var flag: String {
         switch self {
-        case .en: "🇺🇸"
+        case .en: "🇦🇺"
         case .de: "🇩🇪"
         case .zh: "🇨🇳"
         case .fr: "🇫🇷"
         case .es: "🇪🇸"
         case .ja: "🇯🇵"
+        case .it: "🇮🇹"
+        case .pt: "🇵🇹"
+        case .ru: "🇷🇺"
+        case .ko: "🇰🇷"
+        case .nl: "🇳🇱"
+        case .hi: "🇮🇳"
+        case .ar: "🇸🇦"
+        case .pl: "🇵🇱"
+        case .tr: "🇹🇷"
+        case .sv: "🇸🇪"
         }
     }
 
-    // Claude system prompt instruction
+    // Claude system prompt instruction. For languages without a full UI
+    // translation we still steer Claude's *output* language — the chat is
+    // where localisation matters most anyway.
     var claudeInstruction: String {
         switch self {
         case .en: return ""
@@ -407,6 +439,16 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
         case .fr: return "IMPORTANT: You MUST respond in French (Français). All your responses should be in French."
         case .es: return "IMPORTANT: You MUST respond in Spanish (Español). All your responses should be in Spanish."
         case .ja: return "IMPORTANT: You MUST respond in Japanese (日本語). All your responses should be in Japanese."
+        case .it: return "IMPORTANT: You MUST respond in Italian (Italiano). All your responses should be in Italian."
+        case .pt: return "IMPORTANT: You MUST respond in Portuguese (Português). All your responses should be in Portuguese."
+        case .ru: return "IMPORTANT: You MUST respond in Russian (Русский). All your responses should be in Russian."
+        case .ko: return "IMPORTANT: You MUST respond in Korean (한국어). All your responses should be in Korean."
+        case .nl: return "IMPORTANT: You MUST respond in Dutch (Nederlands). All your responses should be in Dutch."
+        case .hi: return "IMPORTANT: You MUST respond in Hindi (हिन्दी). All your responses should be in Hindi."
+        case .ar: return "IMPORTANT: You MUST respond in Arabic (العربية). All your responses should be in Arabic."
+        case .pl: return "IMPORTANT: You MUST respond in Polish (Polski). All your responses should be in Polish."
+        case .tr: return "IMPORTANT: You MUST respond in Turkish (Türkçe). All your responses should be in Turkish."
+        case .sv: return "IMPORTANT: You MUST respond in Swedish (Svenska). All your responses should be in Swedish."
         }
     }
 
@@ -635,6 +677,15 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.stats = "統計"; s.statsMessages = "メッセージ"; s.statsStreak = "連続"
             s.statsActiveDays = "アクティブ日数"; s.statsSessions = "セッション"; s.statsModels = "モデル"
             s.thinkingLower = "思考中…"
+            return s
+        default:
+            // Languages without a full UI translation fall back to English
+            // strings. Claude's chat output still respects the choice via
+            // claudeInstruction — the chat is where localisation matters
+            // most anyway. langDescription is rewritten so the Settings
+            // row doesn't falsely promise that UI labels change.
+            var s = AppLanguage.en.ui
+            s.langDescription = "Claude will respond in \(label). The Kiln UI stays in English for this language."
             return s
         }
     }

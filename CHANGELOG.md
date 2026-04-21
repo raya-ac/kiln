@@ -4,6 +4,25 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.8.2] — 2026-04-21
+
+### Added
+- **Ten more languages** available in Settings → Language: Italian,
+  Portuguese, Russian, Korean, Dutch, Hindi, Arabic, Polish, Turkish,
+  Swedish. For these, Claude's chat output is steered into the chosen
+  language via the system prompt; the Kiln UI stays in English (full
+  UI translations only ship for the six previously supported locales).
+  The settings description updates accordingly so it doesn't overclaim.
+- **English flag is now 🇦🇺.** Because.
+
+### Changed
+- **Language picker is a native dropdown** instead of a scrolling pill
+  row. The old layout squeezed each language name into a 40-pt pill
+  and wrapped "English" into "Eng/lish" when the settings column was
+  narrow. `Picker(.menu)` renders the selected flag + label at rest
+  and drops a proper menu on click — same affordance as the model /
+  mode / permissions rows above it.
+
 ## [1.8.1] — 2026-04-21
 
 ### Fixed

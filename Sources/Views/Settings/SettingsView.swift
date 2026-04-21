@@ -209,28 +209,27 @@ struct SettingsView: View {
                     // Language
                     SettingsSection(title: store.settings.language.ui.language) {
                         SettingsRow(label: store.settings.language.ui.languageLabel) {
-                            HStack(spacing: 2) {
+                            // Native Menu — compact, doesn't fight the row
+                            // width, and matches the other dropdowns in
+                            // Settings (model, mode, permissions).
+                            // Picker with menu style renders the selected
+                            // row as the trigger label — which gives us the
+                            // flag + language name visible at rest, with a
+                            // native dropdown on click. (A Menu's custom
+                            // `label:` gets clobbered by `.borderlessButton`
+                            // style, which is why the text was missing.)
+                            Picker("", selection: Binding(
+                                get: { store.settings.language },
+                                set: { store.settings.language = $0; store.saveSettings() }
+                            )) {
                                 ForEach(AppLanguage.allCases) { lang in
-                                    let selected = store.settings.language == lang
-                                    Button {
-                                        store.settings.language = lang
-                                        store.saveSettings()
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Text(lang.flag)
-                                                .font(.system(size: 12))
-                                            Text(lang.label)
-                                                .font(.system(size: 10, weight: .medium))
-                                        }
-                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 5)
-                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                                    }
-                                    .buttonStyle(.plain)
+                                    Text("\(lang.flag)  \(lang.label)")
+                                        .tag(lang)
                                 }
                             }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .fixedSize()
                         }
 
                         Text(store.settings.language.ui.langDescription)
