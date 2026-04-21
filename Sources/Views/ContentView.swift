@@ -313,6 +313,12 @@ struct ContentView: View {
                 )
             }
         }
+        .onChange(of: store.settings.accentHex) { _, hex in
+            // Live-retint the Dock icon when the user changes accent in
+            // settings. Finder/Launchpad keep the bundled amber — only
+            // NSApp.applicationIconImage is live-swappable.
+            DockIconRenderer.apply(accent: NSColor(kilnHexString: hex))
+        }
         .tint(Color(hexString: store.settings.accentHex))
         .environment(\.kilnAccent, Color(hexString: store.settings.accentHex))
         .environment(\.kilnFontScale, store.settings.fontScale.factor)

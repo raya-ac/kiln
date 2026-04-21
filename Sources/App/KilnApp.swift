@@ -151,6 +151,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Tint the Dock icon with the user's accent as early as possible —
+        // before ContentView's onAppear fires — so the Dock doesn't flash
+        // the bundled amber default. Reads the hex straight from the
+        // persisted settings file.
+        if let hex = Persistence.loadSettings().accentHex as String?, !hex.isEmpty {
+            DockIconRenderer.apply(accent: NSColor(kilnHexString: hex))
+        }
+
         // Register kiln:// URL scheme handler (works even without Info.plist entry
         // when the app is invoked via `open kiln://...` from a running instance).
         NSAppleEventManager.shared().setEventHandler(
