@@ -60,6 +60,10 @@ struct ComposerView: View {
                 )
             }
 
+            // Workdir activity chip — visible only when there are uncommitted
+            // changes in the session's workdir. Click to see which files.
+            WorkdirActivityChip()
+
             // Attachment chips
             if !store.composerAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -646,12 +650,512 @@ struct ComposerView: View {
             // /rewind N — drop the last N message pairs from the session.
             // Default N = 1. Capped at 50 so a typo can't nuke a long
             // session. Non-destructive on disk until saveSession runs.
+            // Guard against rewinding mid-stream — the runtime would keep
+            // appending to a message we've already removed, corrupting state.
+            guard let id = store.activeSessionId else { break }
+            if store.isSessionBusy(id) {
+                ToastCenter.shared.show("Stop generation first", kind: .error)
+                break
+            }
             let parsed = Int(arg.trimmingCharacters(in: .whitespaces)) ?? 1
             let n = max(1, min(50, parsed))
-            if let id = store.activeSessionId {
-                store.rewindSession(id, count: n)
-                ToastCenter.shared.show("Rewound \(n) exchange\(n == 1 ? "" : "s")", kind: .info)
+            store.rewindSession(id, count: n)
+            ToastCenter.shared.show("Rewound \(n) exchange\(n == 1 ? "" : "s")", kind: .info)
+        // --- workdir / shell ---
+        case "/pwd":
+            if let dir = store.activeSession?.workDir {
+                ToastCenter.shared.show(dir, kind: .info, duration: 3.5)
             }
+        case "/open":
+            if let dir = store.activeSession?.workDir {
+                SlashHelpers.revealInFinder(dir)
+            }
+        case "/terminal":
+            if let dir = store.activeSession?.workDir {
+                SlashHelpers.openTerminal(at: dir)
+            }
+        case "/editor":
+            if let dir = store.activeSession?.workDir {
+                SlashHelpers.openInEditor(dir)
+            }
+        case "/cd":
+            let path = arg.trimmingCharacters(in: .whitespaces)
+            guard !path.isEmpty, let id = store.activeSessionId else {
+                ToastCenter.shared.show("Usage: /cd /path/to/dir", kind: .error); break
+            }
+            let expanded = (path as NSString).expandingTildeInPath
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue else {
+                ToastCenter.shared.show("Not a directory: \(expanded)", kind: .error); break
+            }
+            store.setWorkDir(id, workDir: expanded)
+            ToastCenter.shared.show("Workdir → \(expanded)", kind: .success)
+
+        // --- git wrappers ---
+        case "/log":
+            // Inject the last 5 commits as a user message — gives Claude
+            // cheap orientation without having to shell out itself.
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["log", "--oneline", "-n", "5"], in: dir)
+            if r.status == 0 {
+                Task { await store.sendMessage("Recent commits:\n```\n\(r.out)```") }
+            } else {
+                ToastCenter.shared.show("git log failed", kind: .error)
+            }
+        case "/branch":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /branch name", kind: .error); break
+            }
+            let r = SlashHelpers.git(["checkout", "-b", name], in: dir)
+            ToastCenter.shared.show(
+                r.status == 0 ? "On branch \(name)" : "branch failed: \(r.err.trimmingCharacters(in: .whitespacesAndNewlines))",
+                kind: r.status == 0 ? .success : .error,
+                duration: r.status == 0 ? 2.0 : 3.5
+            )
+        case "/checkout":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /checkout branch", kind: .error); break
+            }
+            let r = SlashHelpers.git(["checkout", name], in: dir)
+            ToastCenter.shared.show(
+                r.status == 0 ? "On branch \(name)" : "checkout failed",
+                kind: r.status == 0 ? .success : .error
+            )
+        case "/stash":
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["stash", "push", "-u"], in: dir)
+            ToastCenter.shared.show(
+                r.status == 0 ? "Stashed" : "stash failed",
+                kind: r.status == 0 ? .success : .error
+            )
+        case "/unstash":
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["stash", "pop"], in: dir)
+            ToastCenter.shared.show(
+                r.status == 0 ? "Stash popped" : "unstash failed",
+                kind: r.status == 0 ? .success : .error
+            )
+        case "/pull":
+            guard let dir = store.activeSession?.workDir else { break }
+            // git can take a while — run detached so the UI stays live.
+            Task.detached {
+                let r = SlashHelpers.git(["pull"], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "Pulled" : "pull failed: \(r.err.prefix(120))",
+                        kind: r.status == 0 ? .success : .error,
+                        duration: 3.5
+                    )
+                }
+            }
+        case "/push":
+            guard let dir = store.activeSession?.workDir else { break }
+            Task.detached {
+                let r = SlashHelpers.git(["push"], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "Pushed" : "push failed: \(r.err.prefix(120))",
+                        kind: r.status == 0 ? .success : .error,
+                        duration: 3.5
+                    )
+                }
+            }
+        case "/blame":
+            let file = arg.trimmingCharacters(in: .whitespaces)
+            guard !file.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /blame path/to/file", kind: .error); break
+            }
+            let r = SlashHelpers.git(["blame", "--date=short", file], in: dir)
+            if r.status == 0 {
+                // Cap at ~200 lines to avoid dumping a 5k-line file as context.
+                let lines = r.out.split(separator: "\n").prefix(200).joined(separator: "\n")
+                Task { await store.sendMessage("Blame for `\(file)`:\n```\n\(lines)\n```") }
+            } else {
+                ToastCenter.shared.show("blame failed: \(r.err.prefix(120))", kind: .error)
+            }
+
+        // --- session metadata ---
+        case "/pin":
+            if let id = store.activeSessionId {
+                store.togglePin(id)
+                let pinned = store.sessions.first(where: { $0.id == id })?.isPinned == true
+                ToastCenter.shared.show(pinned ? "Pinned" : "Unpinned", kind: .info)
+            }
+        case "/archive":
+            if let id = store.activeSessionId {
+                store.toggleArchiveSession(id)
+                ToastCenter.shared.show("Archive toggled", kind: .info)
+            }
+        case "/tag":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, let id = store.activeSessionId else {
+                ToastCenter.shared.show("Usage: /tag name", kind: .error); break
+            }
+            store.addTag(name, to: id)
+            ToastCenter.shared.show("Tagged #\(name)", kind: .success)
+        case "/untag":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, let id = store.activeSessionId else {
+                ToastCenter.shared.show("Usage: /untag name", kind: .error); break
+            }
+            store.removeTag(name, from: id)
+            ToastCenter.shared.show("Removed #\(name)", kind: .info)
+
+        // --- content extraction ---
+        case "/copy":
+            if let text = SlashHelpers.lastAssistantText(in: store.activeSession) {
+                SlashHelpers.copyToClipboard(text)
+                ToastCenter.shared.show("Copied \(text.count) chars", kind: .success)
+            } else {
+                ToastCenter.shared.show("No assistant message yet", kind: .error)
+            }
+        case "/copycode":
+            if let code = SlashHelpers.lastCodeBlock(in: store.activeSession) {
+                SlashHelpers.copyToClipboard(code)
+                ToastCenter.shared.show("Copied code (\(code.count) chars)", kind: .success)
+            } else {
+                ToastCenter.shared.show("No code block in last reply", kind: .error)
+            }
+        case "/save":
+            let rel = arg.trimmingCharacters(in: .whitespaces)
+            guard !rel.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /save path/to/file", kind: .error); break
+            }
+            guard let code = SlashHelpers.lastCodeBlock(in: store.activeSession) else {
+                ToastCenter.shared.show("No code block in last reply", kind: .error); break
+            }
+            let target: String = {
+                if rel.hasPrefix("/") || rel.hasPrefix("~") {
+                    return (rel as NSString).expandingTildeInPath
+                }
+                return (dir as NSString).appendingPathComponent(rel)
+            }()
+            do {
+                // Make sure the parent dir exists — surfaces the common
+                // "no such file or directory" error before the write fails.
+                let parent = (target as NSString).deletingLastPathComponent
+                try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+                try code.write(toFile: target, atomically: true, encoding: .utf8)
+                ToastCenter.shared.show("Saved → \(target)", kind: .success, duration: 3.0)
+            } catch {
+                ToastCenter.shared.show("save failed: \(error.localizedDescription)", kind: .error)
+            }
+        case "/share":
+            if let id = store.activeSessionId {
+                let md = store.exportSessionMarkdown(id)
+                SlashHelpers.copyToClipboard(md)
+                ToastCenter.shared.show("Copied markdown (\(md.count) chars)", kind: .success)
+            }
+        case "/quote":
+            if let text = SlashHelpers.lastAssistantText(in: store.activeSession) {
+                // Prefix each line with "> " so Claude sees it as a quote.
+                // Keeps the composer editable so the user can add their
+                // follow-up question underneath.
+                let quoted = text.split(separator: "\n", omittingEmptySubsequences: false)
+                    .map { "> \($0)" }.joined(separator: "\n")
+                input = quoted + "\n\n"
+                isFocused = true
+            } else {
+                ToastCenter.shared.show("No assistant message yet", kind: .error)
+            }
+
+        // --- info ---
+        case "/stats":
+            guard let s = store.activeSession else { break }
+            let msgs = s.messages.count
+            let words = SlashHelpers.wordCount(in: s)
+            let toks = SlashHelpers.approximateTokens(in: s)
+            ToastCenter.shared.show("\(msgs) msgs · \(words) words · ~\(toks) tok", kind: .info, duration: 3.5)
+        case "/tokens":
+            let toks = SlashHelpers.approximateTokens(in: store.activeSession)
+            ToastCenter.shared.show("~\(toks) tokens", kind: .info)
+        case "/env":
+            if let s = store.activeSession {
+                let line = "\(s.model.rawValue) · \(s.kind.rawValue) · \(s.workDir)"
+                ToastCenter.shared.show(line, kind: .info, duration: 4.0)
+            }
+
+        // --- aliases / misc ---
+        case "/undo":
+            guard let id = store.activeSessionId else { break }
+            if store.isSessionBusy(id) {
+                ToastCenter.shared.show("Stop generation first", kind: .error); break
+            }
+            store.rewindSession(id, count: 1)
+            ToastCenter.shared.show("Rewound 1 exchange", kind: .info)
+        case "/resend":
+            Task { await store.retryLastMessage() }
+        case "/summary":
+            // Reuse the title generator — it already asks Claude for a
+            // short, dense phrase. Saves adding a parallel path.
+            Task { await store.generateSessionTitle() }
+        case "/todo":
+            let line = arg.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /todo thing to do", kind: .error); break
+            }
+            let path = (dir as NSString).appendingPathComponent("TODO.md")
+            let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+            let entry = "- [ ] \(line)  _(\(stamp))_\n"
+            do {
+                if FileManager.default.fileExists(atPath: path) {
+                    if let handle = FileHandle(forWritingAtPath: path) {
+                        try handle.seekToEnd()
+                        if let data = entry.data(using: .utf8) { try handle.write(contentsOf: data) }
+                        try handle.close()
+                    }
+                } else {
+                    try "# TODO\n\n\(entry)".write(toFile: path, atomically: true, encoding: .utf8)
+                }
+                ToastCenter.shared.show("Added to TODO.md", kind: .success)
+            } catch {
+                ToastCenter.shared.show("todo failed: \(error.localizedDescription)", kind: .error)
+            }
+        case "/notes":
+            let path = (NSHomeDirectory() as NSString).appendingPathComponent("kiln-notes.md")
+            if !FileManager.default.fileExists(atPath: path) {
+                try? "# Kiln notes\n\n".write(toFile: path, atomically: true, encoding: .utf8)
+            }
+            SlashHelpers.openInEditor(path)
+        case "/help":
+            // Tiny surfacing — the real discoverability is the popup on `/`.
+            // This just nudges people who typed /help expecting a page.
+            ToastCenter.shared.show("Type / to browse all commands · ↑/↓ to navigate · Enter to run", kind: .info, duration: 5.0)
+
+        // --- 1.7.0: workdir inspection ---
+        case "/ls":
+            if let dir = store.activeSession?.workDir {
+                let listing = SlashHelpers.listDir(dir)
+                Task { await store.sendMessage("Contents of `\(dir)`:\n```\n\(listing)\n```") }
+            }
+        case "/tree":
+            if let dir = store.activeSession?.workDir {
+                let t = SlashHelpers.tree(dir, depth: 2)
+                Task { await store.sendMessage("Tree of `\(dir)`:\n```\n\(t)\n```") }
+            }
+        case "/grep":
+            let pat = arg.trimmingCharacters(in: .whitespaces)
+            guard !pat.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /grep pattern", kind: .error); break
+            }
+            Task.detached {
+                // Prefer ripgrep if present — it's Git-aware and 10× faster
+                // than grep on typical trees. Fall back to grep -r.
+                let rgPaths = ["/opt/homebrew/bin/rg", "/usr/local/bin/rg"]
+                let bin = rgPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+                let r: (status: Int32, out: String, err: String) = {
+                    if let bin {
+                        return SlashHelpers.run(bin, args: ["-n", "--no-heading", "-S", pat, dir])
+                    }
+                    return SlashHelpers.run("/usr/bin/grep", args: ["-rn", pat, dir])
+                }()
+                let lines = r.out.split(separator: "\n").prefix(80).joined(separator: "\n")
+                let body = lines.isEmpty ? "(no matches)" : String(lines)
+                await store.sendMessage("Matches for `\(pat)`:\n```\n\(body)\n```")
+            }
+        case "/find":
+            let pat = arg.trimmingCharacters(in: .whitespaces)
+            guard !pat.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /find *.swift", kind: .error); break
+            }
+            let r = SlashHelpers.run("/usr/bin/find", args: [dir, "-name", pat, "-not", "-path", "*/.*"])
+            let lines = r.out.split(separator: "\n").prefix(80).joined(separator: "\n")
+            let body = lines.isEmpty ? "(no matches)" : String(lines)
+            Task { await store.sendMessage("Files matching `\(pat)`:\n```\n\(body)\n```") }
+        case "/cat":
+            let rel = arg.trimmingCharacters(in: .whitespaces)
+            guard !rel.isEmpty, let dir = store.activeSession?.workDir else {
+                ToastCenter.shared.show("Usage: /cat path/to/file", kind: .error); break
+            }
+            let target: String = {
+                if rel.hasPrefix("/") || rel.hasPrefix("~") {
+                    return (rel as NSString).expandingTildeInPath
+                }
+                return (dir as NSString).appendingPathComponent(rel)
+            }()
+            guard let text = try? String(contentsOfFile: target, encoding: .utf8) else {
+                ToastCenter.shared.show("Can't read \(rel)", kind: .error); break
+            }
+            // Cap at 400 lines — anything longer is better read via Claude's
+            // file-read tool than jammed into the prompt.
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            let clipped = lines.prefix(400).joined(separator: "\n")
+            let note = lines.count > 400 ? "\n(… truncated at 400 lines of \(lines.count))" : ""
+            Task { await store.sendMessage("`\(rel)`:\n```\n\(clipped)\(note)\n```") }
+        case "/recent":
+            guard let dir = store.activeSession?.workDir else { break }
+            // Files changed in the last day, minus junk dirs.
+            let r = SlashHelpers.run("/usr/bin/find", args: [
+                dir, "-type", "f",
+                "-not", "-path", "*/.*",
+                "-not", "-path", "*/node_modules/*",
+                "-not", "-path", "*/.build/*",
+                "-mtime", "-1",
+            ])
+            let lines = r.out.split(separator: "\n").prefix(60).joined(separator: "\n")
+            let body = lines.isEmpty ? "(nothing modified in the last 24h)" : String(lines)
+            Task { await store.sendMessage("Recently modified files:\n```\n\(body)\n```") }
+
+        // --- git extras ---
+        case "/repo":
+            guard let dir = store.activeSession?.workDir else { break }
+            let remote = SlashHelpers.git(["remote", "-v"], in: dir).out
+            let upstream = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir).out
+            let body = "remote:\n\(remote)\nupstream: \(upstream.trimmingCharacters(in: .whitespacesAndNewlines))"
+            Task { await store.sendMessage("Repo info:\n```\n\(body)\n```") }
+        case "/diffstat":
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["diff", "HEAD", "--stat"], in: dir)
+            if r.status == 0 {
+                let body = r.out.isEmpty ? "(clean)" : r.out
+                Task { await store.sendMessage("```\n\(body)\n```") }
+            } else {
+                ToastCenter.shared.show("Not a git repo", kind: .error)
+            }
+        case "/upstream":
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir)
+            let up = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+            ToastCenter.shared.show(up.isEmpty ? "No upstream" : "Upstream: \(up)", kind: .info, duration: 4.0)
+        case "/changed":
+            guard let dir = store.activeSession?.workDir else { break }
+            let r = SlashHelpers.git(["status", "--porcelain"], in: dir)
+            if r.status == 0 {
+                let body = r.out.isEmpty ? "(clean)" : r.out
+                Task { await store.sendMessage("Uncommitted changes:\n```\n\(body)\n```") }
+            } else {
+                ToastCenter.shared.show("Not a git repo", kind: .error)
+            }
+
+        // --- quick-inject into composer ---
+        case "/now":
+            let fmt = DateFormatter()
+            fmt.dateStyle = .medium; fmt.timeStyle = .short
+            input = fmt.string(from: Date())
+            isFocused = true
+        case "/date":
+            let fmt = DateFormatter()
+            fmt.dateStyle = .long
+            input = fmt.string(from: Date())
+            isFocused = true
+        case "/clip":
+            if let s = NSPasteboard.general.string(forType: .string) {
+                input = s
+                isFocused = true
+            } else {
+                ToastCenter.shared.show("Clipboard is empty", kind: .error)
+            }
+        case "/paste":
+            if let s = NSPasteboard.general.string(forType: .string), !s.isEmpty {
+                Task { await store.sendMessage(s) }
+            } else {
+                ToastCenter.shared.show("Clipboard is empty", kind: .error)
+            }
+
+        // --- app state / UI ---
+        case "/expand":
+            showExpandedEditor = true
+        case "/killall":
+            // Walk every busy session and interrupt it. The store's public
+            // interrupt() only kills the active session, so we have to
+            // iterate busySessionIds manually.
+            let ids = store.busySessionIds
+            let was = store.activeSessionId
+            for id in ids {
+                store.activeSessionId = id
+                store.interrupt()
+            }
+            store.activeSessionId = was
+            ToastCenter.shared.show("Interrupted \(ids.count) session\(ids.count == 1 ? "" : "s")", kind: .info)
+        case "/readonly":
+            guard let id = store.activeSessionId,
+                  let idx = store.sessions.firstIndex(where: { $0.id == id }) else { break }
+            store.sessions[idx].readOnly.toggle()
+            ToastCenter.shared.show(store.sessions[idx].readOnly ? "Read-only on" : "Read-only off", kind: .info)
+        case "/accent":
+            // Accept #ffcc00 / ffcc00 / FFCC00. Validate hex chars so a typo
+            // doesn't produce a silently-black accent that the user then
+            // has to dig through settings to recover from.
+            let raw = arg.trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "#", with: "")
+                .lowercased()
+            let isHex = raw.count == 6 && raw.allSatisfy { "0123456789abcdef".contains($0) }
+            guard isHex else {
+                ToastCenter.shared.show("Usage: /accent f97316 (6-digit hex)", kind: .error); break
+            }
+            store.settings.accentHex = raw
+            store.saveSettings()
+            ToastCenter.shared.show("Accent → #\(raw)", kind: .success)
+
+        // --- info toasts ---
+        case "/version":
+            let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
+            let b = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+            ToastCenter.shared.show("Kiln \(v) (\(b))", kind: .info, duration: 3.0)
+        case "/age":
+            if let s = store.activeSession {
+                let fmt = RelativeDateTimeFormatter()
+                fmt.unitsStyle = .full
+                let rel = fmt.localizedString(for: s.createdAt, relativeTo: Date())
+                ToastCenter.shared.show("Session started \(rel)", kind: .info, duration: 3.5)
+            }
+        case "/count":
+            if let s = store.activeSession {
+                ToastCenter.shared.show("\(s.messages.count) message\(s.messages.count == 1 ? "" : "s")", kind: .info)
+            }
+        case "/sessions":
+            let total = store.sessions.count
+            let archived = store.sessions.filter { $0.isArchived }.count
+            ToastCenter.shared.show("\(total) sessions · \(archived) archived", kind: .info, duration: 3.0)
+        case "/busy":
+            let n = store.busySessionIds.count
+            ToastCenter.shared.show(n == 0 ? "No sessions busy" : "\(n) busy", kind: .info)
+        case "/diag":
+            let v = ProcessInfo.processInfo.operatingSystemVersion
+            let arch: String = {
+                #if arch(arm64)
+                return "arm64"
+                #else
+                return "x86_64"
+                #endif
+            }()
+            let cpu = ProcessInfo.processInfo.activeProcessorCount
+            ToastCenter.shared.show("macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion) · \(arch) · \(cpu) cores", kind: .info, duration: 4.5)
+
+        // --- navigation / browser ---
+        case "/random":
+            let pool = store.sessions.filter { !$0.isArchived && $0.id != store.activeSessionId }
+            if let pick = pool.randomElement() {
+                store.activeSessionId = pick.id
+            } else {
+                ToastCenter.shared.show("No other sessions", kind: .info)
+            }
+        case "/bugs":
+            if let url = URL(string: "https://github.com/rayaio/kiln/issues") {
+                NSWorkspace.shared.open(url)
+            }
+
+        // --- aliases ---
+        case "/duplicate":
+            if let id = store.activeSessionId {
+                store.cloneSession(id)
+                ToastCenter.shared.show("Cloned session", kind: .success)
+            }
+        case "/star":
+            if let id = store.activeSessionId {
+                store.togglePin(id)
+                let pinned = store.sessions.first(where: { $0.id == id })?.isPinned == true
+                ToastCenter.shared.show(pinned ? "Pinned" : "Unpinned", kind: .info)
+            }
+        case "/zen":
+            store.toggleFocusMode()
+        case "/repeat":
+            Task { await store.retryLastMessage() }
+        case "/compress":
+            Task { await store.compactSession() }
+
         default:
             // Handle dynamic template aliases like `/t:review`.
             if cmd.hasPrefix("/t:") {

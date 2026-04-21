@@ -119,6 +119,33 @@ struct KilnApp: App {
                     store.navigateSession(direction: 1)
                 }
                 .keyboardShortcut("]", modifiers: .command)
+
+                Divider()
+
+                // Cmd+Opt+1..9 — jump to the Nth visible session in the
+                // currently-selected sidebar tab. Unrolled (not ForEach)
+                // because CommandGroup + ForEach has historically been
+                // flaky across macOS releases.
+                Group {
+                    Button("Jump to Session 1") { store.jumpToSession(index: 1) }
+                        .keyboardShortcut("1", modifiers: [.command, .option])
+                    Button("Jump to Session 2") { store.jumpToSession(index: 2) }
+                        .keyboardShortcut("2", modifiers: [.command, .option])
+                    Button("Jump to Session 3") { store.jumpToSession(index: 3) }
+                        .keyboardShortcut("3", modifiers: [.command, .option])
+                    Button("Jump to Session 4") { store.jumpToSession(index: 4) }
+                        .keyboardShortcut("4", modifiers: [.command, .option])
+                    Button("Jump to Session 5") { store.jumpToSession(index: 5) }
+                        .keyboardShortcut("5", modifiers: [.command, .option])
+                    Button("Jump to Session 6") { store.jumpToSession(index: 6) }
+                        .keyboardShortcut("6", modifiers: [.command, .option])
+                    Button("Jump to Session 7") { store.jumpToSession(index: 7) }
+                        .keyboardShortcut("7", modifiers: [.command, .option])
+                    Button("Jump to Session 8") { store.jumpToSession(index: 8) }
+                        .keyboardShortcut("8", modifiers: [.command, .option])
+                    Button("Jump to Session 9") { store.jumpToSession(index: 9) }
+                        .keyboardShortcut("9", modifiers: [.command, .option])
+                }
             }
 
             CommandGroup(after: .newItem) {

@@ -31,6 +31,14 @@ It's still early. I use it every day; you might want to wait.
 - Git-aware file tree — per-file status markers, directory roll-up, branch
   pill in the workdir header, "Show Diff vs HEAD" on any modified file,
   and "Ask Claude About This File" right from the context menu.
+- Workdir activity chip above the composer — shows what Claude's tools
+  touched since HEAD, click a row for the diff. Event-driven, no polling.
+- Session keeps working when you move its workdir — the underlying Claude
+  CLI conversation file is migrated into the new project dir so context
+  carries across the move.
+- ~60 local slash commands for git, repo inspection, clipboard/export,
+  and quick session ops — typed right in the composer.
+- Cmd+Opt+1..9 to jump to the Nth visible session in the current tab.
 - Per-session Cloudflare tunnels for remote control from your phone.
 - Real approval dialogs, not terminal prompts.
 - Dock icon that live-tints to your accent color and follows dark mode.

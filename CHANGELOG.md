@@ -4,6 +4,112 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.8.1] — 2026-04-21
+
+### Fixed
+- **Changing a session's workdir no longer breaks the Claude CLI
+  conversation.** Claude Code stores each conversation under
+  `~/.claude/projects/<dashed-abs-path>/<cliId>.jsonl`, so the resume
+  ID created in workdir A couldn't be resolved from workdir B — the
+  next send errored with "No conversation found with session ID …"
+  and the run aborted. Kiln now migrates the conversation file across
+  project dirs when the workdir changes, so the same CLI session
+  keeps resolving in the new location with full context intact. Any
+  live subprocess is killed first (you can't chdir mid-run).
+- **Pipe-drain deadlock in the shell helper.** `Process.waitUntilExit`
+  before `readDataToEndOfFile` blocks when the child writes past the
+  ~64 KB pipe buffer — `git status` in a dir with many untracked
+  files hit this easily. Stdout and stderr are now drained
+  concurrently via a DispatchGroup before we wait on exit.
+- **Workdir activity scan guards a missing directory.** If the
+  session's workdir doesn't exist or isn't a directory, `git status`
+  is skipped instead of raising inside `Process.run`.
+
+## [1.8.0] — 2026-04-21
+
+### Added
+- **Workdir activity chip** — above the composer, a small pill shows
+  how many files have uncommitted changes in the session's workdir.
+  Click it for a popover listing each file with its git status letter
+  (`M`, `A`, `D`, `R`, `??`). Click a row to open the file's diff in
+  the existing DiffSheet, or use the "Open all in diff" button for
+  the combined view. The chip disappears when the tree is clean or
+  the session isn't in a git repo — so it only draws attention when
+  there's actually something to see.
+- **Event-driven refresh.** The chip updates automatically when a
+  response completes (the moment Claude's tools would have touched
+  the disk) and when you switch between sessions. A tiny refresh
+  icon handles the edge case where you ran `git stash`/`git commit`
+  in Terminal and want Kiln to re-sync without waiting for another
+  reply. No polling — we never run `git status` unless something
+  actually happened that could have changed the tree.
+- **Cmd+Opt+1..9 — jump to the Nth visible session** in the current
+  sidebar tab (pinned first, then alphabetical, matching the list
+  order). Modelled on the browser/VS Code tab-switching pattern.
+  Cmd+1 / Cmd+2 are already bound to the code/chat tab toggle, so
+  the option modifier keeps them distinct.
+
+## [1.7.0] — 2026-04-21
+
+### Added
+- **31 more slash commands**, grouped:
+  - **Workdir inspection:** `/ls`, `/tree`, `/grep <pat>`, `/find <pat>`,
+    `/cat <file>` (capped at 400 lines), `/recent` (files touched in
+    the last 24h). All inject results as a fresh user message so Claude
+    has the context without having to shell out itself.
+  - **Git extras:** `/repo` (remote + upstream), `/diffstat`, `/upstream`,
+    `/changed` (porcelain list).
+  - **Quick-inject into composer:** `/now` (timestamp), `/date`,
+    `/clip` (clipboard → composer), `/paste` (clipboard → send now).
+  - **App state / UI:** `/expand` (open multi-line editor),
+    `/killall` (interrupt every busy session), `/readonly` (toggle the
+    composer-hiding read-only flag on the session), `/accent <hex>`
+    (live-change the accent color; validates 6-digit hex).
+  - **Info toasts:** `/version`, `/age`, `/count`, `/sessions`,
+    `/busy`, `/diag` (macOS / arch / CPU).
+  - **Navigation:** `/random` (jump to a random non-archived session),
+    `/bugs` (opens the issue tracker).
+  - **Aliases:** `/duplicate` → `/clone`, `/star` → `/pin`,
+    `/zen` → `/focus`, `/repeat` → `/retry`, `/compress` → `/compact`.
+- `/grep` auto-prefers `rg` (Homebrew) when available and falls back
+  to `grep -rn` otherwise — so the command works on a stock mac but
+  gets the good results on a configured one.
+
+## [1.6.0] — 2026-04-21
+
+### Added
+- **32 new slash commands** covering workdir, git, content and stats:
+  - Workdir: `/pwd`, `/open` (Finder), `/terminal`, `/editor`,
+    `/cd <path>`.
+  - Git: `/log`, `/branch <name>`, `/checkout <name>`, `/stash`,
+    `/unstash`, `/pull`, `/push`, `/blame <file>`.
+  - Session metadata: `/pin`, `/archive`, `/tag <name>`,
+    `/untag <name>`.
+  - Content: `/copy` (last reply), `/copycode` (last fenced block),
+    `/save <file>` (write last code block), `/share` (markdown to
+    clipboard), `/quote` (quote last reply into composer).
+  - Info: `/stats`, `/tokens`, `/env`.
+  - Aliases & misc: `/undo` (= `/rewind 1`), `/resend` (= `/retry`),
+    `/summary` (= `/title`), `/todo <text>` (appends to `TODO.md`
+    in the workdir), `/notes` (opens `~/kiln-notes.md`), `/help`.
+- `SlashCommandHelpers.swift` with a shell-safe argv-style `Process`
+  runner plus clipboard / Finder / editor utilities and message-content
+  extractors. No AppleScript, no `/bin/sh -c` — so arbitrary branch
+  names, commit messages and file paths can't break out into shell.
+
+## [1.5.3] — 2026-04-21
+
+### Fixed
+- **Tool image preview resolved against session workdir** — relative
+  paths in tool input (e.g. `docs/img.png`) were resolved against the
+  app's CWD, not the session's workdir, so previews silently failed.
+- **Agent directory scan cached (5s TTL)** — the slash popup called
+  `loadAgents()` on every keystroke, hammering `FileManager` to
+  enumerate `~/.claude/agents/`. Now cached with a short TTL.
+- **`/rewind` blocked during active generation** — rewinding mid-stream
+  would have the runtime keep appending to a message we'd already
+  dropped, corrupting session state. Now toasts "Stop generation first".
+
 ## [1.5.2] — 2026-04-21
 
 ### Fixed

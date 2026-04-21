@@ -24,6 +24,65 @@ final class ClaudeService: ObservableObject {
         cliSessionIds.first { $0.value == cliId }?.key
     }
 
+    /// Forget the CLI resume ID for a Kiln session. Last-resort — prefer
+    /// migrateCLISession when the workdir changes so conversation context
+    /// carries across the move.
+    func forgetCLISession(for sessionId: String) {
+        cliSessionIds[sessionId] = nil
+    }
+
+    /// Whether we have a CLI resume ID on file for this session.
+    func hasCLISession(for sessionId: String) -> Bool {
+        cliSessionIds[sessionId] != nil
+    }
+
+    /// Claude CLI stores each conversation at
+    /// `~/.claude/projects/<dashed-abs-path>/<cliId>.jsonl`. The "hash" is
+    /// just the absolute path with `/` rewritten to `-` — reversible and
+    /// deterministic. We build it ourselves rather than scan, because it
+    /// needs to exist before the next `claude --resume` runs.
+    private func projectDir(for workDir: String) -> URL {
+        let expanded = (workDir as NSString).expandingTildeInPath
+        let dashed = "-" + expanded
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .replacingOccurrences(of: "/", with: "-")
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".claude/projects/\(dashed)", isDirectory: true)
+    }
+
+    /// Copy the CLI conversation file from the old workdir's project dir
+    /// into the new one, so `--resume <cliId>` keeps working after the
+    /// user moves the session to a different folder. Returns true if the
+    /// migration succeeded (or wasn't needed) — false only if we had a
+    /// cliId on file but couldn't find the source file to copy.
+    ///
+    /// Note: the CLI conversation file embeds the original cwd in each
+    /// turn's metadata. Claude tolerates resuming it from a different
+    /// cwd — new turns get the new cwd and tools run there. The old
+    /// turns' cwd in the JSONL is historical but harmless.
+    @discardableResult
+    func migrateCLISession(for sessionId: String, from oldWorkDir: String, to newWorkDir: String) -> Bool {
+        guard let cliId = cliSessionIds[sessionId] else { return true }
+        if oldWorkDir == newWorkDir { return true }
+        let fm = FileManager.default
+        let src = projectDir(for: oldWorkDir).appendingPathComponent("\(cliId).jsonl")
+        let dstDir = projectDir(for: newWorkDir)
+        let dst = dstDir.appendingPathComponent("\(cliId).jsonl")
+        guard fm.fileExists(atPath: src.path) else {
+            // Source gone — drop the mapping so we don't try to --resume an
+            // unresolvable id in the new dir.
+            cliSessionIds[sessionId] = nil
+            return false
+        }
+        try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+        // If a file with the same id already exists at dst (shouldn't
+        // normally), leave it alone rather than clobber.
+        if !fm.fileExists(atPath: dst.path) {
+            try? fm.copyItem(at: src, to: dst)
+        }
+        return fm.fileExists(atPath: dst.path)
+    }
+
     private let claudePath: String
 
     init() {

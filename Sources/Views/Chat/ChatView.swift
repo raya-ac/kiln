@@ -989,9 +989,13 @@ struct ToolCallCard: View {
                 // image file, show the result alongside the diff. Sniffs
                 // file_path from the input JSON; only loads on-demand
                 // once the tool has finished (to avoid thrashing disk
-                // while Claude is mid-write).
-                if tool.isDone, let imagePath = imagePathFromInput(tool.input) {
-                    ToolImagePreview(path: imagePath, refreshKey: tool.completedAt)
+                // while Claude is mid-write). Relative paths are resolved
+                // against the active session's workDir — NSImage(contentsOfFile:)
+                // would otherwise use CWD and silently miss the file.
+                if tool.isDone,
+                   let imagePath = imagePathFromInput(tool.input),
+                   let resolved = resolveToolPath(imagePath) {
+                    ToolImagePreview(path: resolved, refreshKey: tool.completedAt)
                         .padding(.top, 8)
                 }
 
@@ -1097,6 +1101,17 @@ struct ToolCallCard: View {
 
     private func firstLine(_ s: String) -> String {
         s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? s
+    }
+
+    /// Resolve a tool-supplied path against the active session's workdir.
+    /// Claude commonly passes relative paths (`"logo.png"`, `"src/foo.ts"`);
+    /// those need to be anchored to the session, not to Kiln's CWD.
+    /// Absolute or tilde-prefixed paths are returned as-is (expanded).
+    private func resolveToolPath(_ raw: String) -> String? {
+        let expanded = (raw as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") { return expanded }
+        guard let workDir = store.activeSession?.workDir else { return nil }
+        return (workDir as NSString).appendingPathComponent(expanded)
     }
 
     /// Sniff a file_path/path key out of the tool input JSON and return

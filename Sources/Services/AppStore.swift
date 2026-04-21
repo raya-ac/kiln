@@ -17,6 +17,12 @@ final class AppStore: ObservableObject {
                 // when the app was last closed, instead of booting into
                 // the fallback "first session" every time.
                 UserDefaults.standard.set(id, forKey: "kiln.activeSessionId")
+                // Refresh the workdir activity chip — the previous session's
+                // cache is meaningless now. Deferred to the next runloop so
+                // we don't stall the selection animation with a git shellout.
+                DispatchQueue.main.async { [weak self] in
+                    self?.refreshWorkdirActivity(id)
+                }
             } else {
                 UserDefaults.standard.removeObject(forKey: "kiln.activeSessionId")
             }
@@ -151,6 +157,54 @@ final class AppStore: ObservableObject {
     /// `/diff` sheet — raw git diff for the active session's workdir.
     /// Populated on command, cleared when the sheet dismisses.
     @Published var diffSheetContent: String?
+
+    /// Per-session cache of `git status --porcelain` output — populated on
+    /// session activation and refreshed every time a response completes.
+    /// The activity chip above the composer reads from here so the UI can
+    /// stay in sync without the view itself shelling out to git.
+    @Published var workdirChanges: [String: [ChangedFile]] = [:]
+
+    /// Refresh the cached changed-file list for a session. Cheap enough
+    /// to run on the main queue — `git status` on a repo of a few thousand
+    /// files takes a handful of ms. If it starts to matter we can hop
+    /// to a detached task, but for now simplicity wins.
+    /// Jump to the Nth visible session in the current sidebar tab
+    /// (1-indexed). No-op if there aren't that many. Used by the
+    /// Cmd+Opt+1..9 shortcuts in the File menu.
+    func jumpToSession(index n: Int) {
+        let visible = sessions
+            .filter { !$0.isArchived && $0.kind == selectedSidebarTab }
+            .sorted { lhs, rhs in
+                // Pinned first, then alphabetical — matches the sidebar
+                // rendering, so "Jump to Session 1" lines up visually.
+                if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+                return lhs.name.lowercased() < rhs.name.lowercased()
+            }
+        guard n >= 1, n <= visible.count else { return }
+        activeSessionId = visible[n - 1].id
+    }
+
+    /// Runs `git status` off the main thread — even a well-written scan
+    /// can take hundreds of ms in a monorepo with lots of untracked files,
+    /// and doing it inline was beachballing the UI every time a response
+    /// completed.
+    ///
+    /// We use GCD rather than Task.detached to sidestep any Sendable
+    /// friction with AppStore (not an actor, not @MainActor-annotated).
+    /// Dispatch hop back to main to mutate @Published state.
+    func refreshWorkdirActivity(_ sessionId: String) {
+        guard let s = sessions.first(where: { $0.id == sessionId }) else {
+            workdirChanges[sessionId] = nil
+            return
+        }
+        let workDir = s.workDir
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let files = WorkdirActivity.scan(workDir)
+            DispatchQueue.main.async {
+                self?.workdirChanges[sessionId] = files
+            }
+        }
+    }
 
     /// Tool-approval requests awaiting the user. The ApprovalDialog sheet
     /// renders the first entry; the HTTP hook handler is blocked on a
@@ -731,6 +785,17 @@ final class AppStore: ObservableObject {
     func setWorkDir(_ id: String, workDir: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         let old = sessions[idx]
+        // Workdir changed? Claude Code stores sessions per-workdir-hash
+        // under `~/.claude/projects/<dashed-abs-path>/<cliId>.jsonl`, so a
+        // resume-id created in workdir A cannot be resolved from workdir B
+        // — `claude --resume` errors with "No conversation found". Migrate
+        // the session file across project dirs so the conversation keeps
+        // working after the move. Also kill any live process; you can't
+        // chdir mid-run.
+        if old.workDir != workDir {
+            claude.kill(sessionId: id)
+            claude.migrateCLISession(for: id, from: old.workDir, to: workDir)
+        }
         var fresh = Session(
             id: old.id,
             workDir: workDir,
@@ -750,6 +815,15 @@ final class AppStore: ObservableObject {
         fresh.wasInterrupted = old.wasInterrupted
         sessions[idx] = fresh
         Persistence.saveSession(fresh)
+        // The @file picker caches paths per workdir. The cache for the
+        // OLD dir is fine to keep, but if the user types @ in the new
+        // dir, we want fresh results. Invalidate so the next query walks.
+        WorkdirFileIndex.shared.invalidate(workDir)
+        // Activity chip also keyed on workdir content — flush and re-scan.
+        workdirChanges[id] = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshWorkdirActivity(id)
+        }
     }
 
     func setGroup(_ id: String, group: String?) {
@@ -1693,6 +1767,10 @@ final class AppStore: ObservableObject {
         case .done:
             finalizeAssistantMessage(sessionId: sessionId)
             mutateRuntime(sessionId) { $0.isBusy = false }
+            // Tool calls may have touched the workdir — re-scan so the
+            // activity chip above the composer reflects reality. Event-
+            // driven, not polled: git status runs at most once per reply.
+            refreshWorkdirActivity(sessionId)
             if generatingSessionId == sessionId {
                 generatingSessionId = busySessionIds.first
             }
