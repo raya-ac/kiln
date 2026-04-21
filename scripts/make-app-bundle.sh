@@ -100,6 +100,10 @@ fi
 if [ -f "$ROOT/Sources/App/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Sources/App/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Bundle CHANGELOG so the "What's New" popup has something to read.
+if [ -f "$ROOT/CHANGELOG.md" ]; then
+  cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
+fi
 
 # 5. Info.plist. LSMinimumSystemVersion stays 14.0 — both arches support
 # the same floor; Sparkle uses sparkle:machineArchitectures to pick.

@@ -209,14 +209,12 @@ struct FileTreeView: View {
             if showingEditor, let idx = activeIndex {
                 let path = openFiles[idx].path
 
-                // Header strip (filename, dirty dot, save, language badge).
+                // Header strip (breadcrumbs, dirty dot, save, language badge).
                 HStack(spacing: 6) {
                     Image(systemName: iconForFile(URL(fileURLWithPath: path).lastPathComponent))
                         .font(.system(size: 10))
                         .foregroundStyle(Color.kilnAccent)
-                    Text(URL(fileURLWithPath: path).lastPathComponent)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.kilnText)
+                    EditorBreadcrumbs(path: path, workDir: currentWorkDir)
                     if openFiles[idx].isDirty {
                         Circle()
                             .fill(Color.kilnAccent)
@@ -990,6 +988,7 @@ struct FileRow: View {
     var onSiblingsChanged: () -> Void = {}
     let depth: Int
 
+    @EnvironmentObject var store: AppStore
     @State private var expanded = false
     @State private var children: [FileEntry]?
     @State private var hovering = false
@@ -1053,6 +1052,9 @@ struct FileRow: View {
                         Button { onShowGitDiff(entry.path) }
                             label: { Label("Show Diff vs HEAD", systemImage: "arrow.triangle.2.circlepath") }
                     }
+                    Button {
+                        store.composerPrefill = "About `\(entry.path)`:\n\n"
+                    } label: { Label("Ask Claude About This File", systemImage: "sparkles") }
                     Divider()
                 }
                 if entry.isDirectory {
@@ -1504,6 +1506,83 @@ struct DiffRow: View {
         }
         .padding(.vertical, 1)
         .background(DiffView.rowBackground(line.kind))
+    }
+}
+
+// MARK: - Editor breadcrumbs
+//
+// Path components above the editor, rendered as separated, clickable
+// segments. Each folder component opens that folder in Finder; the last
+// segment (the file itself) reveals it. Keeps the header compact by
+// truncating the middle when the path is deep, showing at most a head,
+// a middle ellipsis, and the last two components.
+
+struct EditorBreadcrumbs: View {
+    let path: String
+    let workDir: String
+
+    private var components: [(name: String, fullPath: String)] {
+        // Strip the workDir prefix so breadcrumbs show the project-relative
+        // path rather than `/Users/you/.../project/src/...`.
+        let rel: String = {
+            if path.hasPrefix(workDir + "/") {
+                return String(path.dropFirst(workDir.count + 1))
+            }
+            return path
+        }()
+        let parts = rel.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        var out: [(String, String)] = []
+        var acc = workDir
+        for part in parts {
+            acc = (acc as NSString).appendingPathComponent(part)
+            out.append((part, acc))
+        }
+        return out
+    }
+
+    /// Collapse the middle when the trail is deep. Keeps the first
+    /// component and the last two so context ("src / .../ Views / Foo.swift")
+    /// is always legible.
+    private var displayComponents: [(name: String, fullPath: String, isEllipsis: Bool)] {
+        let all = components
+        guard all.count > 4 else {
+            return all.map { ($0.name, $0.fullPath, false) }
+        }
+        var out: [(String, String, Bool)] = []
+        out.append((all[0].name, all[0].fullPath, false))
+        out.append(("…", all[all.count - 3].fullPath, true))
+        out.append((all[all.count - 2].name, all[all.count - 2].fullPath, false))
+        out.append((all[all.count - 1].name, all[all.count - 1].fullPath, false))
+        return out
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(displayComponents.enumerated()), id: \.offset) { idx, comp in
+                if idx > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+                Button {
+                    if comp.isEllipsis { return }
+                    let url = URL(fileURLWithPath: comp.fullPath)
+                    if idx == displayComponents.count - 1 {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } else {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Text(comp.name)
+                        .font(.system(size: 11, weight: idx == displayComponents.count - 1 ? .semibold : .regular))
+                        .foregroundStyle(idx == displayComponents.count - 1 ? Color.kilnText : Color.kilnTextSecondary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .disabled(comp.isEllipsis)
+                .help(comp.isEllipsis ? "" : comp.fullPath)
+            }
+        }
     }
 }
 

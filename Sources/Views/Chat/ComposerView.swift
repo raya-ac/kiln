@@ -125,6 +125,20 @@ struct ComposerView: View {
                             else { input += "\n" }
                         }
                         .onAppear { isFocused = true }
+                        .onChange(of: store.composerPrefill) { _, new in
+                            // External prefill hook (e.g. "Ask Claude about
+                            // this file"). Append with a separator if the
+                            // user already has text typed; otherwise just
+                            // drop it in. Always focus and clear the signal.
+                            guard let text = new, !text.isEmpty else { return }
+                            if input.isEmpty {
+                                input = text
+                            } else {
+                                input += input.hasSuffix("\n") ? text : "\n" + text
+                            }
+                            isFocused = true
+                            DispatchQueue.main.async { store.composerPrefill = nil }
+                        }
                         .disableAutocorrection(!store.settings.spellCheck)
                         .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .tiff]) { providers in
                             handlePaste(providers)

@@ -18,6 +18,7 @@ final class AppStore: ObservableObject {
     }
     @Published var showNewSessionSheet = false
     @Published var showSessionTemplates = false
+    @Published var showWhatsNew = false
     @Published var showShortcutsOverlay = false
     /// First-run onboarding. Drives the OnboardingSheet overlay — walks
     /// through the welcome, checks for Claude Code, and helps install it
@@ -198,6 +199,13 @@ final class AppStore: ObservableObject {
     }
     @Published var pendingSend: PendingSend?
     private var pendingSendTask: Task<Void, Never>?
+
+    /// One-shot signal to prefill the composer input. Set from the
+    /// file-tree "Ask Claude about this file" action (or anywhere else
+    /// that wants to seed a prompt). ComposerView observes this, inserts
+    /// the text at the current caret, focuses the field, and clears the
+    /// signal so re-sending the same string fires again.
+    @Published var composerPrefill: String?
 
     func cancelPendingSend() -> (text: String, attachments: [ComposerAttachment])? {
         guard let pending = pendingSend else { return nil }

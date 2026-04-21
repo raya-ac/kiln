@@ -229,6 +229,17 @@ struct ContentView: View {
                 .environmentObject(store)
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
+        .sheet(isPresented: $store.showWhatsNew) {
+            if let version = WhatsNew.currentVersion,
+               let changelog = WhatsNew.loadChangelog(),
+               let body = WhatsNew.sectionBody(for: version, in: changelog) {
+                WhatsNewView(version: version, notes: body) {
+                    WhatsNew.markSeen(version)
+                    store.showWhatsNew = false
+                }
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
+            }
+        }
         // PreToolUse approvals: while the queue is non-empty, block on the
         // head of the queue. The hook that spawned the request is suspended
         // on a CheckedContinuation until the user resolves it.
@@ -304,7 +315,18 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.15), value: store.showCommandPalette)
         .animation(.easeOut(duration: 0.15), value: store.showGlobalSearch)
-        .onAppear { CompletionNotifier.shared.requestAuthorization() }
+        .onAppear {
+            CompletionNotifier.shared.requestAuthorization()
+            // Fire "What's New" once per version. Skipped on dev runs where
+            // CFBundleShortVersionString isn't populated. Also skipped if
+            // we're showing onboarding — new users don't need a changelog.
+            if !store.showOnboarding, WhatsNew.shouldShow,
+               let version = WhatsNew.currentVersion,
+               let changelog = WhatsNew.loadChangelog(),
+               WhatsNew.sectionBody(for: version, in: changelog) != nil {
+                store.showWhatsNew = true
+            }
+        }
         .onChange(of: store.isBusy) { wasBusy, isBusy in
             if wasBusy && !isBusy && store.settings.notifyOnCompletion {
                 CompletionNotifier.shared.notifyIfUnfocused(

@@ -22,6 +22,20 @@ I wanted the feel of a native editor — command palette, keyboard shortcuts, a 
 
 It's still early. I use it every day; you might want to wait.
 
+## What's in it
+
+- Sessions per project, code and chat split into two sidebars.
+- Command palette (⌘K), Quick Open (⌘P), global message search (⇧⌘F).
+- Built-in editor with inline Claude diffs (accept / revert), breadcrumbs,
+  and keyboard shortcuts.
+- Git-aware file tree — per-file status markers, directory roll-up, branch
+  pill in the workdir header, "Show Diff vs HEAD" on any modified file,
+  and "Ask Claude About This File" right from the context menu.
+- Per-session Cloudflare tunnels for remote control from your phone.
+- Real approval dialogs, not terminal prompts.
+- Dock icon that live-tints to your accent color and follows dark mode.
+- Sparkle auto-updates.
+
 ## Running it
 
 Clone and build:
