@@ -12,27 +12,51 @@ import AppKit
 
 enum DockIconRenderer {
     /// Render the Kiln mark at 512pt (Dock size is capped there anyway)
-    /// using `accent` as the tile color. The glyph stays near-black so
-    /// contrast holds regardless of how light the accent is; darker
-    /// accents still read fine because the glyph is much smaller than the
-    /// tile.
-    static func render(accent: NSColor, size: CGFloat = 512) -> NSImage {
-        let rect = NSRect(x: 0, y: 0, width: size, height: size)
-        let image = NSImage(size: rect.size)
+    /// using `accent` as the tile color. The tile is inset from the
+    /// canvas to match Apple's icon grid — native app icons reserve
+    /// ~10% around the visible mark for shadow/padding, and without it
+    /// our tile sits noticeably larger than neighbors in the Dock.
+    ///
+    /// `dark` flips the tile to a neutral dark background with the accent
+    /// driving the glyph — better for dark-mode Docks where a bright
+    /// saturated square sticks out. Light mode keeps the accent as the
+    /// tile so the icon still reads as "the colored flame app."
+    static func render(accent: NSColor, dark: Bool, size: CGFloat = 512) -> NSImage {
+        let canvas = NSRect(x: 0, y: 0, width: size, height: size)
+        let image = NSImage(size: canvas.size)
         image.lockFocus()
         defer { image.unlockFocus() }
 
-        let radius = size * 0.22
-        let tile = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-        accent.setFill()
+        // Apple icon grid: the mark occupies ~824/1024 of the canvas, i.e.
+        // ~9.77% padding per side. 0.1 is close enough and leaves a hair
+        // of breathing room for the Dock's drop shadow.
+        let inset = size * 0.10
+        let tileRect = canvas.insetBy(dx: inset, dy: inset)
+        let radius = tileRect.width * 0.225   // relative to tile, not canvas
+
+        let tileColor: NSColor
+        let glyphColor: NSColor
+        if dark {
+            // Dark-mode tile: near-black with the accent driving the
+            // flame. Reads like a "native" dark icon with a pop of user
+            // color, same vibe as Terminal / Xcode in dark mode.
+            tileColor = NSColor(srgbRed: 0x1C/255, green: 0x1C/255, blue: 0x1E/255, alpha: 1)
+            glyphColor = accent
+        } else {
+            // Light-mode tile: accent is the tile, glyph picks
+            // black-or-white via WCAG luminance so contrast holds across
+            // the full accent palette.
+            tileColor = accent
+            glyphColor = contrastingGlyphColor(for: accent)
+        }
+
+        let tile = NSBezierPath(roundedRect: tileRect, xRadius: radius, yRadius: radius)
+        tileColor.setFill()
         tile.fill()
 
-        // Glyph color: pick dark-on-light or light-on-dark based on the
-        // accent's luminance. Pure black/white read cleaner than any fixed
-        // brand color once the accent hue varies freely.
-        let glyphColor = contrastingGlyphColor(for: accent)
-
-        let glyphSize = size * 0.62
+        // Glyph sizing is relative to the tile, not the canvas, so the
+        // inset doesn't shrink the mark visually.
+        let glyphSize = tileRect.width * 0.62
         let config = NSImage.SymbolConfiguration(pointSize: glyphSize, weight: .heavy)
         guard let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: nil)?
                 .withSymbolConfiguration(config) else {
@@ -50,8 +74,8 @@ enum DockIconRenderer {
         glyphCanvas.unlockFocus()
 
         let flameRect = NSRect(
-            x: (size - flame.size.width) / 2,
-            y: (size - flame.size.height) / 2,
+            x: tileRect.midX - flame.size.width / 2,
+            y: tileRect.midY - flame.size.height / 2,
             width: flame.size.width,
             height: flame.size.height
         )
@@ -60,12 +84,12 @@ enum DockIconRenderer {
         return image
     }
 
-    /// Push a freshly rendered icon onto the Dock. Safe to call off the
-    /// main actor — AppKit marshals the assignment internally, but we
-    /// jump to main anyway to keep semantics clear.
+    /// Push a freshly rendered icon onto the Dock. The `dark` mode is
+    /// read from the app's effective appearance at render time.
     @MainActor
     static func apply(accent: NSColor) {
-        let img = render(accent: accent)
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let img = render(accent: accent, dark: dark)
         NSApp.applicationIconImage = img
     }
 

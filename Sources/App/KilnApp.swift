@@ -146,6 +146,7 @@ struct KilnApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated(unsafe) static var urlHandler: ((URL) -> Void)?
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -157,6 +158,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // persisted settings file.
         if let hex = Persistence.loadSettings().accentHex as String?, !hex.isEmpty {
             DockIconRenderer.apply(accent: NSColor(kilnHexString: hex))
+        }
+
+        // Re-render the Dock icon when the effective appearance changes —
+        // catches both system-wide dark-mode flips (when theme == system)
+        // and the user's own theme override (which sets NSApp.appearance).
+        // ContentView also re-applies on accent/theme change, but KVO is
+        // the only way to react to a system flip without a settings edit.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            let hex = Persistence.loadSettings().accentHex
+            Task { @MainActor in
+                DockIconRenderer.apply(accent: NSColor(kilnHexString: hex))
+            }
         }
 
         // Register kiln:// URL scheme handler (works even without Info.plist entry
