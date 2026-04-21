@@ -793,7 +793,9 @@ final class AppStore: ObservableObject {
         // working after the move. Also kill any live process; you can't
         // chdir mid-run.
         if old.workDir != workDir {
-            claude.kill(sessionId: id)
+            // migrateCLISession terminates any live subprocess + waits for
+            // exit before copying, so we don't need a separate kill here —
+            // doing both would double-signal the process.
             claude.migrateCLISession(for: id, from: old.workDir, to: workDir)
         }
         var fresh = Session(

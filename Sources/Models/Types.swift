@@ -691,11 +691,11 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
                 search: "Cerca sessioni…", clearMessages: "Cancella messaggi",
                 deleteConfirm: "Vuoi davvero eliminare", cantUndo: "L'operazione non è annullabile."
             )
-            s.forked = "fork"; s.you = "Tu"; s.save = "Salva"; s.loading = "Caricamento…"
+            s.forked = "biforcato"; s.you = "Tu"; s.save = "Salva"; s.loading = "Caricamento…"
             s.notGitRepo = "Non è un repo git"; s.commitMessage = "Messaggio di commit…"
             s.browse = "Sfoglia"; s.createSession = "Crea sessione"
             s.workingDirectory = "CARTELLA DI LAVORO"; s.model = "MODELLO"
-            s.tagline = "Una casa nativa per Claude."
+            s.tagline = "Un ambiente nativo per Claude."
             s.defaults = "PREDEFINITI"; s.language = "LINGUA"; s.memory = "MEMORIA (ENGRAM)"; s.about = "INFO"
             s.systemPrompt = "Prompt di sistema"; s.resetToDefault = "Ripristina"; s.enableEngram = "Abilita Engram"
             s.setGroup = "Imposta gruppo…"; s.moveToGroup = "Sposta nel gruppo"
@@ -733,7 +733,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
                 search: "Procurar sessões…", clearMessages: "Limpar mensagens",
                 deleteConfirm: "Tem a certeza que quer eliminar", cantUndo: "Esta ação não pode ser desfeita."
             )
-            s.forked = "fork"; s.you = "Tu"; s.save = "Guardar"; s.loading = "A carregar…"
+            s.forked = "bifurcado"; s.you = "Tu"; s.save = "Guardar"; s.loading = "A carregar…"
             s.notGitRepo = "Não é um repo git"; s.commitMessage = "Mensagem de commit…"
             s.browse = "Procurar"; s.createSession = "Criar sessão"
             s.workingDirectory = "DIRETÓRIO DE TRABALHO"; s.model = "MODELO"
@@ -770,7 +770,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
                 learnMore: "Узнать больше", send: "Отправить", stop: "Стоп", selectFile: "Выберите файл",
                 files: "Файлы", git: "Git", terminal: "Терминал", delete: "Удалить", cancel: "Отмена",
                 rename: "Переименовать", pin: "Закрепить", unpin: "Открепить", fork: "Форк", copy: "Копировать",
-                commit: "Коммит", push: "Push", pull: "Pull", changes: "Изменения",
+                commit: "Коммит", push: "Пуш", pull: "Пул", changes: "Изменения",
                 recentCommits: "Последние коммиты", cleanTree: "Рабочее дерево чисто",
                 search: "Поиск сессий…", clearMessages: "Очистить сообщения",
                 deleteConfirm: "Вы уверены, что хотите удалить", cantUndo: "Это действие нельзя отменить."
@@ -840,7 +840,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.activityHint = "Claude가 작성한 코드와 실행한 명령어가 여기에 표시됩니다."
             s.callsSuffix = "호출"
             s.filterFiles = "파일 필터…"; s.noFilesMatch = "일치하는 파일이 없습니다"
-            s.think = "사고"; s.noThink = "사고 안 함"; s.turnsSuffix = "턴"
+            s.think = "생각"; s.noThink = "생각 안 함"; s.turnsSuffix = "턴"
             s.effortLow = "낮음"; s.effortMed = "중간"; s.effortHigh = "높음"; s.effortMax = "최대"
             s.stats = "통계"; s.statsMessages = "메시지"; s.statsStreak = "연속"
             s.statsActiveDays = "활동 일수"; s.statsSessions = "세션"; s.statsModels = "모델"
@@ -914,7 +914,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.error = "त्रुटि"; s.done = "पूर्ण"; s.running = "चल रहा है…"
             s.input = "इनपुट"; s.output = "आउटपुट"
             s.justNow = "अभी"; s.yesterday = "कल"
-            s.mAgo = "मि"; s.hAgo = "घं"; s.dAgo = "दि"; s.msgs = "संदेश"
+            s.mAgo = "मि पहले"; s.hAgo = "घं पहले"; s.dAgo = "दि पहले"; s.msgs = "संदेश"
             s.path = "पथ"; s.permissionsLabel = "अनुमतियाँ"; s.workDir = "कार्य निर्देशिका"
             s.modeLabel = "मोड"; s.modelLabel = "मॉडल"; s.languageLabel = "भाषा"
             s.langDescription = "Claude चयनित भाषा में उत्तर देगा। UI लेबल भी अपडेट होंगे।"
@@ -989,7 +989,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.notGitRepo = "To nie repozytorium git"; s.commitMessage = "Wiadomość commita…"
             s.browse = "Przeglądaj"; s.createSession = "Utwórz sesję"
             s.workingDirectory = "KATALOG ROBOCZY"; s.model = "MODEL"
-            s.tagline = "Natywny dom dla Claude."
+            s.tagline = "Domowe środowisko dla Claude."
             s.defaults = "DOMYŚLNE"; s.language = "JĘZYK"; s.memory = "PAMIĘĆ (ENGRAM)"; s.about = "O PROGRAMIE"
             s.systemPrompt = "Prompt systemowy"; s.resetToDefault = "Przywróć domyślne"; s.enableEngram = "Włącz Engram"
             s.setGroup = "Ustaw grupę…"; s.moveToGroup = "Przenieś do grupy"
@@ -1031,7 +1031,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.notGitRepo = "Git deposu değil"; s.commitMessage = "Commit mesajı…"
             s.browse = "Gözat"; s.createSession = "Oturum oluştur"
             s.workingDirectory = "ÇALIŞMA DİZİNİ"; s.model = "MODEL"
-            s.tagline = "Claude için yerli bir yuva."
+            s.tagline = "Claude için yerel bir ev."
             s.defaults = "VARSAYILANLAR"; s.language = "DİL"; s.memory = "BELLEK (ENGRAM)"; s.about = "HAKKINDA"
             s.systemPrompt = "Sistem istemi"; s.resetToDefault = "Varsayılana sıfırla"; s.enableEngram = "Engram'ı etkinleştir"
             s.setGroup = "Grup ayarla…"; s.moveToGroup = "Gruba taşı"
@@ -1073,7 +1073,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.notGitRepo = "Inte ett git-repo"; s.commitMessage = "Commit-meddelande…"
             s.browse = "Bläddra"; s.createSession = "Skapa session"
             s.workingDirectory = "ARBETSMAPP"; s.model = "MODELL"
-            s.tagline = "Ett nativt hem för Claude."
+            s.tagline = "Ett inbyggt hem för Claude."
             s.defaults = "STANDARD"; s.language = "SPRÅK"; s.memory = "MINNE (ENGRAM)"; s.about = "OM"
             s.systemPrompt = "Systemprompt"; s.resetToDefault = "Återställ standard"; s.enableEngram = "Aktivera Engram"
             s.setGroup = "Ange grupp…"; s.moveToGroup = "Flytta till grupp"

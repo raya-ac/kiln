@@ -64,10 +64,22 @@ final class ClaudeService: ObservableObject {
     func migrateCLISession(for sessionId: String, from oldWorkDir: String, to newWorkDir: String) -> Bool {
         guard let cliId = cliSessionIds[sessionId] else { return true }
         if oldWorkDir == newWorkDir { return true }
+
+        // If a subprocess for this session is still running, wait for it to
+        // exit before we copy — otherwise the child can be mid-write to
+        // <cliId>.jsonl while we're snapshotting it, yielding a truncated
+        // transcript at the destination.
+        if let p = runningProcesses[sessionId], p.isRunning {
+            p.terminate()
+            p.waitUntilExit()
+        }
+
         let fm = FileManager.default
-        let src = projectDir(for: oldWorkDir).appendingPathComponent("\(cliId).jsonl")
+        let srcDir = projectDir(for: oldWorkDir)
         let dstDir = projectDir(for: newWorkDir)
+        let src = srcDir.appendingPathComponent("\(cliId).jsonl")
         let dst = dstDir.appendingPathComponent("\(cliId).jsonl")
+
         guard fm.fileExists(atPath: src.path) else {
             // Source gone — drop the mapping so we don't try to --resume an
             // unresolvable id in the new dir.
@@ -75,11 +87,30 @@ final class ClaudeService: ObservableObject {
             return false
         }
         try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
-        // If a file with the same id already exists at dst (shouldn't
-        // normally), leave it alone rather than clobber.
-        if !fm.fileExists(atPath: dst.path) {
-            try? fm.copyItem(at: src, to: dst)
+
+        // Destination already has a file with this id? That means a *different*
+        // conversation under the new workdir shares the cliId (cosmically
+        // unlikely but not impossible with restored backups). Refuse to
+        // clobber, and drop the mapping so the next send starts fresh rather
+        // than silently resuming the wrong conversation.
+        if fm.fileExists(atPath: dst.path) {
+            cliSessionIds[sessionId] = nil
+            return false
         }
+        try? fm.copyItem(at: src, to: dst)
+
+        // The transcript may have a sibling `<cliId>/` directory holding
+        // subagent state, cached tool results, etc. Copy it too so agents
+        // and tool-result caches keep working after the move. Missing
+        // sibling is fine — newer CLI versions may not use it.
+        let srcSidecar = srcDir.appendingPathComponent(cliId, isDirectory: true)
+        let dstSidecar = dstDir.appendingPathComponent(cliId, isDirectory: true)
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: srcSidecar.path, isDirectory: &isDir), isDir.boolValue,
+           !fm.fileExists(atPath: dstSidecar.path) {
+            try? fm.copyItem(at: srcSidecar, to: dstSidecar)
+        }
+
         return fm.fileExists(atPath: dst.path)
     }
 

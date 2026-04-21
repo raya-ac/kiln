@@ -149,6 +149,13 @@ enum SlashHelpers {
                 current!.append(line)
             }
         }
+        // Unterminated final fence — common when a reply was interrupted or
+        // cut off mid-stream. Treat it as the last block rather than silently
+        // dropping the content, otherwise `/save` and `/copycode` report
+        // "no code block" on visibly-present code.
+        if let open = current, !open.isEmpty {
+            blocks.append(open)
+        }
         return blocks.last?.joined(separator: "\n")
     }
 

@@ -694,49 +694,71 @@ struct ComposerView: View {
         // --- git wrappers ---
         case "/log":
             // Inject the last 5 commits as a user message — gives Claude
-            // cheap orientation without having to shell out itself.
+            // cheap orientation without having to shell out itself. Off
+            // main: big histories in a heavy repo can take 100+ ms to
+            // walk, which beachballs the composer.
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["log", "--oneline", "-n", "5"], in: dir)
-            if r.status == 0 {
-                Task { await store.sendMessage("Recent commits:\n```\n\(r.out)```") }
-            } else {
-                ToastCenter.shared.show("git log failed", kind: .error)
+            Task.detached {
+                let r = SlashHelpers.git(["log", "--oneline", "-n", "5"], in: dir)
+                await MainActor.run {
+                    if r.status == 0 {
+                        Task { await store.sendMessage("Recent commits:\n```\n\(r.out)```") }
+                    } else {
+                        ToastCenter.shared.show("git log failed", kind: .error)
+                    }
+                }
             }
         case "/branch":
             let name = arg.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, let dir = store.activeSession?.workDir else {
                 ToastCenter.shared.show("Usage: /branch name", kind: .error); break
             }
-            let r = SlashHelpers.git(["checkout", "-b", name], in: dir)
-            ToastCenter.shared.show(
-                r.status == 0 ? "On branch \(name)" : "branch failed: \(r.err.trimmingCharacters(in: .whitespacesAndNewlines))",
-                kind: r.status == 0 ? .success : .error,
-                duration: r.status == 0 ? 2.0 : 3.5
-            )
+            Task.detached {
+                let r = SlashHelpers.git(["checkout", "-b", name], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "On branch \(name)" : "branch failed: \(r.err.trimmingCharacters(in: .whitespacesAndNewlines))",
+                        kind: r.status == 0 ? .success : .error,
+                        duration: r.status == 0 ? 2.0 : 3.5
+                    )
+                }
+            }
         case "/checkout":
             let name = arg.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, let dir = store.activeSession?.workDir else {
                 ToastCenter.shared.show("Usage: /checkout branch", kind: .error); break
             }
-            let r = SlashHelpers.git(["checkout", name], in: dir)
-            ToastCenter.shared.show(
-                r.status == 0 ? "On branch \(name)" : "checkout failed",
-                kind: r.status == 0 ? .success : .error
-            )
+            Task.detached {
+                let r = SlashHelpers.git(["checkout", name], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "On branch \(name)" : "checkout failed",
+                        kind: r.status == 0 ? .success : .error
+                    )
+                }
+            }
         case "/stash":
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["stash", "push", "-u"], in: dir)
-            ToastCenter.shared.show(
-                r.status == 0 ? "Stashed" : "stash failed",
-                kind: r.status == 0 ? .success : .error
-            )
+            Task.detached {
+                let r = SlashHelpers.git(["stash", "push", "-u"], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "Stashed" : "stash failed",
+                        kind: r.status == 0 ? .success : .error
+                    )
+                }
+            }
         case "/unstash":
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["stash", "pop"], in: dir)
-            ToastCenter.shared.show(
-                r.status == 0 ? "Stash popped" : "unstash failed",
-                kind: r.status == 0 ? .success : .error
-            )
+            Task.detached {
+                let r = SlashHelpers.git(["stash", "pop"], in: dir)
+                await MainActor.run {
+                    ToastCenter.shared.show(
+                        r.status == 0 ? "Stash popped" : "unstash failed",
+                        kind: r.status == 0 ? .success : .error
+                    )
+                }
+            }
         case "/pull":
             guard let dir = store.activeSession?.workDir else { break }
             // git can take a while — run detached so the UI stays live.
@@ -767,13 +789,17 @@ struct ComposerView: View {
             guard !file.isEmpty, let dir = store.activeSession?.workDir else {
                 ToastCenter.shared.show("Usage: /blame path/to/file", kind: .error); break
             }
-            let r = SlashHelpers.git(["blame", "--date=short", file], in: dir)
-            if r.status == 0 {
-                // Cap at ~200 lines to avoid dumping a 5k-line file as context.
-                let lines = r.out.split(separator: "\n").prefix(200).joined(separator: "\n")
-                Task { await store.sendMessage("Blame for `\(file)`:\n```\n\(lines)\n```") }
-            } else {
-                ToastCenter.shared.show("blame failed: \(r.err.prefix(120))", kind: .error)
+            Task.detached {
+                let r = SlashHelpers.git(["blame", "--date=short", file], in: dir)
+                await MainActor.run {
+                    if r.status == 0 {
+                        // Cap at ~200 lines to avoid dumping a 5k-line file as context.
+                        let lines = r.out.split(separator: "\n").prefix(200).joined(separator: "\n")
+                        Task { await store.sendMessage("Blame for `\(file)`:\n```\n\(lines)\n```") }
+                    } else {
+                        ToastCenter.shared.show("blame failed: \(r.err.prefix(120))", kind: .error)
+                    }
+                }
             }
 
         // --- session metadata ---
@@ -826,19 +852,32 @@ struct ComposerView: View {
             guard let code = SlashHelpers.lastCodeBlock(in: store.activeSession) else {
                 ToastCenter.shared.show("No code block in last reply", kind: .error); break
             }
-            let target: String = {
-                if rel.hasPrefix("/") || rel.hasPrefix("~") {
-                    return (rel as NSString).expandingTildeInPath
-                }
-                return (dir as NSString).appendingPathComponent(rel)
-            }()
+            // Confine writes to the session's workdir. Absolute paths (`/…`
+            // or `~/…`) used to silently escape the workdir — one assistant
+            // message with a fenced shell script plus `/save ~/.zshrc` would
+            // clobber a dotfile. Reject those paths; force the user to cd
+            // into the dir via the workdir header if they want to write
+            // elsewhere.
+            if rel.hasPrefix("/") || rel.hasPrefix("~") {
+                ToastCenter.shared.show("/save writes inside the session's workdir only — use a relative path", kind: .error)
+                break
+            }
+            let target = (dir as NSString).appendingPathComponent(rel)
+            // Canonicalise and re-check — a relative path with `..` can still
+            // climb above the workdir. Compare standardised absolute paths.
+            let resolvedTarget = URL(fileURLWithPath: target).standardizedFileURL.path
+            let resolvedDir = URL(fileURLWithPath: dir).standardizedFileURL.path
+            guard resolvedTarget == resolvedDir || resolvedTarget.hasPrefix(resolvedDir + "/") else {
+                ToastCenter.shared.show("/save path escapes the workdir (\(rel))", kind: .error)
+                break
+            }
             do {
                 // Make sure the parent dir exists — surfaces the common
                 // "no such file or directory" error before the write fails.
-                let parent = (target as NSString).deletingLastPathComponent
+                let parent = (resolvedTarget as NSString).deletingLastPathComponent
                 try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
-                try code.write(toFile: target, atomically: true, encoding: .utf8)
-                ToastCenter.shared.show("Saved → \(target)", kind: .success, duration: 3.0)
+                try code.write(toFile: resolvedTarget, atomically: true, encoding: .utf8)
+                ToastCenter.shared.show("Saved → \(resolvedTarget)", kind: .success, duration: 3.0)
             } catch {
                 ToastCenter.shared.show("save failed: \(error.localizedDescription)", kind: .error)
             }
@@ -960,10 +999,12 @@ struct ComposerView: View {
             guard !pat.isEmpty, let dir = store.activeSession?.workDir else {
                 ToastCenter.shared.show("Usage: /find *.swift", kind: .error); break
             }
-            let r = SlashHelpers.run("/usr/bin/find", args: [dir, "-name", pat, "-not", "-path", "*/.*"])
-            let lines = r.out.split(separator: "\n").prefix(80).joined(separator: "\n")
-            let body = lines.isEmpty ? "(no matches)" : String(lines)
-            Task { await store.sendMessage("Files matching `\(pat)`:\n```\n\(body)\n```") }
+            Task.detached {
+                let r = SlashHelpers.run("/usr/bin/find", args: [dir, "-name", pat, "-not", "-path", "*/.*"])
+                let lines = r.out.split(separator: "\n").prefix(80).joined(separator: "\n")
+                let body = lines.isEmpty ? "(no matches)" : String(lines)
+                await store.sendMessage("Files matching `\(pat)`:\n```\n\(body)\n```")
+            }
         case "/cat":
             let rel = arg.trimmingCharacters(in: .whitespaces)
             guard !rel.isEmpty, let dir = store.activeSession?.workDir else {
@@ -986,47 +1027,64 @@ struct ComposerView: View {
             Task { await store.sendMessage("`\(rel)`:\n```\n\(clipped)\(note)\n```") }
         case "/recent":
             guard let dir = store.activeSession?.workDir else { break }
-            // Files changed in the last day, minus junk dirs.
-            let r = SlashHelpers.run("/usr/bin/find", args: [
-                dir, "-type", "f",
-                "-not", "-path", "*/.*",
-                "-not", "-path", "*/node_modules/*",
-                "-not", "-path", "*/.build/*",
-                "-mtime", "-1",
-            ])
-            let lines = r.out.split(separator: "\n").prefix(60).joined(separator: "\n")
-            let body = lines.isEmpty ? "(nothing modified in the last 24h)" : String(lines)
-            Task { await store.sendMessage("Recently modified files:\n```\n\(body)\n```") }
+            // Files changed in the last day, minus junk dirs. `find` on a
+            // big monorepo can take seconds — off main.
+            Task.detached {
+                let r = SlashHelpers.run("/usr/bin/find", args: [
+                    dir, "-type", "f",
+                    "-not", "-path", "*/.*",
+                    "-not", "-path", "*/node_modules/*",
+                    "-not", "-path", "*/.build/*",
+                    "-mtime", "-1",
+                ])
+                let lines = r.out.split(separator: "\n").prefix(60).joined(separator: "\n")
+                let body = lines.isEmpty ? "(nothing modified in the last 24h)" : String(lines)
+                await store.sendMessage("Recently modified files:\n```\n\(body)\n```")
+            }
 
         // --- git extras ---
         case "/repo":
             guard let dir = store.activeSession?.workDir else { break }
-            let remote = SlashHelpers.git(["remote", "-v"], in: dir).out
-            let upstream = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir).out
-            let body = "remote:\n\(remote)\nupstream: \(upstream.trimmingCharacters(in: .whitespacesAndNewlines))"
-            Task { await store.sendMessage("Repo info:\n```\n\(body)\n```") }
+            Task.detached {
+                let remote = SlashHelpers.git(["remote", "-v"], in: dir).out
+                let upstream = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir).out
+                let body = "remote:\n\(remote)\nupstream: \(upstream.trimmingCharacters(in: .whitespacesAndNewlines))"
+                await store.sendMessage("Repo info:\n```\n\(body)\n```")
+            }
         case "/diffstat":
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["diff", "HEAD", "--stat"], in: dir)
-            if r.status == 0 {
-                let body = r.out.isEmpty ? "(clean)" : r.out
-                Task { await store.sendMessage("```\n\(body)\n```") }
-            } else {
-                ToastCenter.shared.show("Not a git repo", kind: .error)
+            Task.detached {
+                let r = SlashHelpers.git(["diff", "HEAD", "--stat"], in: dir)
+                await MainActor.run {
+                    if r.status == 0 {
+                        let body = r.out.isEmpty ? "(clean)" : r.out
+                        Task { await store.sendMessage("```\n\(body)\n```") }
+                    } else {
+                        ToastCenter.shared.show("Not a git repo", kind: .error)
+                    }
+                }
             }
         case "/upstream":
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir)
-            let up = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
-            ToastCenter.shared.show(up.isEmpty ? "No upstream" : "Upstream: \(up)", kind: .info, duration: 4.0)
+            Task.detached {
+                let r = SlashHelpers.git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], in: dir)
+                let up = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+                await MainActor.run {
+                    ToastCenter.shared.show(up.isEmpty ? "No upstream" : "Upstream: \(up)", kind: .info, duration: 4.0)
+                }
+            }
         case "/changed":
             guard let dir = store.activeSession?.workDir else { break }
-            let r = SlashHelpers.git(["status", "--porcelain"], in: dir)
-            if r.status == 0 {
-                let body = r.out.isEmpty ? "(clean)" : r.out
-                Task { await store.sendMessage("Uncommitted changes:\n```\n\(body)\n```") }
-            } else {
-                ToastCenter.shared.show("Not a git repo", kind: .error)
+            Task.detached {
+                let r = SlashHelpers.git(["status", "--porcelain"], in: dir)
+                await MainActor.run {
+                    if r.status == 0 {
+                        let body = r.out.isEmpty ? "(clean)" : r.out
+                        Task { await store.sendMessage("Uncommitted changes:\n```\n\(body)\n```") }
+                    } else {
+                        ToastCenter.shared.show("Not a git repo", kind: .error)
+                    }
+                }
             }
 
         // --- quick-inject into composer ---

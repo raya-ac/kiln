@@ -4,6 +4,44 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.8.4] — 2026-04-21
+
+### Fixed
+- **Workdir migration now waits for the live subprocess to exit before
+  copying** the CLI transcript. Previously `claude.kill` returned
+  immediately while the child was still flushing writes to
+  `<cliId>.jsonl`, so the copy at the destination could be truncated.
+  Also migrates the sibling `<cliId>/` sidecar directory (subagent
+  state, cached tool results) so agents don't lose their scratch data
+  across a workdir move.
+- **Migration refuses to clobber an existing destination transcript.**
+  If `<cliId>.jsonl` already exists in the new workdir's project dir
+  — say because a backup was restored — Kiln drops the mapping
+  instead of silently resuming a different conversation. The next
+  send starts a fresh CLI session in the new dir.
+- **`/save` is now confined to the session's workdir.** Absolute paths
+  (`/…` or `~/…`) and relative paths that climb above the workdir via
+  `..` are rejected. The old behaviour would silently write anywhere
+  the user could write, which combined with an untrusted code block
+  was a real-world overwrite risk.
+- **`lastCodeBlock` no longer drops content on an unterminated fence.**
+  Interrupted or mid-stream replies often end without the closing
+  ``` — `/save` and `/copycode` used to report "no code block" on
+  visibly-present code. Now the open block is returned as the last
+  one.
+- **Slash commands that shell out now run off the main thread.** `/log`,
+  `/branch`, `/checkout`, `/stash`, `/unstash`, `/blame`, `/find`,
+  `/recent`, `/repo`, `/diffstat`, `/upstream`, `/changed` — all move
+  to `Task.detached`. Previously they blocked the UI while `git` or
+  `find` ran; on a large monorepo that was a visible beachball.
+- **Translation polish.** Italian / Portuguese `forked` is now
+  `biforcato` / `bifurcado` (was bare English `fork`). Korean
+  `think` / `noThink` uses `생각` / `생각 안 함` instead of 사고
+  (which reads as "accident"). Hindi time abbreviations gained the
+  `पहले` suffix so they read as "N min *ago*". Russian `push`/`pull`
+  now `Пуш`/`Пул` to match the translated `Коммит`. Taglines in
+  Turkish, Polish, and Swedish dropped the anglicisms.
+
 ## [1.8.3] — 2026-04-21
 
 ### Added
