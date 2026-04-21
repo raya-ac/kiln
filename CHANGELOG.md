@@ -4,6 +4,24 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.3.5] — 2026-04-21
+
+### Added
+- **Bottom status bar** — persistent one-line strip across the window
+  footer. Shows active model, workdir basename (click to reveal in
+  Finder), last-turn token totals with compact k/M formatting, a busy
+  indicator while Claude is working, an engram on/off pill (click to
+  open Settings), and the total session count.
+- **Sidebar session sort** — new menu in the sidebar header with four
+  modes: Manual (pinned-first, then list order), Recent activity, Name
+  (A–Z), and Created. Pinned sessions always surface first regardless
+  of sort. The choice persists across launches.
+- **Inline tag editor** in the Session Info sheet — existing tags render
+  as removable chips in a wrapping flow layout; a free-text field
+  commits new tags on Return. Tags feed the sidebar filter.
+- **Archive / Unarchive shortcut** (`⌘⌥A`) — toggles archive state on
+  the active session without hunting for the menu item.
+
 ## [1.3.4] — 2026-04-21
 
 ### Added

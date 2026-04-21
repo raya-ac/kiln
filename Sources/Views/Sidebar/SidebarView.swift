@@ -14,6 +14,15 @@ struct SidebarView: View {
     @State private var searchText = ""
     @State private var showArchived: Bool = false
 
+    private func sortLabel(_ order: AppStore.SessionSort) -> String {
+        switch order {
+        case .manual: return "Manual"
+        case .recent: return "Recent"
+        case .name: return "Name"
+        case .created: return "Created"
+        }
+    }
+
     private func filterArchived(_ s: Session) -> Bool {
         showArchived ? s.isArchived : !s.isArchived
     }
@@ -195,7 +204,36 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.bottom, 8)
+            .padding(.bottom, 4)
+
+            // Sort control — Pinned sessions always float to the top; this
+            // picker just reorders the rest. Kept understated (right-aligned
+            // small menu) so it doesn't compete with the tabs or search.
+            HStack {
+                Spacer()
+                Menu {
+                    ForEach(AppStore.SessionSort.allCases, id: \.self) { order in
+                        Button {
+                            store.sessionSort = order
+                        } label: {
+                            Label(sortLabel(order), systemImage: store.sessionSort == order ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 8))
+                        Text(sortLabel(store.sessionSort))
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(Color.kilnTextTertiary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
 
             // Search bar
             if sessionsForTab.count > 3 {

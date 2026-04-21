@@ -409,11 +409,45 @@ final class AppStore: ObservableObject {
         return sessions.firstIndex { $0.id == id }
     }
 
-    /// Sessions in display order: pinned first, then manual order preserved
+    /// How the sidebar orders sessions. Pinned always floats to the top;
+    /// `sort` decides how the rest are arranged. Stored in UserDefaults
+    /// so the pick persists across launches.
+    enum SessionSort: String, CaseIterable { case manual, recent, name, created }
+
+    var sessionSort: SessionSort {
+        get {
+            let raw = UserDefaults.standard.string(forKey: "kiln.sessionSort") ?? "manual"
+            return SessionSort(rawValue: raw) ?? .manual
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "kiln.sessionSort")
+            objectWillChange.send()
+        }
+    }
+
+    /// Sessions in display order: pinned first, then ordered per
+    /// `sessionSort`. `manual` preserves whatever the user has dragged into
+    /// place; the others re-derive on every read (cheap — just a sort).
     var sortedSessions: [Session] {
         let pinned = sessions.filter { $0.isPinned }
         let unpinned = sessions.filter { !$0.isPinned }
-        return pinned + unpinned
+        let order = sessionSort
+        let rest: [Session]
+        switch order {
+        case .manual:
+            rest = unpinned
+        case .recent:
+            rest = unpinned.sorted { lastActivity($0) > lastActivity($1) }
+        case .name:
+            rest = unpinned.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .created:
+            rest = unpinned.sorted { $0.createdAt > $1.createdAt }
+        }
+        return pinned + rest
+    }
+
+    private func lastActivity(_ s: Session) -> Date {
+        s.messages.last?.timestamp ?? s.createdAt
     }
 
     /// Sessions grouped — preserves array order within each group

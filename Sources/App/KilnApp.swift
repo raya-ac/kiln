@@ -59,6 +59,14 @@ struct KilnApp: App {
                 .keyboardShortcut("i", modifiers: .command)
                 .disabled(store.activeSessionId == nil)
 
+                Button("Archive / Unarchive") {
+                    if let id = store.activeSessionId {
+                        store.toggleArchiveSession(id)
+                    }
+                }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(store.activeSessionId == nil)
+
                 Divider()
 
                 Button("Keyboard Shortcuts") {

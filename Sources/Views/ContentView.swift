@@ -219,6 +219,9 @@ struct ContentView: View {
                 LaunchRecoveryBanner()
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            StatusBar().environmentObject(store)
+        }
         .preferredColorScheme(Color.kilnPreferredColorScheme)
         .sheet(isPresented: $store.showNewSessionSheet) {
             NewSessionSheet()
