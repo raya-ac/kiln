@@ -211,6 +211,7 @@ struct ContentView: View {
             }
         } // GeometryReader
         .background(Color.kilnBg)
+        .overlay(ToastOverlay(), alignment: .bottom)
         .safeAreaInset(edge: .top, spacing: 0) {
             // Launch-time recovery strip — any sessions marked interrupted
             // (from the previous app run) get surfaced once, with a jump

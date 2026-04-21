@@ -156,6 +156,13 @@ struct ChatView: View {
                         .preferredColorScheme(Color.kilnPreferredColorScheme)
                 }
             }
+            .sheet(isPresented: Binding(
+                get: { store.diffSheetContent != nil },
+                set: { if !$0 { store.diffSheetContent = nil } }
+            )) {
+                DiffSheet(content: store.diffSheetContent ?? "")
+                    .preferredColorScheme(Color.kilnPreferredColorScheme)
+            }
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
@@ -2311,5 +2318,61 @@ struct ToolTimelineSheet: View {
         let m = Int(s) / 60
         let r = Int(s) % 60
         return String(format: "%d:%02d", m, r)
+    }
+}
+
+// MARK: - Git diff sheet
+
+/// Plain-text diff viewer — no syntax highlighting yet, just a
+/// monospace dump with simple line coloring for +/-. Good enough to
+/// confirm what's about to be committed without leaving Kiln.
+struct DiffSheet: View {
+    let content: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Git diff").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(content, forType: .string)
+                    ToastCenter.shared.show("Diff copied", kind: .success)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .help("Copy diff to clipboard")
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                        Text(String(line).isEmpty ? " " : String(line))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(color(for: String(line)))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(12)
+            }
+            .background(Color.kilnBg)
+        }
+        .frame(width: 780, height: 560)
+    }
+
+    private func color(for line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") { return Color.kilnTextSecondary }
+        if line.hasPrefix("+") { return Color.kilnSuccess }
+        if line.hasPrefix("-") { return Color.kilnError }
+        if line.hasPrefix("@@") { return Color.kilnAccent }
+        if line.hasPrefix("#") { return Color.kilnTextTertiary }
+        return Color.kilnText
     }
 }

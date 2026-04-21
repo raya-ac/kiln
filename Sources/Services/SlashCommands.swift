@@ -42,6 +42,8 @@ enum SlashCommands {
         .init(id: "status", label: "/status", description: "Inject current git status as context", kind: .kiln),
         .init(id: "template", label: "/template", description: "Insert a saved prompt template — /template name", kind: .kiln),
         .init(id: "rewind", label: "/rewind", description: "Drop the last N message pairs — /rewind 3", kind: .kiln),
+        .init(id: "diff", label: "/diff", description: "Show git diff for the session's workdir", kind: .kiln),
+        .init(id: "clone", label: "/clone", description: "Duplicate this session's config (model, instructions, tags) with no messages", kind: .kiln),
     ]
 
     /// Expand the slash list with dynamic prompt templates so they show up

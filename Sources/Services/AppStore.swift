@@ -148,6 +148,9 @@ final class AppStore: ObservableObject {
     @Published var showInSessionFind = false
     /// Tool-call timeline sheet toggle. Flipped by `/timeline`.
     @Published var showToolTimeline = false
+    /// `/diff` sheet — raw git diff for the active session's workdir.
+    /// Populated on command, cleared when the sheet dismisses.
+    @Published var diffSheetContent: String?
 
     /// Tool-approval requests awaiting the user. The ApprovalDialog sheet
     /// renders the first entry; the HTTP hook handler is blocked on a
@@ -1065,6 +1068,34 @@ final class AppStore: ObservableObject {
         sessions.insert(forked, at: 0)
         activeSessionId = forked.id
         Persistence.saveSession(forked)
+    }
+
+    /// Clone a session's shell: same model, workDir, kind, instructions,
+    /// tags, and group — but no messages and no fork lineage. Useful for
+    /// "spin up another pass at this problem" without rehashing a long
+    /// history. Named `<original> (clone)`.
+    func cloneSession(_ id: String) {
+        guard let src = sessions.first(where: { $0.id == id }) else { return }
+        var fresh = Session(
+            workDir: src.workDir,
+            name: "\(src.name) (clone)",
+            model: src.model,
+            isPinned: false,
+            group: src.group,
+            forkedFrom: nil,
+            kind: src.kind,
+            readOnly: false,
+            isArchived: false,
+            sessionInstructions: src.sessionInstructions,
+            tags: src.tags,
+            tunnelPort: nil,
+            tunnelSub: nil,
+            colorLabel: src.colorLabel
+        )
+        fresh.messages = []
+        sessions.insert(fresh, at: 0)
+        activeSessionId = fresh.id
+        Persistence.saveSession(fresh)
     }
 
     // MARK: - Chat

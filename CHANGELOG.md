@@ -4,6 +4,28 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.5.1] — 2026-04-21
+
+### Fixed
+- **Slash-command filter ranking** — typing `/t` now surfaces commands
+  whose label starts with `t` first, then contains `t`. Description
+  text is no longer matched, so unrelated commands don't bubble up.
+- **Enter on a fully-typed command runs it** — previously `/timeline`
+  + Enter would re-insert the command with a trailing space, forcing
+  a second Enter. Now if the typed text exactly matches the highlighted
+  command, Enter executes it.
+
+### Added
+- **Toast notifications** — ephemeral feedback strip at the bottom of
+  the window. Dismisses automatically or on click.
+- **`/commit` reports outcome** — toast shows the new short hash on
+  success, "Nothing to commit" when clean, or the failure reason.
+- **`/diff`** — opens a sheet with staged + unstaged diff for the
+  session's workdir. Plain text with +/- coloring, Copy button.
+- **`/clone`** — duplicates the active session's shell (model, workDir,
+  kind, instructions, tags, color, group) into a fresh empty session.
+  Good for "same setup, new thread."
+
 ## [1.5.0] — 2026-04-21
 
 Observability, git, and prompt ergonomics — a full feature sweep.

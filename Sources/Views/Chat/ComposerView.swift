@@ -133,8 +133,18 @@ struct ComposerView: View {
                         .focused($isFocused)
                         .onSubmit {
                             // If the slash popup is open and has a selection, Enter accepts that.
+                            // Exception: if the user has typed the full label
+                            // (e.g. `/timeline`), skip the re-insert dance and
+                            // just execute it. Otherwise it takes two Enters
+                            // to run a known command, which is maddening.
                             if let matches = slashMatches, !matches.isEmpty {
-                                insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
+                                let typed = input.trimmingCharacters(in: .whitespaces).lowercased()
+                                let pick = matches[min(slashSelectedIndex, matches.count - 1)]
+                                if pick.label.lowercased() == typed {
+                                    send()
+                                } else {
+                                    insertSlashCommand(pick)
+                                }
                                 return
                             }
                             // @file popup — Enter picks the highlighted path.
@@ -378,6 +388,11 @@ struct ComposerView: View {
 
     /// Returns the current slash query (text after the leading `/`) or nil
     /// if we shouldn't be showing the popup.
+    ///
+    /// Ranking: exact label match first, then label-prefix, then label
+    /// contains. Description is deliberately NOT matched — typing "t"
+    /// shouldn't pull up every command that happens to have "t" in its
+    /// description.
     private var slashMatches: [SlashCommand]? {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("/") else { return nil }
@@ -386,10 +401,19 @@ struct ComposerView: View {
         let query = String(trimmed.dropFirst()).lowercased()
         let all = SlashCommands.all()
         if query.isEmpty { return all }
-        return all.filter {
-            $0.label.lowercased().contains(query) ||
-            $0.description.lowercased().contains(query)
+        // Score each candidate: 0 = exact, 1 = prefix, 2 = contains,
+        // nil = not a match. Stable sort within each bucket preserves
+        // the authored order in `SlashCommands.builtins`.
+        let scored: [(SlashCommand, Int)] = all.compactMap { c in
+            let body = c.label.lowercased().dropFirst() // strip the leading "/"
+            let labelLower = String(body)
+            if labelLower == query { return (c, 0) }
+            if labelLower.hasPrefix(query) { return (c, 1) }
+            if labelLower.contains(query) { return (c, 2) }
+            return nil
         }
+        let sorted = scored.sorted { $0.1 < $1.1 }
+        return sorted.map { $0.0 }
     }
 
     private func insertSlashCommand(_ cmd: SlashCommand) {
@@ -579,7 +603,32 @@ struct ComposerView: View {
                 ? "wip: \(Date().formatted(date: .abbreviated, time: .shortened))"
                 : msg
             if let dir = store.activeSession?.workDir {
-                Task.detached { GitQuickCommit.run(workDir: dir, message: message) }
+                Task.detached {
+                    let outcome = GitQuickCommit.run(workDir: dir, message: message)
+                    await MainActor.run {
+                        switch outcome {
+                        case .committed(let short):
+                            ToastCenter.shared.show("Committed \(short)", kind: .success)
+                        case .nothingToCommit:
+                            ToastCenter.shared.show("Nothing to commit", kind: .info)
+                        case .failed(let reason):
+                            ToastCenter.shared.show("Commit failed: \(reason)", kind: .error, duration: 3.5)
+                        }
+                    }
+                }
+            }
+        case "/diff":
+            if let dir = store.activeSession?.workDir {
+                if let d = GitQuickCommit.diff(workDir: dir) {
+                    store.diffSheetContent = d.isEmpty ? "# No changes — working tree is clean.\n" : d
+                } else {
+                    ToastCenter.shared.show("Not a git repo", kind: .error)
+                }
+            }
+        case "/clone":
+            if let id = store.activeSessionId {
+                store.cloneSession(id)
+                ToastCenter.shared.show("Cloned session", kind: .success)
             }
         case "/status":
             // Inject current git status as a plain user message so Claude
