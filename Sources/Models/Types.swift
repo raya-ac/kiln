@@ -333,8 +333,12 @@ struct Session: Identifiable, Sendable {
     /// Optional stable subdomain for this session's tunnel. Empty / nil →
     /// a fresh random subdomain is assigned each time the tunnel starts.
     var tunnelSub: String?
+    /// Optional color label. Stored as a preset name ("red", "amber",
+    /// "green", "blue", "purple", "pink") or `nil` for no label. Rendered
+    /// as a small dot next to the session name in the sidebar.
+    var colorLabel: String? = nil
 
-    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .sonnet46, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .sonnet46, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, createdAt: Date = .now) {
         self.id = id
         self.workDir = workDir
         self.name = name
@@ -351,6 +355,7 @@ struct Session: Identifiable, Sendable {
         self.tags = tags
         self.tunnelPort = tunnelPort
         self.tunnelSub = tunnelSub
+        self.colorLabel = colorLabel
     }
 }
 

@@ -107,6 +107,7 @@ struct SessionData: Codable {
     /// Both default-absent so old session files decode unchanged.
     var tunnelPort: Int? = nil
     var tunnelSub: String? = nil
+    var colorLabel: String? = nil
     var messages: [MessageData]
 
     // Handle missing keys from older session files
@@ -128,6 +129,7 @@ struct SessionData: Codable {
         tags = (try? c.decode([String].self, forKey: .tags)) ?? []
         tunnelPort = try? c.decode(Int.self, forKey: .tunnelPort)
         tunnelSub = try? c.decode(String.self, forKey: .tunnelSub)
+        colorLabel = try? c.decode(String.self, forKey: .colorLabel)
         messages = (try? c.decode([MessageData].self, forKey: .messages)) ?? []
     }
 
@@ -148,6 +150,7 @@ struct SessionData: Codable {
         self.tags = session.tags
         self.tunnelPort = session.tunnelPort
         self.tunnelSub = session.tunnelSub
+        self.colorLabel = session.colorLabel
         self.messages = session.messages.map { MessageData(from: $0) }
     }
 
@@ -167,6 +170,7 @@ struct SessionData: Codable {
             tags: tags,
             tunnelPort: tunnelPort,
             tunnelSub: tunnelSub,
+            colorLabel: colorLabel,
             createdAt: Date(timeIntervalSince1970: createdAt)
         )
         s.wasInterrupted = wasInterrupted

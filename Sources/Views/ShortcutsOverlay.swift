@@ -25,6 +25,7 @@ struct ShortcutsOverlay: View {
         ("Session", [
             ("⌘N", "New session"),
             ("⌘I", "Session info"),
+            ("⌘⇧M", "Cycle model on active session"),
             ("⌘⇧T", "Session templates"),
             ("⌘⇧E", "Export chat as markdown"),
             ("⌘W", "Close active session"),

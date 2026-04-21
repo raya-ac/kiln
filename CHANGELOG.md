@@ -4,6 +4,25 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.3.6] — 2026-04-21
+
+### Added
+- **Session color labels** — right-click a session → Color to tag it
+  with one of six fixed presets (red, amber, green, blue, purple,
+  pink). A small dot appears next to the name in the sidebar for
+  at-a-glance grouping. Chose fixed presets over arbitrary hex so the
+  dots stay legible against both light and dark row backgrounds.
+- **Duplicate with messages** — new sidebar context menu entry that
+  forks a session, carrying over the full message history, tags,
+  session instructions, and color. The original is untouched. The
+  existing "Duplicate (empty)" stays for when you only want the config.
+- **Cycle Model shortcut** (`⌘⇧M`) — rotates the active session
+  through the available Claude models without opening the picker.
+  Handy for retrying the last prompt on a stronger model.
+- **Composer character / word count** — subtle monospaced counter on
+  the right edge of the composer hint strip. Only rendered while the
+  draft is non-empty so it stays out of the way.
+
 ## [1.3.5] — 2026-04-21
 
 ### Added

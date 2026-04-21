@@ -1,6 +1,26 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - Session color labels
+//
+// Six named swatches a user can pin to a session for at-a-glance
+// grouping. Kept to fixed presets so the dots read consistently in
+// both light and dark themes — arbitrary hex makes the sidebar look
+// noisy and lowers contrast against the row background.
+enum SessionColor {
+    static let all: [(name: String, color: Color)] = [
+        ("red",    Color(hex: 0xEF4444)),
+        ("amber",  Color(hex: 0xF59E0B)),
+        ("green",  Color(hex: 0x10B981)),
+        ("blue",   Color(hex: 0x3B82F6)),
+        ("purple", Color(hex: 0x8B5CF6)),
+        ("pink",   Color(hex: 0xEC4899)),
+    ]
+    static func color(for name: String) -> Color? {
+        all.first(where: { $0.name == name })?.color
+    }
+}
+
 struct SidebarView: View {
     @EnvironmentObject var store: AppStore
     @State private var renamingId: String?
@@ -488,6 +508,12 @@ struct SessionRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
+                        if let color = session.colorLabel,
+                           let swatch = SessionColor.color(for: color) {
+                            Circle()
+                                .fill(swatch)
+                                .frame(width: 7, height: 7)
+                        }
                         if isRenaming {
                             TextField(store.settings.language.ui.rename, text: $renameText, onCommit: {
                                 store.renameSession(session.id, name: renameText)
@@ -612,6 +638,32 @@ struct SessionRow: View {
                 store.duplicateSession(session.id)
             } label: {
                 Label("Duplicate (empty)", systemImage: "square.on.square")
+            }
+
+            Button {
+                store.duplicateSessionWithMessages(session.id)
+            } label: {
+                Label("Duplicate with messages", systemImage: "doc.on.doc")
+            }
+
+            Menu("Color") {
+                ForEach(SessionColor.all, id: \.name) { entry in
+                    Button {
+                        store.setSessionColor(session.id, color: entry.name)
+                    } label: {
+                        if session.colorLabel == entry.name {
+                            Label(entry.name.capitalized, systemImage: "checkmark")
+                        } else {
+                            Text(entry.name.capitalized)
+                        }
+                    }
+                }
+                if session.colorLabel != nil {
+                    Divider()
+                    Button("Clear color") {
+                        store.setSessionColor(session.id, color: nil)
+                    }
+                }
             }
 
             Divider()

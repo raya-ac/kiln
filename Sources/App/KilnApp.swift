@@ -59,6 +59,12 @@ struct KilnApp: App {
                 .keyboardShortcut("i", modifiers: .command)
                 .disabled(store.activeSessionId == nil)
 
+                Button("Cycle Model") {
+                    store.cycleActiveSessionModel()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(store.activeSessionId == nil)
+
                 Button("Archive / Unarchive") {
                     if let id = store.activeSessionId {
                         store.toggleArchiveSession(id)

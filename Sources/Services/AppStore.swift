@@ -1315,12 +1315,57 @@ final class AppStore: ObservableObject {
             name: "\(src.name) (copy)",
             model: src.model,
             group: src.group,
-            kind: src.kind
+            kind: src.kind,
+            colorLabel: src.colorLabel
         )
         copy.messages = []
         sessions.insert(copy, at: 0)
         activeSessionId = copy.id
         Persistence.saveSession(copy)
+    }
+
+    /// Clone a session including its full message history. Useful for
+    /// branching an exploration while keeping the original untouched.
+    func duplicateSessionWithMessages(_ id: String) {
+        guard let src = sessions.first(where: { $0.id == id }) else { return }
+        var copy = Session(
+            workDir: src.workDir,
+            name: "\(src.name) (fork)",
+            model: src.model,
+            group: src.group,
+            forkedFrom: src.id,
+            kind: src.kind,
+            sessionInstructions: src.sessionInstructions,
+            tags: src.tags,
+            colorLabel: src.colorLabel
+        )
+        copy.messages = src.messages
+        sessions.insert(copy, at: 0)
+        activeSessionId = copy.id
+        Persistence.saveSession(copy)
+    }
+
+    /// Assign (or clear with `nil`) the color label of a session.
+    func setSessionColor(_ id: String, color: String?) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].colorLabel = color
+        Persistence.saveSession(sessions[idx])
+        objectWillChange.send()
+    }
+
+    /// Cycle the active session's model to the next available one.
+    /// Wired to ⌘⇧M — a fast way to retry the last prompt with a
+    /// different model without hunting through the picker.
+    func cycleActiveSessionModel() {
+        guard let id = activeSessionId,
+              let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let models = ClaudeModel.allCases
+        let cur = sessions[idx].model
+        let curIdx = models.firstIndex(of: cur) ?? 0
+        let next = models[(curIdx + 1) % models.count]
+        sessions[idx].model = next
+        Persistence.saveSession(sessions[idx])
+        objectWillChange.send()
     }
 
     /// Switch to the next / previous session (in the current sidebar tab,

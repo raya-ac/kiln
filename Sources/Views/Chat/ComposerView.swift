@@ -248,6 +248,12 @@ struct ComposerView: View {
                         hintButton("⌘.", "stop") { store.interrupt() }
                     }
                     Spacer()
+                    if !input.isEmpty {
+                        Text(composerCountLabel)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(Color.kilnTextTertiary)
+                            .help("Characters and words in the draft")
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -332,6 +338,17 @@ struct ComposerView: View {
     private var placeholderText: String {
         let custom = store.settings.composerPlaceholder
         return custom.isEmpty ? store.settings.language.ui.messagePlaceholder : custom
+    }
+
+    /// Formats the current draft's character + word count for the hint strip.
+    /// Words are split on any whitespace run, which is good enough for a
+    /// peripheral indicator — we're not writing WordCounter.app here.
+    private var composerCountLabel: String {
+        let chars = input.count
+        let words = input
+            .split(whereSeparator: { $0.isWhitespace })
+            .count
+        return "\(chars) chars · \(words) words"
     }
 
     private var shouldShowHintStrip: Bool {
