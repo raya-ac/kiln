@@ -160,6 +160,10 @@ struct FileTreeView: View {
     // the tree reloads or a Claude tool call finishes. Keyed by absolute
     // path so FileRow lookups are cheap.
     @State private var gitStatuses: [String: GitStatus.FileState] = [:]
+    // Non-nil while a git-diff sheet is presented. The view reads both
+    // sides lazily on sheet appearance so we don't pay for disk + shell-out
+    // on every tree render.
+    @State private var gitDiffPath: String?
 
     private var currentWorkDir: String {
         let dir = store.activeSession?.workDir ?? NSHomeDirectory()
@@ -304,6 +308,26 @@ struct FileTreeView: View {
                         .foregroundStyle(Color.kilnText)
                         .lineLimit(1)
                         .truncationMode(.head)
+                    if let gitInfo = GitStatus.info(for: currentWorkDir) {
+                        // Branch + dirty count. Tiny pill so it reads at a
+                        // glance without eating the workdir path width.
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 8, weight: .semibold))
+                            Text(gitInfo.branch)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            if gitInfo.dirtyCount > 0 {
+                                Text("·\(gitInfo.dirtyCount)")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Color.kilnAccent)
+                            }
+                        }
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
                     Spacer()
                     Button {
                         Task { await loadDirectory() }
@@ -368,6 +392,7 @@ struct FileTreeView: View {
                                     activePath: activeIndex.flatMap { openFiles.indices.contains($0) ? openFiles[$0].path : nil },
                                     gitStatuses: gitStatuses,
                                     onOpen: { path in openFile(at: path) },
+                                    onShowGitDiff: { path in gitDiffPath = path },
                                     onPathRenamed: { old, new in renameOpenFile(from: old, to: new) },
                                     onPathDeleted: { path in closeOpenFile(at: path) },
                                     onSiblingsChanged: { Task { await loadDirectory() } },
@@ -405,6 +430,12 @@ struct FileTreeView: View {
             syncLiveWriteContent()
         }
         .background(editorShortcuts)
+        .sheet(item: Binding(
+            get: { gitDiffPath.map(GitDiffTarget.init) },
+            set: { gitDiffPath = $0?.path }
+        )) { target in
+            GitDiffSheet(path: target.path, workDir: currentWorkDir)
+        }
     }
 
     /// Hidden buttons that register editor-local keyboard shortcuts.
@@ -947,6 +978,9 @@ struct FileRow: View {
     /// by state. Empty dict = not a repo or nothing changed.
     var gitStatuses: [String: GitStatus.FileState] = [:]
     let onOpen: (String) -> Void
+    /// Called when the user picks "Show Diff vs HEAD" from the context
+    /// menu. Parent handles presentation since the sheet outlives this row.
+    var onShowGitDiff: (String) -> Void = { _ in }
     /// Notify the tree when a file gets renamed so open-tabs can update.
     var onPathRenamed: (String, String) -> Void = { _, _ in }
     /// Notify the tree when a path is deleted so open-tabs can close.
@@ -1015,6 +1049,10 @@ struct FileRow: View {
                     Button {
                         NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
                     } label: { Label("Open with Default App", systemImage: "arrow.up.forward.app") }
+                    if let state = gitStatuses[entry.path], state != .untracked {
+                        Button { onShowGitDiff(entry.path) }
+                            label: { Label("Show Diff vs HEAD", systemImage: "arrow.triangle.2.circlepath") }
+                    }
                     Divider()
                 }
                 if entry.isDirectory {
@@ -1055,6 +1093,7 @@ struct FileRow: View {
                         activePath: activePath,
                         gitStatuses: gitStatuses,
                         onOpen: onOpen,
+                        onShowGitDiff: onShowGitDiff,
                         onPathRenamed: onPathRenamed,
                         onPathDeleted: onPathDeleted,
                         onSiblingsChanged: { loadChildren() },
@@ -1465,6 +1504,132 @@ struct DiffRow: View {
         }
         .padding(.vertical, 1)
         .background(DiffView.rowBackground(line.kind))
+    }
+}
+
+// MARK: - Git diff sheet
+//
+// Presents a HEAD-vs-worktree diff for a single file in a modal. Loads
+// HEAD content via `git show HEAD:<relpath>` on appear; worktree content
+// comes straight from disk. Reuses DiffView's LCS renderer so the visual
+// language matches the Accept/Revert flow.
+
+struct GitDiffTarget: Identifiable {
+    let path: String
+    var id: String { path }
+}
+
+struct GitDiffSheet: View {
+    let path: String
+    let workDir: String
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var head: String = ""
+    @State private var working: String = ""
+    @State private var loading = true
+    @State private var errorMsg: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(Color.kilnAccent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(relativeDisplayPath)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.kilnText)
+                    Text("Working copy vs. HEAD")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.kilnSurface)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(14)
+
+            Rectangle().fill(Color.kilnBorder).frame(height: 1)
+
+            Group {
+                if loading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let msg = errorMsg {
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(Color.kilnError)
+                        Text(msg)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.kilnTextSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    DiffView(before: head, after: working)
+                }
+            }
+        }
+        .frame(width: 820, height: 560)
+        .background(Color.kilnBg)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task { await load() }
+    }
+
+    private var relativeDisplayPath: String {
+        path.hasPrefix(workDir + "/") ? String(path.dropFirst(workDir.count + 1)) : path
+    }
+
+    private func load() async {
+        let rel = relativeDisplayPath
+        let (headText, workText, err) = await Task.detached(priority: .userInitiated) {
+            () -> (String, String, String?) in
+            // HEAD side — empty string is a valid result (file didn't exist
+            // at HEAD, i.e. fully added). Distinguish that from a real
+            // error by checking exit code.
+            let head = GitDiffSheet.runGit(["show", "HEAD:" + rel], in: workDir) ?? ""
+            let work: String
+            do {
+                work = try String(contentsOfFile: path, encoding: .utf8)
+            } catch {
+                return ("", "", "Failed to read working copy: \(error.localizedDescription)")
+            }
+            return (head, work, nil)
+        }.value
+        await MainActor.run {
+            head = headText
+            working = workText
+            errorMsg = err
+            loading = false
+        }
+    }
+
+    /// Lightweight shell-out. Returns nil if git exits non-zero (e.g. the
+    /// file isn't in HEAD). Empty string is a valid zero-exit result.
+    nonisolated static func runGit(_ args: [String], in dir: String) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = ["git", "-C", dir] + args
+        let out = Pipe()
+        let err = Pipe()
+        proc.standardOutput = out
+        proc.standardError = err
+        do {
+            try proc.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+            if proc.terminationStatus != 0 { return nil }
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return nil
+        }
     }
 }
 
