@@ -202,7 +202,11 @@ struct CodeEditorView: NSViewRepresentable {
         case "gleam": return "gleam"
         case "crystal", "cr": return "crystal"
         case "vlang": return "v"
-        default: return "plaintext"
+        // Passthrough: any other language id gets handed straight to Monaco.
+        // Monaco silently treats unknown ids as plaintext, so this is safe
+        // AND means new registerBasic calls in index.html don't need a
+        // corresponding Swift case to take effect.
+        default: return lang.lowercased()
         }
     }
 

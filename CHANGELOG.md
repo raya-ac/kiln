@@ -4,6 +4,35 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.4.2] — 2026-04-21
+
+Everything-under-the-sun edition for the editor. If you can name it, Kiln
+probably colors it now.
+
+### Added
+- **~45 more languages with syntax highlighting**, covering the weird, the
+  old, and the experimental — each with a minimal Monarch tokenizer so
+  keywords, strings, comments, and numbers render correctly:
+  - Systems & new-wave: D, Ada, Pony, Hare, Chapel, Roc, Mojo, Jakt,
+    Carbon, Wren, Squirrel, Haxe, GDScript.
+  - Historical: COBOL, Forth, Rexx, Smalltalk, APL, Erlang.
+  - Functional / ML family: SML, ReasonML, ReScript, PureScript, Common
+    Lisp, Racket, Fennel, Janet, Hy, Prolog.
+  - Theorem provers: Coq, Lean, Agda, Idris, Isabelle, F\*, Dafny, TLA+.
+  - Shell / scripting: Fish, Nushell, AWK, SED, AutoHotkey, AppleScript.
+  - Hardware & low-level: VHDL, x86/ARM assembly, WebAssembly text, LLVM IR.
+  - Shaders: GLSL, HLSL, Metal, CUDA.
+  - Infra / config: HCL (Terraform), Nginx, Apache, Caddy, systemd units,
+    dotenv, Starlark/Bazel, Ninja, Meson, Just, Robot Framework.
+  - Blockchain: Vyper, Move, Cadence, Clarity.
+  - Docs / typesetting: LaTeX, AsciiDoc, BibTeX, Org, Typst.
+  - Scientific / stats: MATLAB, Wolfram, Stata, SAS.
+  - DSL / niche: Pine Script, Groovy.
+- **Graceful passthrough** for unknown language ids — the editor hands
+  whatever the filename suggests straight to Monaco. Registered languages
+  color; unregistered ones render as plaintext instead of getting
+  intercepted and funneled to "plaintext" on the Swift side.
+
 ## [1.4.1] — 2026-04-21
 
 A follow-up patch — stability, session persistence, and the editor gets

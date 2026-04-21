@@ -367,6 +367,536 @@
           extra: [[/^\s*\[[^\]]+\]/, 'type'], [/^\s*[A-Za-z_][\w-]*\s*(?==)/, 'key']]
         });
 
+        // ------------------------------------------------------------------
+        // The everything-under-the-sun batch. Monaco doesn't ship any of
+        // these — each gets a minimal Monarch tokenizer so keywords, strings,
+        // comments, and numbers color correctly. Grouped roughly by family.
+        // ------------------------------------------------------------------
+
+        // D — systems C-family
+        registerBasic({
+          id: 'd', extensions: ['.d','.di'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['abstract','alias','align','asm','assert','auto','body','bool','break','byte','case','cast','catch','cdouble','cent','cfloat','char','class','const','continue','creal','dchar','debug','default','delegate','delete','deprecated','do','double','else','enum','export','extern','false','final','finally','float','for','foreach','foreach_reverse','function','goto','idouble','if','ifloat','immutable','import','in','inout','int','interface','invariant','ireal','is','lazy','long','macro','mixin','module','new','nothrow','null','out','override','package','pragma','private','protected','public','pure','real','ref','return','scope','shared','short','static','struct','super','switch','synchronized','template','this','throw','true','try','typedef','typeid','typeof','ubyte','ucent','uint','ulong','union','unittest','ushort','version','void','volatile','wchar','while','with','__FILE__','__FUNCTION__','__LINE__','__MODULE__']
+        });
+        // Ada — strongly typed, verbose, begin/end blocks
+        registerBasic({
+          id: 'ada', extensions: ['.ada','.adb','.ads'],
+          lineComment: '--', strings: 'double',
+          keywords: ['abort','abs','abstract','accept','access','aliased','all','and','array','at','begin','body','case','constant','declare','delay','delta','digits','do','else','elsif','end','entry','exception','exit','for','function','generic','goto','if','in','interface','is','limited','loop','mod','new','not','null','of','or','others','out','overriding','package','pragma','private','procedure','protected','raise','range','record','rem','renames','requeue','return','reverse','select','separate','some','subtype','synchronized','tagged','task','terminate','then','type','until','use','when','while','with','xor'],
+          types: ['Integer','Natural','Positive','Float','Long_Float','Character','String','Boolean','Duration','Wide_Character','Wide_String']
+        });
+        // COBOL — fixed-form identification/environment/data/procedure divisions
+        registerBasic({
+          id: 'cobol', extensions: ['.cob','.cbl','.cobol','.cpy'],
+          lineComment: '*', strings: 'both',
+          keywords: ['IDENTIFICATION','DIVISION','PROGRAM-ID','ENVIRONMENT','CONFIGURATION','SOURCE-COMPUTER','OBJECT-COMPUTER','INPUT-OUTPUT','FILE-CONTROL','DATA','FILE','WORKING-STORAGE','LINKAGE','SECTION','PROCEDURE','USING','SELECT','ASSIGN','ORGANIZATION','ACCESS','MODE','RECORD','KEY','FD','SD','COPY','REPLACING','OPEN','INPUT','OUTPUT','I-O','EXTEND','CLOSE','READ','WRITE','REWRITE','DELETE','START','ACCEPT','DISPLAY','MOVE','ADD','SUBTRACT','MULTIPLY','DIVIDE','COMPUTE','PERFORM','VARYING','UNTIL','TIMES','IF','THEN','ELSE','END-IF','EVALUATE','WHEN','END-EVALUATE','CALL','EXIT','STOP','RUN','GO','TO','SEARCH','SORT','MERGE','STRING','UNSTRING','INSPECT','REPLACE','OCCURS','PIC','PICTURE','VALUE','REDEFINES','RENAMES','BLANK','ZERO','ZEROS','ZEROES','SPACE','SPACES','HIGH-VALUE','LOW-VALUE','QUOTE','FILLER','USAGE','COMP','COMP-3','BINARY','PACKED-DECIMAL'],
+          types: []
+        });
+        // Erlang — functional, pattern-matching, OTP
+        registerBasic({
+          id: 'erlang', extensions: ['.erl','.hrl'],
+          lineComment: '%', strings: 'double',
+          keywords: ['after','and','andalso','band','begin','bnot','bor','bsl','bsr','bxor','case','catch','cond','div','end','fun','if','let','not','of','or','orelse','receive','rem','try','when','xor','module','export','import','behaviour','compile','define','undef','ifdef','ifndef','include','include_lib','record','spec','type','callback','opaque','on_load'],
+          types: ['atom','binary','bitstring','boolean','byte','char','float','function','integer','iolist','list','map','maybe_improper_list','neg_integer','nil','no_return','node','non_neg_integer','none','number','pid','port','pos_integer','reference','string','term','timeout','tuple']
+        });
+        // Prolog — Horn clauses, :- is the rule operator
+        registerBasic({
+          id: 'prolog', extensions: ['.prolog','.pro','.pl'],
+          lineComment: '%', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['is','not','mod','rem','div','abs','min','max','assert','asserta','assertz','retract','retractall','fail','true','false','nil','findall','bagof','setof','forall','member','append','length','nth0','nth1','reverse','sort','msort','atom','atomic','var','nonvar','integer','float','number','compound','ground','functor','arg','copy_term']
+        });
+        // Common Lisp — (defun foo (x) ...)
+        registerBasic({
+          id: 'commonlisp', extensions: ['.lisp','.lsp','.cl','.asd'],
+          lineComment: ';', blockComment: ['#|','|#'], strings: 'double',
+          keywords: ['defun','defmacro','defvar','defparameter','defconstant','defclass','defmethod','defgeneric','defpackage','defstruct','deftype','defsystem','let','let*','flet','labels','lambda','function','progn','prog1','prog2','if','when','unless','cond','case','typecase','loop','do','dolist','dotimes','block','return','return-from','tagbody','go','catch','throw','unwind-protect','setf','setq','push','pop','incf','decf','and','or','not','nil','t','car','cdr','cons','list','append','mapcar','mapc','reduce','quote','function','eval','apply','funcall','in-package','use-package','export','import','require','provide']
+        });
+        // Racket — (define (foo x) ...), Lisp-family with Scheme roots
+        registerBasic({
+          id: 'racket-ext', extensions: ['.rkt','.rktl','.rktd'],
+          lineComment: ';', blockComment: ['#|','|#'], strings: 'double',
+          keywords: ['define','define-syntax','define-struct','lambda','let','let*','letrec','if','when','unless','cond','case','and','or','not','begin','set!','quote','quasiquote','unquote','require','provide','module','module+','for','for/list','for/fold','match','syntax-rules','syntax-case']
+        });
+        // Scheme — already covered by Monaco but register an alias for robustness
+        registerBasic({
+          id: 'scheme-ext', extensions: ['.scm','.ss','.rkt'],
+          lineComment: ';', strings: 'double',
+          keywords: ['define','lambda','if','cond','case','and','or','not','begin','let','let*','letrec','set!','quote','quasiquote','unquote','when','unless','do','delay','force','eval','apply']
+        });
+        // Fennel — Lisp for Lua
+        registerBasic({
+          id: 'fennel', extensions: ['.fnl'],
+          lineComment: ';', strings: 'double',
+          keywords: ['fn','lambda','λ','local','var','global','let','set','each','for','while','do','if','when','match','match-try','case','case-try','and','or','not','not=','.','..','?.',':','->','->>','-?>','-?>>','doto','tset','values','length','require','import-macros','require-macros','include','macro','macros','eval-compiler','unquote']
+        });
+        // Janet — Lisp, Clojure-flavored
+        registerBasic({
+          id: 'janet', extensions: ['.janet','.jdn'],
+          lineComment: '#', strings: 'double',
+          keywords: ['def','def-','var','var-','defn','defn-','defmacro','defmacro-','defglobal','fn','do','if','if-not','when','when-not','unless','cond','case','while','for','each','loop','quote','quasiquote','unquote','splice','let','with','with-syms','try','and','or','not','set','put','get','merge','import','use','require','break','return']
+        });
+        // Hy — Lisp to Python bytecode
+        registerBasic({
+          id: 'hy', extensions: ['.hy'],
+          lineComment: ';', strings: 'double',
+          keywords: ['defn','defmacro','defclass','do','if','cond','when','unless','let','setv','for','while','try','except','finally','import','require','from','as','quote','quasiquote','unquote','lambda','fn','return','yield','raise','and','or','not','is','in']
+        });
+        // Standard ML — ocaml cousin
+        registerBasic({
+          id: 'sml', extensions: ['.sml','.sig','.fun'],
+          blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['abstype','and','andalso','as','case','datatype','do','else','end','eqtype','exception','fn','fun','functor','handle','if','in','include','infix','infixr','let','local','nonfix','of','op','open','orelse','raise','rec','sharing','sig','signature','struct','structure','then','type','val','where','while','with','withtype'],
+          types: ['int','real','char','string','bool','unit','list','array','option','ref','exn','vector']
+        });
+        // ReasonML — OCaml JS-syntax
+        registerBasic({
+          id: 'reason', extensions: ['.re','.rei'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['and','as','assert','begin','class','constraint','do','done','downto','else','end','exception','external','false','for','fun','function','functor','if','in','include','inherit','initializer','lazy','let','match','method','module','mutable','new','nonrec','object','of','open','or','private','rec','sig','struct','switch','then','to','true','try','type','val','virtual','when','while','with'],
+          types: ['int','float','char','string','bool','unit','list','array','option','ref']
+        });
+        // ReScript — ReasonML successor
+        registerBasic({
+          id: 'rescript', extensions: ['.res','.resi'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['and','as','assert','async','await','constraint','else','exception','external','false','for','fun','if','in','include','lazy','let','module','mutable','of','open','private','rec','switch','then','to','true','try','type','when','while','with','downto','break','continue'],
+          types: ['int','float','char','string','bool','unit','list','array','option','ref','promise']
+        });
+        // PureScript — Haskell-to-JS
+        registerBasic({
+          id: 'purescript', extensions: ['.purs'],
+          lineComment: '--', blockComment: ['{-','-}'], strings: 'double',
+          keywords: ['ado','case','class','data','derive','do','else','false','foreign','if','import','in','infix','infixl','infixr','instance','kind','let','module','newtype','nominal','of','phantom','representational','role','then','true','type','where'],
+          types: ['Int','Number','String','Char','Boolean','Array','Maybe','Either','Effect','Aff','Unit']
+        });
+        // F* — dependently-typed, verification
+        registerBasic({
+          id: 'fstar', extensions: ['.fst','.fsti'],
+          lineComment: '//', blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['abstract','and','as','assert','assume','attributes','begin','by','calc','class','default','decreases','effect','eliminate','else','end','ensures','exception','exists','false','friend','forall','fun','function','if','in','include','inline','inline_for_extraction','instance','introduce','irreducible','inductive','layered_effect','lemma','let','logic','match','module','mutable','new','new_effect','noeq','noextract','of','open','opaque','or','polymonadic_bind','polymonadic_subcomp','postulate','private','quote','range_of','rec','reflectable','reifiable','reify','requires','return','set_range_of','sub_effect','synth','then','to','total','true','try','type','unfold','unfoldable','val','when','with'],
+          types: ['int','nat','pos','bool','string','unit','list','option','either','Type','prop']
+        });
+        // Agda — UTF-8 keywords common, ASCII subset here
+        registerBasic({
+          id: 'agda', extensions: ['.agda','.lagda'],
+          lineComment: '--', blockComment: ['{-','-}'], strings: 'double',
+          keywords: ['abstract','codata','coinductive','constructor','data','do','eta-equality','field','forall','hiding','import','in','inductive','infix','infixl','infixr','instance','let','macro','module','mutual','no-eta-equality','open','overlap','pattern','postulate','primitive','private','public','quote','quoteContext','quoteGoal','quoteTerm','record','renaming','rewrite','Set','syntax','tactic','unquote','unquoteDecl','unquoteDef','using','variable','where','with']
+        });
+        // Idris — Haskell-ish with dependent types
+        registerBasic({
+          id: 'idris', extensions: ['.idr','.lidr'],
+          lineComment: '--', blockComment: ['{-','-}'], strings: 'double',
+          keywords: ['abstract','case','class','codata','constructor','corecord','covering','data','do','dsl','else','export','if','impossible','implicit','import','in','infix','infixl','infixr','instance','interface','let','mutual','namespace','of','parameters','partial','postulate','private','proof','public','quoteGoal','record','rewrite','syntax','then','total','using','where','with']
+        });
+        // Coq — theorem prover
+        registerBasic({
+          id: 'coq', extensions: ['.v'],
+          blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['Axiom','CoFixpoint','CoInductive','Definition','Fixpoint','Hypothesis','Inductive','Lemma','Module','Notation','Parameter','Proof','Qed','Record','Require','Import','Export','Section','Theorem','Variable','End','forall','exists','fun','match','with','let','in','if','then','else','return','as','where','Set','Prop','Type','Check','Compute','Print','Eval','Search','Admitted','Abort','Reset','Show','unfold','simpl','cbv','cbn','red','pattern','change','rewrite','apply','destruct','induction','intro','intros','exact','assumption','split','left','right','exists','constructor','auto','tauto','omega','ring','field']
+        });
+        // Lean 4 — Microsoft Research
+        registerBasic({
+          id: 'lean', extensions: ['.lean'],
+          lineComment: '--', blockComment: ['/-','-/'], strings: 'double',
+          keywords: ['abbrev','axiom','by','calc','class','constant','def','deriving','do','else','end','example','export','extends','fun','have','hiding','if','import','in','inductive','infix','infixl','infixr','instance','let','match','mutual','namespace','notation','open','partial','postfix','prefix','prelude','private','protected','rec','renaming','returns','section','set_option','show','structure','syntax','theorem','then','universe','unsafe','variable','where','with','λ','∀','∃','→','↦','≤','≥','≠'],
+          types: ['Nat','Int','Float','Bool','Char','String','List','Array','Option','Prop','Type','Sort','Unit']
+        });
+        // Isabelle — structured proofs
+        registerBasic({
+          id: 'isabelle', extensions: ['.thy'],
+          blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['theory','imports','begin','end','datatype','primrec','fun','function','definition','lemma','theorem','corollary','proposition','proof','qed','apply','by','using','have','show','thus','hence','assume','fix','obtain','with','where','and','or','not','True','False','if','then','else','case','of','let','in','abbreviation','notation','syntax','type_synonym','typedecl','axiomatization','consts','class','instance','instantiation','interpretation','locale','sublocale','context','record','inductive','coinductive']
+        });
+        // Dafny — program verification
+        registerBasic({
+          id: 'dafny', extensions: ['.dfy'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['abstract','allocated','as','assert','assume','bool','break','by','calc','case','char','class','codatatype','const','constructor','continue','datatype','decreases','default','else','ensures','exists','expect','export','extends','false','forall','free','fresh','function','ghost','if','imap','import','in','include','inductive','int','invariant','is','iset','iterator','label','lemma','map','match','method','modifies','modify','module','multiset','nat','new','newtype','null','object','old','opened','predicate','print','provides','reads','real','refines','requires','return','returns','reveal','reveals','seq','set','static','string','then','this','trait','true','twostate','type','unchanged','var','where','while','with','witness','yield','yields']
+        });
+        // TLA+ — Lamport's spec language
+        registerBasic({
+          id: 'tla', extensions: ['.tla'],
+          lineComment: '\\*', blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['MODULE','EXTENDS','VARIABLE','VARIABLES','CONSTANT','CONSTANTS','ASSUME','ASSUMPTION','AXIOM','THEOREM','PROOF','QED','LET','IN','IF','THEN','ELSE','CASE','OTHER','CHOOSE','EXCEPT','DOMAIN','SUBSET','UNION','INSTANCE','WITH','LOCAL','RECURSIVE','LAMBDA','ENABLED','UNCHANGED','SF_','WF_','TRUE','FALSE','BOOLEAN']
+        });
+        // Groovy — JVM dynamic, Java-ish
+        registerBasic({
+          id: 'groovy', extensions: ['.groovy','.gradle','.gvy','.gy','.gsh'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['abstract','as','assert','boolean','break','byte','case','catch','char','class','const','continue','def','default','do','double','else','enum','extends','false','final','finally','float','for','goto','if','implements','import','in','instanceof','int','interface','long','native','new','null','package','private','protected','public','return','short','static','strictfp','super','switch','synchronized','this','threadsafe','throw','throws','transient','true','try','void','volatile','while','trait'],
+          types: ['String','Integer','Long','Double','Float','Boolean','Object','List','Map','Set','Closure','Range','BigInteger','BigDecimal']
+        });
+        // AWK — record processor
+        registerBasic({
+          id: 'awk', extensions: ['.awk'],
+          lineComment: '#', strings: 'double',
+          keywords: ['BEGIN','END','if','else','while','for','do','break','continue','next','nextfile','exit','return','function','in','getline','print','printf','printf','delete','length','sub','gsub','match','index','split','sprintf','substr','tolower','toupper','sin','cos','atan2','exp','log','sqrt','int','rand','srand','system','systime'],
+          types: ['FS','RS','OFS','ORS','NF','NR','FNR','FILENAME','ARGC','ARGV','ENVIRON','SUBSEP']
+        });
+        // SED — streaming substitutions
+        registerBasic({
+          id: 'sed', extensions: ['.sed'],
+          lineComment: '#', strings: 'double',
+          keywords: ['s','g','p','d','a','i','c','b','t','n','N','P','D','h','H','g','G','l','q','Q','r','w','W','x','y','z','T','e','F','R']
+        });
+        // VHDL — hardware description
+        registerBasic({
+          id: 'vhdl', extensions: ['.vhd','.vhdl'],
+          lineComment: '--', strings: 'double',
+          keywords: ['abs','access','after','alias','all','and','architecture','array','assert','attribute','begin','block','body','buffer','bus','case','component','configuration','constant','disconnect','downto','else','elsif','end','entity','exit','file','for','function','generate','generic','group','guarded','if','impure','in','inertial','inout','is','label','library','linkage','literal','loop','map','mod','nand','new','next','nor','not','null','of','on','open','or','others','out','package','port','postponed','procedure','process','protected','pure','range','record','register','reject','rem','report','return','rol','ror','select','severity','shared','signal','sla','sll','sra','srl','subtype','then','to','transport','type','unaffected','units','until','use','variable','wait','when','while','with','xnor','xor'],
+          types: ['bit','bit_vector','boolean','character','integer','natural','positive','real','std_logic','std_logic_vector','unsigned','signed','string']
+        });
+        // x86 / ARM assembly — generic coverage
+        registerBasic({
+          id: 'asm', extensions: ['.asm','.s','.nasm','.S'],
+          lineComment: ';', strings: 'both',
+          keywords: ['mov','movb','movw','movl','movq','lea','push','pop','add','sub','mul','imul','div','idiv','inc','dec','neg','and','or','xor','not','shl','shr','sar','sal','rol','ror','cmp','test','jmp','je','jne','jz','jnz','jl','jle','jg','jge','ja','jae','jb','jbe','jo','jno','js','jns','jc','jnc','call','ret','iret','nop','int','hlt','cli','sti','pushf','popf','pushad','popad','cld','std','loop','enter','leave','lock','rep','repe','repne','repz','repnz','fadd','fsub','fmul','fdiv','fcom','fld','fst','fstp','fxch','section','segment','global','extern','bits','default','equ','db','dw','dd','dq','resb','resw','resd','resq','times','org','end','proc','endp','struc','endstruc'],
+          types: ['byte','word','dword','qword','tbyte','oword','yword','zword','near','far','short','ptr']
+        });
+        // WebAssembly text format
+        registerBasic({
+          id: 'wat', extensions: ['.wat','.wast'],
+          lineComment: ';;', blockComment: ['(;', ';)'], strings: 'double',
+          keywords: ['module','func','param','result','local','global','table','memory','export','import','start','elem','data','type','block','loop','if','else','end','br','br_if','br_table','return','call','call_indirect','drop','select','get_local','set_local','tee_local','get_global','set_global','i32','i64','f32','f64','const','add','sub','mul','div_s','div_u','rem_s','rem_u','and','or','xor','shl','shr_s','shr_u','rotl','rotr','eq','eqz','ne','lt_s','lt_u','le_s','le_u','gt_s','gt_u','ge_s','ge_u','load','store']
+        });
+        // LLVM IR
+        registerBasic({
+          id: 'llvm', extensions: ['.ll','.llvm'],
+          lineComment: ';', strings: 'double',
+          keywords: ['define','declare','global','constant','target','triple','datalayout','attributes','module','asm','alias','type','opaque','private','internal','linkonce','weak','common','appending','extern_weak','external','thread_local','dllimport','dllexport','noinline','alwaysinline','optnone','readonly','readnone','nounwind','uwtable','ssp','sspstrong','sanitize_address','ret','br','switch','indirectbr','invoke','resume','unreachable','add','fadd','sub','fsub','mul','fmul','udiv','sdiv','fdiv','urem','srem','frem','shl','lshr','ashr','and','or','xor','alloca','load','store','getelementptr','fence','cmpxchg','atomicrmw','trunc','zext','sext','fptoui','fptosi','uitofp','sitofp','fptrunc','fpext','ptrtoint','inttoptr','bitcast','addrspacecast','icmp','fcmp','phi','select','call','va_arg','landingpad','catchpad','cleanuppad'],
+          types: ['void','i1','i8','i16','i32','i64','i128','half','float','double','fp128','label','metadata','x86_mmx','x86_fp80','ppc_fp128','token']
+        });
+        // GLSL — OpenGL shader
+        registerBasic({
+          id: 'glsl', extensions: ['.glsl','.vert','.frag','.geom','.comp','.tesc','.tese'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['attribute','const','uniform','varying','layout','centroid','flat','smooth','noperspective','patch','sample','break','continue','do','for','while','switch','case','default','if','else','subroutine','in','out','inout','true','false','invariant','precise','discard','return','lowp','mediump','highp','precision','struct','shared','coherent','volatile','restrict','readonly','writeonly','atomic_uint','buffer','union','main'],
+          types: ['void','bool','int','uint','float','double','vec2','vec3','vec4','ivec2','ivec3','ivec4','uvec2','uvec3','uvec4','bvec2','bvec3','bvec4','dvec2','dvec3','dvec4','mat2','mat3','mat4','mat2x2','mat2x3','mat2x4','mat3x2','mat3x3','mat3x4','mat4x2','mat4x3','mat4x4','sampler1D','sampler2D','sampler3D','samplerCube','sampler2DArray','image2D','image3D']
+        });
+        // HLSL — DirectX shader
+        registerBasic({
+          id: 'hlsl', extensions: ['.hlsl','.fx','.fxh'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['cbuffer','tbuffer','register','packoffset','static','const','uniform','shared','volatile','extern','precise','globallyCoherent','groupshared','inline','struct','class','interface','if','else','for','while','do','switch','case','default','break','continue','return','discard','true','false','in','out','inout','point','line','triangle','lineadj','triangleadj','centroid','linear','nointerpolation','noperspective','sample','row_major','column_major'],
+          types: ['void','bool','int','int1','int2','int3','int4','uint','uint1','uint2','uint3','uint4','float','float1','float2','float3','float4','double','min16float','min10float','min16int','min12int','min16uint','float1x1','float2x2','float3x3','float4x4','matrix','vector','Texture1D','Texture2D','Texture3D','TextureCube','Texture2DArray','TextureCubeArray','Sampler','SamplerState','SamplerComparisonState','RWTexture1D','RWTexture2D','RWTexture3D','Buffer','RWBuffer','StructuredBuffer','RWStructuredBuffer','ByteAddressBuffer','RWByteAddressBuffer','AppendStructuredBuffer','ConsumeStructuredBuffer']
+        });
+        // Metal shading — Apple GPU
+        registerBasic({
+          id: 'metal', extensions: ['.metal'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['using','namespace','struct','class','template','typename','constant','device','threadgroup','thread','kernel','vertex','fragment','compute','buffer','texture','sampler','stage_in','position','color','depth','point_size','const','inline','static','extern','if','else','for','while','do','switch','case','default','break','continue','return','true','false','nullptr','sizeof','typeof','new','delete','public','private','protected'],
+          types: ['void','bool','char','uchar','short','ushort','int','uint','long','ulong','half','float','float2','float3','float4','half2','half3','half4','int2','int3','int4','uint2','uint3','uint4','float2x2','float3x3','float4x4','texture1d','texture2d','texture3d','texturecube','texture2d_array','depth2d','depth2d_array','depthcube','texture2d_ms']
+        });
+        // CUDA — C++ with device attributes
+        registerBasic({
+          id: 'cuda', extensions: ['.cu','.cuh'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['__global__','__device__','__host__','__shared__','__constant__','__managed__','__restrict__','__forceinline__','__noinline__','__launch_bounds__','asm','auto','break','case','catch','char','class','const','constexpr','const_cast','continue','decltype','default','delete','do','double','dynamic_cast','else','enum','explicit','export','extern','false','float','for','friend','goto','if','inline','int','long','mutable','namespace','new','noexcept','nullptr','operator','private','protected','public','register','reinterpret_cast','return','short','signed','sizeof','static','static_assert','static_cast','struct','switch','template','this','thread_local','throw','true','try','typedef','typeid','typename','union','unsigned','using','virtual','void','volatile','wchar_t','while'],
+          types: ['dim3','uint3','int3','float3','float4','double2','double3','cudaError_t','cudaStream_t','cudaEvent_t','size_t']
+        });
+        // HCL / Terraform
+        registerBasic({
+          id: 'hcl', extensions: ['.hcl','.tf','.tfvars','.nomad'],
+          lineComment: '#', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['resource','data','variable','output','locals','module','provider','terraform','backend','required_providers','required_version','lifecycle','depends_on','count','for_each','dynamic','content','provisioner','connection','true','false','null','if','else','endif','for','in','endfor'],
+          extra: [[/\$\{[^}]+\}/, 'variable']]
+        });
+        // Nginx config
+        registerBasic({
+          id: 'nginx', extensions: ['.conf.nginx'],
+          lineComment: '#', strings: 'double',
+          keywords: ['http','server','location','upstream','events','mail','stream','types','map','geo','split_clients','limit_req_zone','limit_conn_zone','proxy_cache_path','fastcgi_cache_path','ssl','listen','server_name','root','index','try_files','rewrite','return','proxy_pass','fastcgi_pass','proxy_set_header','add_header','allow','deny','access_log','error_log','include','worker_processes','worker_connections','keepalive_timeout','sendfile','gzip','ssl_certificate','ssl_certificate_key','ssl_protocols']
+        });
+        // Apache httpd
+        registerBasic({
+          id: 'apache', extensions: ['.apacheconf','.htaccess'],
+          lineComment: '#', strings: 'double',
+          keywords: ['ServerRoot','Listen','User','Group','ServerAdmin','ServerName','DocumentRoot','Directory','Files','Location','VirtualHost','IfModule','IfDefine','LoadModule','Include','IncludeOptional','AllowOverride','Options','Order','Allow','Deny','Require','RewriteEngine','RewriteRule','RewriteCond','Redirect','RedirectMatch','Alias','AliasMatch','ScriptAlias','DirectoryIndex','ErrorDocument','ErrorLog','LogLevel','CustomLog','LogFormat','AddType','AddHandler','SetHandler','AuthType','AuthName','AuthUserFile','SSLEngine','SSLCertificateFile','SSLCertificateKeyFile']
+        });
+        // Caddy v2
+        registerBasic({
+          id: 'caddy', extensions: ['.caddyfile'],
+          lineComment: '#', strings: 'double',
+          keywords: ['reverse_proxy','file_server','root','encode','log','header','redir','rewrite','route','handle','handle_path','respond','try_files','templates','php_fastcgi','tls','basicauth','bind','import','snippet','gzip','zstd','brotli']
+        });
+        // systemd units
+        registerBasic({
+          id: 'systemd', extensions: ['.service','.socket','.timer','.target','.mount','.path','.automount','.slice','.scope'],
+          lineComment: '#', strings: 'double',
+          keywords: ['Unit','Service','Socket','Timer','Target','Mount','Automount','Path','Slice','Scope','Install','Description','After','Before','Wants','Requires','Requisite','Conflicts','BindsTo','PartOf','Type','ExecStart','ExecStop','ExecReload','ExecStartPre','ExecStartPost','Environment','EnvironmentFile','WorkingDirectory','User','Group','Restart','RestartSec','TimeoutSec','PrivateTmp','ProtectSystem','ProtectHome','WantedBy','RequiredBy','Alias','Also','OnCalendar','OnBootSec','OnUnitActiveSec','Persistent','ListenStream','ListenDatagram','Accept']
+        });
+        // dotenv
+        registerBasic({
+          id: 'dotenv', extensions: ['.env'],
+          lineComment: '#', strings: 'both',
+          keywords: ['true','false','null'],
+          extra: [[/^\s*[A-Z_][A-Z0-9_]*(?==)/, 'key']]
+        });
+        // Starlark / Bazel
+        registerBasic({
+          id: 'starlark', extensions: ['.star','.bzl','.bazel','.BUILD','BUCK'],
+          lineComment: '#', strings: 'both',
+          keywords: ['def','if','elif','else','for','in','not','and','or','return','break','continue','pass','lambda','True','False','None','load','fail','print','len','range','type','dict','list','tuple','struct','select','glob','package'],
+          types: []
+        });
+        // Ninja build
+        registerBasic({
+          id: 'ninja', extensions: ['.ninja'],
+          lineComment: '#', strings: 'double',
+          keywords: ['rule','build','default','pool','include','subninja','command','description','depfile','deps','generator','restat','rspfile','rspfile_content','in','out'],
+          extra: [[/\$[\w{][\w}]*/, 'variable']]
+        });
+        // Meson
+        registerBasic({
+          id: 'meson', extensions: ['.meson.build','.wrap'],
+          lineComment: '#', strings: 'both',
+          keywords: ['project','executable','library','shared_library','static_library','shared_module','both_libraries','declare_dependency','dependency','find_program','find_library','subdir','subdir_done','subproject','configuration_data','configure_file','install_headers','install_data','install_subdir','files','include_directories','if','elif','else','endif','foreach','endforeach','continue','break','and','or','not','in','true','false','error','warning','message','assert']
+        });
+        // Just — command runner
+        registerBasic({
+          id: 'just', extensions: ['.just','justfile'],
+          lineComment: '#', strings: 'both',
+          keywords: ['alias','export','set','if','else','shebang','@','&&'],
+          extra: [[/^\s*[\w-]+(?=\s*:)/, 'entity.name.function'], [/\{\{[^}]+\}\}/, 'variable']]
+        });
+        // Robot Framework
+        registerBasic({
+          id: 'robot', extensions: ['.robot','.resource'],
+          lineComment: '#', strings: 'double',
+          keywords: ['Settings','Variables','Keywords','Test Cases','Tasks','Library','Resource','Documentation','Tags','Setup','Teardown','Template','Timeout','Arguments','Return','Given','When','Then','And','But','IF','ELSE','ELSE IF','END','FOR','IN','IN RANGE','IN ENUMERATE','IN ZIP','WHILE','TRY','EXCEPT','FINALLY','RETURN','BREAK','CONTINUE']
+        });
+        // GDScript — Godot
+        registerBasic({
+          id: 'gdscript', extensions: ['.gd'],
+          lineComment: '#', strings: 'both',
+          keywords: ['if','elif','else','for','while','match','break','continue','pass','return','func','var','const','enum','class','class_name','extends','static','signal','export','onready','tool','remote','master','puppet','sync','remotesync','mastersync','puppetsync','and','or','not','in','is','as','self','super','true','false','null','void','await','yield','breakpoint','assert','preload','load'],
+          types: ['int','float','bool','String','Vector2','Vector3','Vector4','Rect2','Transform2D','Transform3D','Basis','Color','NodePath','RID','Object','Array','Dictionary','PackedByteArray','PackedInt32Array','PackedFloat32Array','PackedStringArray','PackedVector2Array','PackedVector3Array','PackedColorArray','Callable','Signal','StringName']
+        });
+        // Haxe — cross-target language
+        registerBasic({
+          id: 'haxe', extensions: ['.hx'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['abstract','break','case','cast','catch','class','continue','default','do','dynamic','else','enum','extends','extern','false','final','for','function','if','implements','import','in','inline','interface','macro','new','null','operator','overload','override','package','private','public','return','static','super','switch','this','throw','true','try','typedef','untyped','using','var','while'],
+          types: ['Int','Float','Bool','String','Array','Dynamic','Void','Null','Any','Map','Iterator','Iterable','Class','Enum','EnumValue']
+        });
+        // Wren — small concurrent
+        registerBasic({
+          id: 'wren', extensions: ['.wren'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['break','class','construct','continue','else','false','for','foreign','if','import','in','is','null','return','static','super','this','true','var','while']
+        });
+        // Squirrel — embedded
+        registerBasic({
+          id: 'squirrel', extensions: ['.nut'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['base','break','case','catch','class','clone','continue','const','default','delete','do','else','enum','extends','false','for','foreach','function','if','in','instanceof','local','null','resume','return','static','switch','this','throw','true','try','typeof','while','yield']
+        });
+        // Raku — Perl 6
+        registerBasic({
+          id: 'raku', extensions: ['.raku','.rakumod','.p6','.pl6','.pm6'],
+          lineComment: '#', strings: 'both',
+          keywords: ['my','our','has','state','let','temp','sub','multi','method','submethod','class','role','grammar','token','rule','regex','does','is','but','returns','of','where','subset','enum','constant','module','package','if','elsif','else','unless','with','orwith','without','when','given','while','until','repeat','loop','for','each','last','next','redo','return','fail','die','warn','use','need','import','require','BEGIN','END','CHECK','INIT','FIRST','LAST','ENTER','LEAVE','KEEP','UNDO','PRE','POST','CATCH','CONTROL','and','or','xor','not','andthen','orelse','notandthen','so']
+        });
+        // Pony — capabilities-secure actors
+        registerBasic({
+          id: 'pony', extensions: ['.pony'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['use','type','interface','trait','primitive','class','actor','struct','object','is','let','var','embed','fun','be','new','where','if','ifdef','iftype','then','elseif','else','elseiftype','end','while','do','repeat','until','for','in','match','cases','try','error','with','return','break','continue','consume','recover','as','this','compile_error','compile_intrinsic','iso','trn','ref','val','box','tag','true','false'],
+          types: ['None','Bool','I8','I16','I32','I64','I128','ILong','ISize','U8','U16','U32','U64','U128','ULong','USize','F32','F64','String','Array','Env','Stdin','Stdout','Stderr','Pointer']
+        });
+        // Mojo — Python-family systems
+        registerBasic({
+          id: 'mojo', extensions: ['.mojo','.🔥'],
+          lineComment: '#', strings: 'both',
+          keywords: ['def','fn','struct','trait','var','let','alias','owned','borrowed','inout','mut','raises','async','await','with','as','pass','break','continue','return','yield','if','elif','else','while','for','in','not','and','or','is','True','False','None','import','from','try','except','finally','raise','class','lambda','global','nonlocal','del','assert','parameter'],
+          types: ['Int','UInt','Int8','Int16','Int32','Int64','UInt8','UInt16','UInt32','UInt64','Float16','Float32','Float64','Bool','String','StringLiteral','Tensor','DTypePointer','Pointer','SIMD','List','Dict','Tuple']
+        });
+        // Jakt — SerenityOS systems lang
+        registerBasic({
+          id: 'jakt', extensions: ['.jakt'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['if','else','while','for','in','loop','match','return','break','continue','yield','defer','guard','throw','throws','try','catch','must','let','mut','anon','fn','comptime','unsafe','cpp','extern','function','enum','struct','class','public','private','restricted','namespace','import','as','this','true','false','null','and','or','not'],
+          types: ['i8','i16','i32','i64','u8','u16','u32','u64','usize','isize','f32','f64','bool','c_int','c_char','String','StringBuilder','Array','Dictionary','Set','Tuple','Optional','WeakPtr','Range']
+        });
+        // Carbon — experimental C++ successor
+        registerBasic({
+          id: 'carbon', extensions: ['.carbon'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['abstract','addr','alias','and','api','as','auto','base','break','case','choice','class','constraint','continue','default','else','export','extends','extern','external','final','fn','for','forall','friend','if','impl','import','in','interface','is','let','library','like','match','namespace','not','observe','or','override','package','partial','private','protected','returned','return','self','Self','template','then','type','unsafe','var','virtual','where','while'],
+          types: ['bool','i8','i16','i32','i64','i128','i256','u8','u16','u32','u64','u128','u256','f32','f64','String','Array','Slice','Ptr','Optional','Result']
+        });
+        // Chapel — HPC
+        registerBasic({
+          id: 'chapel', extensions: ['.chpl'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['align','atomic','begin','break','by','class','cobegin','coforall','config','const','continue','delete','dmapped','do','domain','else','enum','export','extern','for','forall','forwarding','if','in','index','inline','inout','iter','label','let','lifetime','local','locale','module','new','nil','noinit','on','only','otherwise','out','override','owned','param','private','proc','prototype','public','real','record','reduce','ref','require','return','scan','select','serial','shared','single','sparse','sync','then','throw','throws','try','type','union','unmanaged','use','var','when','where','while','with','yield','zip'],
+          types: ['int','uint','real','imag','complex','bool','string','bytes','void','nothing','range','domain','sync','single','atomic','tuple','object','borrowed','owned','shared','unmanaged']
+        });
+        // Hare — new-wave systems
+        registerBasic({
+          id: 'hare', extensions: ['.ha'],
+          lineComment: '//', strings: 'double',
+          keywords: ['abort','alloc','append','as','assert','bool','break','case','char','const','continue','def','defer','delete','else','enum','export','f32','f64','false','fn','for','free','i16','i32','i64','i8','if','insert','int','is','len','let','match','never','nullable','offset','opaque','return','size','static','str','struct','switch','true','type','u16','u32','u64','u8','uint','uintptr','union','use','valist','vastart','vaarg','vaend','void','yield']
+        });
+        // Roc — fast, friendly, functional
+        registerBasic({
+          id: 'roc', extensions: ['.roc'],
+          lineComment: '#', strings: 'double',
+          keywords: ['app','package','platform','hosted','imports','exposes','packages','provides','requires','to','using','as','interface','when','is','if','then','else','expect','expect-fx','dbg','crash'],
+          types: ['Bool','Str','Num','I8','I16','I32','I64','I128','U8','U16','U32','U64','U128','F32','F64','Dec','List','Dict','Set','Result','Task']
+        });
+        // Vyper — Python-ish Ethereum contracts
+        registerBasic({
+          id: 'vyper', extensions: ['.vy'],
+          lineComment: '#', strings: 'both',
+          keywords: ['def','return','if','elif','else','for','in','while','break','continue','pass','assert','raise','import','from','as','struct','event','interface','implements','public','private','external','internal','view','pure','payable','nonpayable','constant','immutable','True','False','None','self','msg','tx','block','chain','send','log','empty','convert','extract32','concat','keccak256','sha256','uint256_addmod','uint256_mulmod','len','slice','method_id','_abi_encode','_abi_decode'],
+          types: ['bool','uint8','uint16','uint32','uint64','uint128','uint256','int8','int16','int32','int64','int128','int256','address','bytes','bytes32','String','DynArray','HashMap','decimal','constant','immutable']
+        });
+        // Move — Aptos/Sui
+        registerBasic({
+          id: 'move', extensions: ['.move'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['module','script','fun','public','friend','entry','native','const','let','mut','move','copy','return','if','else','while','loop','break','continue','abort','assert','use','as','struct','has','key','store','copy','drop','acquires','spec','pragma','invariant','ensures','requires','true','false'],
+          types: ['u8','u16','u32','u64','u128','u256','bool','address','signer','vector']
+        });
+        // Cadence — Flow blockchain
+        registerBasic({
+          id: 'cadence', extensions: ['.cdc'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['let','var','fun','init','destroy','pre','post','if','else','while','for','in','break','continue','return','switch','case','default','transaction','prepare','execute','pub','priv','access','self','contract','interface','resource','struct','enum','event','import','from','as','create','destroy','auth','capability','Type','attachment','base','view','entitlement','mapping'],
+          types: ['Int','Int8','Int16','Int32','Int64','UInt','UInt8','UInt16','UInt32','UInt64','Fix64','UFix64','Bool','String','Character','Address','Path','Type','Void','Never','AnyResource','AnyStruct','Capability','Account','AuthAccount','PublicAccount','Block']
+        });
+        // Clarity — Stacks
+        registerBasic({
+          id: 'clarity', extensions: ['.clar'],
+          lineComment: ';;', strings: 'double',
+          keywords: ['define-constant','define-data-var','define-map','define-public','define-private','define-read-only','define-trait','impl-trait','use-trait','let','begin','if','match','try!','unwrap!','unwrap-panic','unwrap-err!','unwrap-err-panic','asserts!','and','or','not','is-eq','is-some','is-none','is-ok','is-err','ok','err','some','none','true','false','map-get?','map-set','map-insert','map-delete','var-get','var-set','contract-call?','as-contract','at-block','tx-sender','contract-caller','block-height','burn-block-height','stx-liquid-supply'],
+          types: ['uint','int','bool','principal','buff','string-ascii','string-utf8','list','tuple','response','optional']
+        });
+        // Typst — new typesetting
+        registerBasic({
+          id: 'typst', extensions: ['.typ'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['let','set','show','if','else','for','in','while','break','continue','return','import','include','as','and','or','not','none','auto','true','false']
+        });
+        // AsciiDoc
+        registerBasic({
+          id: 'asciidoc', extensions: ['.adoc','.asciidoc'],
+          lineComment: '//', strings: 'double',
+          keywords: ['include','image','video','audio','link','xref','kbd','menu','btn','icon','footnote','cite','stem','latexmath','asciimath']
+        });
+        // BibTeX
+        registerBasic({
+          id: 'bibtex', extensions: ['.bib'],
+          lineComment: '%', strings: 'both',
+          keywords: ['article','book','booklet','conference','inbook','incollection','inproceedings','manual','mastersthesis','misc','phdthesis','proceedings','techreport','unpublished','string','preamble','comment']
+        });
+        // Org — Emacs Org mode
+        registerBasic({
+          id: 'org', extensions: ['.org'],
+          lineComment: '#', strings: 'double',
+          keywords: ['TODO','DONE','CANCELLED','DEFERRED','WAITING','NEXT','IN-PROGRESS','BEGIN_SRC','END_SRC','BEGIN_EXAMPLE','END_EXAMPLE','BEGIN_QUOTE','END_QUOTE','TITLE','AUTHOR','DATE','STARTUP','OPTIONS','TAGS','FILETAGS','PROPERTY','SCHEDULED','DEADLINE','CLOSED']
+        });
+        // Cypher / Neo4j
+        registerBasic({
+          id: 'cypher-ext', extensions: ['.cyp','.cql'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['MATCH','OPTIONAL','WHERE','RETURN','CREATE','MERGE','DELETE','DETACH','REMOVE','SET','WITH','UNWIND','UNION','LIMIT','SKIP','ORDER','BY','ASC','DESC','DISTINCT','CALL','YIELD','FOREACH','CASE','WHEN','THEN','ELSE','END','AND','OR','NOT','XOR','IN','IS','NULL','TRUE','FALSE','AS','ON','CONSTRAINT','INDEX','DROP','LOAD','CSV','FROM','HEADERS','USING','PERIODIC','COMMIT','PROFILE','EXPLAIN']
+        });
+        // Pine Script — TradingView
+        registerBasic({
+          id: 'pinescript', extensions: ['.pine'],
+          lineComment: '//', strings: 'both',
+          keywords: ['if','else','for','to','by','while','switch','case','default','break','continue','var','varip','const','import','export','method','type','enum','fn','return','true','false','na','and','or','not','na','series','simple','input','study','indicator','strategy','library','plot','plotshape','plotchar','plotarrow','plotcandle','plotbar','hline','vline','bgcolor','barcolor','fill','alert','alertcondition','label','line','box','table','array','matrix','map','request','ta','math','str','color','chart','syminfo','timeframe','time','session','ticker'],
+          types: ['int','float','bool','string','color','label','line','box','table','array','matrix','map','series','simple','input']
+        });
+        // Rexx
+        registerBasic({
+          id: 'rexx', extensions: ['.rex','.rexx'],
+          lineComment: '--', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['address','arg','call','do','drop','else','end','exit','expose','forever','forward','guard','if','interpret','iterate','leave','nop','numeric','on','off','options','otherwise','parse','procedure','pull','push','queue','raise','reply','return','say','select','signal','source','then','trace','until','upper','use','when','while','with']
+        });
+        // Fish shell
+        registerBasic({
+          id: 'fish', extensions: ['.fish'],
+          lineComment: '#', strings: 'both',
+          keywords: ['alias','and','argparse','begin','bg','bind','block','break','breakpoint','builtin','case','cd','command','commandline','complete','contains','continue','count','dirh','dirs','disown','echo','else','emit','end','eval','exec','exit','false','fg','for','function','functions','history','if','in','isatty','jobs','math','nextd','not','or','popd','prevd','printf','pushd','pwd','read','return','set','source','status','string','switch','test','time','trap','true','type','ulimit','umask','unalias','unset','vared','wait','while']
+        });
+        // Nushell
+        registerBasic({
+          id: 'nushell', extensions: ['.nu'],
+          lineComment: '#', strings: 'both',
+          keywords: ['def','def-env','export','export-env','let','let-env','mut','const','alias','use','source','hide','module','extern','if','else','for','in','while','loop','break','continue','return','match','try','catch','do','where','not','and','or','xor','bit-and','bit-or','bit-xor','bit-shl','bit-shr','true','false','null','nothing']
+        });
+        // AutoHotkey
+        registerBasic({
+          id: 'autohotkey', extensions: ['.ahk'],
+          lineComment: ';', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['if','else','while','until','loop','for','return','break','continue','goto','gosub','onexit','msgbox','send','sendinput','sendraw','sendplay','sendevent','click','mousemove','mouseclick','mousegetpos','winactivate','winclose','winwait','winwaitactive','winwaitclose','winminimize','winmaximize','winrestore','winshow','winhide','wingettitle','wingetpos','winmove','winset','wingetclass','controlclick','controlsend','controlgettext','controlsettext','clipboard','a_','hotkey','hotstring','run','runwait','runas','fileappend','fileread','filecopy','filemove','filedelete','filecreatedir','fileremovedir','filegetsize','filegetattrib','filegettime','filegetversion','filerecycle','filesetattrib','filesettime','func','class','extends','static','new','this','global','local','byref','false','true']
+        });
+        // AppleScript
+        registerBasic({
+          id: 'applescript', extensions: ['.applescript','.scpt'],
+          lineComment: '--', blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['application','tell','to','of','from','on','end','in','out','set','get','copy','make','with','without','where','return','returning','given','whose','as','using','terms','considering','ignoring','case','diacriticals','hyphens','punctuation','white','space','if','then','else','repeat','while','until','times','exit','continue','try','error','global','local','script','property','my','it','me','current','every','all','first','last','some','any','front','back','middle','before','after','beginning','ending','above','below','true','false','yes','no','and','or','not','is','equal','equals','does','not','contain','starts','ends','with','a','reference','and','greater','less','than','app'],
+          types: ['integer','real','number','string','text','list','record','boolean','date','file','alias','reference','any','missing','value']
+        });
+        // MATLAB / Octave
+        registerBasic({
+          id: 'matlab', extensions: ['.m','.mat'],
+          lineComment: '%', blockComment: ['%{','%}'], strings: 'both',
+          keywords: ['function','end','if','else','elseif','for','while','switch','case','otherwise','break','continue','return','try','catch','global','persistent','classdef','properties','methods','events','enumeration','do','parfor','spmd','clear','clc','close','disp','fprintf','sprintf','plot','figure','hold','axis','xlabel','ylabel','title','legend','save','load','input','output','varargin','varargout','nargin','nargout','true','false']
+        });
+        // Wolfram / Mathematica
+        registerBasic({
+          id: 'wolfram', extensions: ['.wl','.wls','.nb','.m.wolfram'],
+          lineComment: '', blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['Module','Block','With','If','Which','Switch','Do','While','For','Table','Map','Apply','Function','Plot','Plot3D','ListPlot','Manipulate','Print','Get','Put','Set','SetDelayed','Equal','Unequal','Greater','Less','And','Or','Not','Null','True','False','Infinity','Pi','E','I','Integer','Real','Complex','Rational','String','List','Association','Rule','RuleDelayed','Replace','ReplaceAll','ReplaceRepeated','Solve','NSolve','Integrate','D','Series','Simplify','FullSimplify','Expand','Factor','Part','First','Last','Length','Head','Range','Append','Prepend','Join','Select','Cases','Position']
+        });
+        // Stata
+        registerBasic({
+          id: 'stata', extensions: ['.do','.ado'],
+          lineComment: '*', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['if','else','while','foreach','forvalues','for','in','of','program','define','end','args','syntax','global','local','matrix','scalar','return','ereturn','sreturn','exit','drop','keep','generate','replace','egen','rename','sort','gsort','by','bysort','capture','quietly','noisily','display','version','clear','use','save','import','export','merge','append','collapse','reshape','regress','summarize','tabulate','describe','list','browse','edit','set','cd','mkdir','pwd','log','close','estimates','predict','test','lincom','margins']
+        });
+        // SAS
+        registerBasic({
+          id: 'sas', extensions: ['.sas'],
+          blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['data','set','merge','update','modify','infile','file','input','output','put','if','then','else','do','end','while','until','by','retain','drop','keep','rename','label','length','format','informat','array','proc','run','quit','title','footnote','options','libname','filename','ods','cards','datalines','stop','return','call','link','goto','abort','select','when','otherwise','_all_','_numeric_','_character_','_temporary_','and','or','not','in','eq','ne','lt','le','gt','ge']
+        });
+        // LaTeX
+        registerBasic({
+          id: 'latex', extensions: ['.tex','.latex','.sty','.cls','.dtx','.ltx'],
+          lineComment: '%', strings: 'double',
+          keywords: ['documentclass','usepackage','begin','end','section','subsection','subsubsection','chapter','paragraph','subparagraph','part','newcommand','renewcommand','newenvironment','renewenvironment','def','let','input','include','includeonly','bibliography','bibliographystyle','cite','ref','label','eqref','pageref','item','textbf','textit','texttt','emph','underline','frac','sqrt','sum','int','prod','lim','alpha','beta','gamma','delta','epsilon','theta','lambda','mu','pi','sigma','phi','omega','mathbb','mathcal','mathfrak','mathbf','mathit','mathrm','left','right','quad','qquad','hspace','vspace','newline','newpage','maketitle','tableofcontents','listoffigures','listoftables']
+        });
+        // R Markdown / Pandoc — same base as markdown, let pass
+
+        // Smalltalk
+        registerBasic({
+          id: 'smalltalk', extensions: ['.st'],
+          blockComment: ['"','"'], strings: 'single',
+          keywords: ['self','super','nil','true','false','thisContext','Smalltalk','Transcript','Object','Class','Metaclass','Boolean','Number','Integer','Float','Character','String','Symbol','Array','OrderedCollection','Dictionary','Set','Bag','Stream']
+        });
+        // APL — ASCII subset only; real APL uses special glyphs
+        registerBasic({
+          id: 'apl', extensions: ['.apl','.aplf','.aplo'],
+          lineComment: '⍝', strings: 'single',
+          keywords: ['if','else','while','until','return','namespace']
+        });
+        // Forth
+        registerBasic({
+          id: 'forth', extensions: ['.fth','.4th','.forth'],
+          lineComment: '\\', blockComment: ['(',')'], strings: 'double',
+          keywords: [':','I',';','if','then','else','begin','until','while','repeat','do','loop','+loop','leave','exit','variable','constant','value','create','does','allot','cells','char','compile','immediate','recurse','words','see','dup','drop','swap','over','rot','-rot','nip','tuck','pick','roll','depth','and','or','xor','not','invert','true','false','abort','quit','bye']
+        });
+        // Nginx, Apache, Caddy already above. Ninja, Meson already above.
+
+        // Nim, Odin, Elm, Haskell, OCaml, Fortran, Nix, Makefile, CMake,
+        // Gleam, Crystal, V already registered in the earlier batch.
+
         var editor = monaco.editor.create(document.getElementById('editor'), {
           value: '',
           language: 'plaintext',
