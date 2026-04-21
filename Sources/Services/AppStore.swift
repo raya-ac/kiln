@@ -270,6 +270,23 @@ final class AppStore: ObservableObject {
         let stored = Persistence.loadSessions()
         sessions = stored.map { $0.toSession() }
 
+        // Sweep stale interruption flags. The flag is set pre-emptively on
+        // every send and cleared on clean completion — but if the app truly
+        // crashed, the flag survives on disk. We only want to surface "just
+        // crashed" sessions in the launch recovery banner, not anything the
+        // user clearly moved on from. If a flagged session hasn't had
+        // activity in the last 4 hours, assume the user closed the app
+        // cleanly since the crash and clear the flag quietly.
+        let staleCutoff: TimeInterval = 4 * 60 * 60
+        let now = Date()
+        for i in sessions.indices where sessions[i].wasInterrupted {
+            let lastActivity = sessions[i].messages.last?.timestamp ?? sessions[i].createdAt
+            if now.timeIntervalSince(lastActivity) > staleCutoff {
+                sessions[i].wasInterrupted = false
+                Persistence.saveSession(sessions[i])
+            }
+        }
+
         // Restore remote server config from UserDefaults and auto-start if enabled.
         let d = UserDefaults.standard
         remoteServer.port = UInt16(d.integer(forKey: "remote.port")) == 0 ? 8421 : UInt16(d.integer(forKey: "remote.port"))

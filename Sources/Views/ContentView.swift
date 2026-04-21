@@ -1151,15 +1151,16 @@ struct LaunchRecoveryBanner: View {
     @EnvironmentObject var store: AppStore
 
     var body: some View {
-        let count = store.interruptedSessions.count
+        let sessions = store.interruptedSessions
+        let count = sessions.count
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color(hex: 0xF59E0B))
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(count) \(count == 1 ? "session was" : "sessions were") interrupted last run")
+                Text("\(count) \(count == 1 ? "session was" : "sessions were") interrupted")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
-                Text("Resume from where you left off or dismiss.")
+                Text(interruptionSubtitle(sessions))
                     .font(.system(size: 10))
                     .foregroundStyle(Color.kilnTextTertiary)
             }
@@ -1216,5 +1217,18 @@ struct LaunchRecoveryBanner: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color(hex: 0xF59E0B).opacity(0.4)).frame(height: 1)
         }
+    }
+
+    /// Subtitle shows when the most-recently-interrupted session stopped,
+    /// using relative time. Avoids the old "last run" phrasing which was
+    /// wrong whenever the flag survived multiple app launches.
+    private func interruptionSubtitle(_ sessions: [Session]) -> String {
+        let mostRecent = sessions
+            .map { $0.messages.last?.timestamp ?? $0.createdAt }
+            .max() ?? Date()
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let when = formatter.localizedString(for: mostRecent, relativeTo: Date())
+        return "Interrupted \(when). Resume or dismiss."
     }
 }
