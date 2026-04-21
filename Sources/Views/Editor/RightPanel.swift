@@ -600,6 +600,15 @@ struct FileTreeView: View {
                 idx = existing
             } else {
                 let initial = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+                // Capture the pre-edit state NOW, before the stream below
+                // overwrites originalContent. Otherwise the diff viewer's
+                // before/after both end up pointing at Claude's post-write
+                // content and render as identical. For a brand-new file
+                // `initial` is "" — exactly the "all additions" hunk we
+                // want the diff to show.
+                if preEditSnapshot[path] == nil {
+                    preEditSnapshot[path] = initial
+                }
                 openFiles.append(OpenFile(path: path, content: initial))
                 idx = openFiles.count - 1
                 if activeIndex == nil { activeIndex = idx }
@@ -913,23 +922,143 @@ struct FileTreeView: View {
     }
 
     private func languageForFile(_ path: String) -> String {
+        // Special-case filenames whose extension alone doesn't tell the
+        // whole story — Dockerfile, Makefile, .gitignore, etc. — then
+        // fall through to an extension-based map. Monaco ships with all
+        // of these built in; we just have to hand it the right id.
+        let name = (path as NSString).lastPathComponent.lowercased()
+        switch name {
+        case "dockerfile", "containerfile": return "dockerfile"
+        case "makefile", "gnumakefile": return "makefile"
+        case "cmakelists.txt": return "cmake"
+        case ".gitignore", ".dockerignore", ".npmignore", ".eslintignore",
+             ".prettierignore": return "ignore"
+        case "gemfile", "rakefile", "podfile", "brewfile": return "ruby"
+        case "package.swift": return "swift"
+        case ".env", ".env.local", ".env.production", ".env.development":
+            return "ini"
+        default: break
+        }
+
         let ext = (path as NSString).pathExtension.lowercased()
         switch ext {
+        // Apple platforms
         case "swift": return "swift"
-        case "js": return "js"
-        case "ts": return "ts"
-        case "jsx": return "jsx"
-        case "tsx": return "tsx"
-        case "py": return "python"
-        case "json": return "json"
+        case "m", "mm": return "objective-c"
+        // Web
+        case "js", "mjs", "cjs": return "javascript"
+        case "ts", "mts", "cts": return "typescript"
+        case "jsx": return "javascript"
+        case "tsx": return "typescript"
+        case "html", "htm", "xhtml": return "html"
         case "css": return "css"
-        case "html", "htm": return "html"
-        case "md": return "markdown"
-        case "sh", "bash", "zsh": return "shell"
+        case "scss", "sass": return "scss"
+        case "less": return "less"
+        case "vue": return "html"
+        case "svelte": return "html"
+        case "graphql", "gql": return "graphql"
+        // Data / config
+        case "json", "jsonc", "json5": return "json"
+        case "yaml", "yml": return "yaml"
+        case "toml": return "ini"
+        case "ini", "cfg", "conf": return "ini"
+        case "xml", "plist", "storyboard", "xib", "xsd", "xsl": return "xml"
+        case "csv", "tsv": return "plaintext"
+        // Docs
+        case "md", "markdown", "mdown", "mkd": return "markdown"
+        case "rst": return "restructuredtext"
+        case "tex", "latex": return "latex"
+        // Shells
+        case "sh", "bash", "zsh", "ksh", "fish": return "shell"
+        case "bat", "cmd": return "bat"
+        case "ps1", "psm1", "psd1": return "powershell"
+        // Systems
+        case "c", "h": return "c"
+        case "cpp", "cc", "cxx", "hpp", "hh", "hxx", "h++": return "cpp"
         case "rs": return "rust"
         case "go": return "go"
-        case "rb": return "ruby"
-        default: return ext
+        case "zig": return "zig"
+        case "d": return "cpp"              // no D tokenizer, C/C++ is close
+        case "nim", "nims": return "nim"
+        case "v": return "systemverilog"    // .v is much more commonly Verilog than V
+        case "odin": return "odin"
+        case "gleam": return "gleam"
+        case "cr": return "crystal"
+        // JVM
+        case "java": return "java"
+        case "kt", "kts": return "kotlin"
+        case "scala", "sc": return "scala"
+        case "groovy", "gradle": return "groovy"
+        case "clj", "cljs", "cljc", "edn": return "clojure"
+        // Dynamic
+        case "py", "pyw", "pyi": return "python"
+        case "rb", "rbw": return "ruby"
+        case "php", "phtml": return "php"
+        case "pl", "pm": return "perl"
+        case "lua": return "lua"
+        case "tcl": return "tcl"
+        case "r", "rmd": return "r"
+        case "jl": return "julia"
+        // Functional
+        case "hs", "lhs": return "haskell"
+        case "elm": return "elm"
+        case "ex", "exs": return "elixir"
+        case "erl", "hrl": return "erlang"
+        case "ml", "mli": return "ocaml"
+        case "fs", "fsi", "fsx": return "fsharp"
+        case "lisp", "lsp", "cl": return "lisp"
+        case "rkt": return "racket"
+        case "scm", "ss": return "scheme"
+        // .NET
+        case "cs": return "csharp"
+        case "vb": return "vb"
+        case "razor", "cshtml": return "razor"
+        case "xaml": return "xml"
+        // Mobile / cross
+        case "dart": return "dart"
+        // Scientific / numeric
+        case "f", "for", "f77", "f90", "f95", "f03", "f08": return "fortran"
+        case "m.octave", "octave": return "matlab"
+        case "mat": return "matlab"
+        // Databases
+        case "sql", "mysql", "pgsql": return "sql"
+        // Hardware description
+        case "vhd", "vhdl": return "vhdl"
+        case "sv", "svh", "v.sv", "verilog": return "systemverilog"
+        // Assembly
+        case "asm", "s", "nasm": return "asm"
+        // Makefiles / build
+        case "mk", "make": return "makefile"
+        case "cmake": return "cmake"
+        case "bazel", "bzl", "starlark": return "python"
+        // Infrastructure
+        case "tf", "tfvars": return "hcl"
+        case "hcl": return "hcl"
+        case "nix": return "nix"
+        // Misc
+        case "proto": return "protobuf"
+        case "coffee": return "coffeescript"
+        case "pas", "pp.pas": return "pascal"
+        case "apex", "cls", "trigger": return "apex"
+        case "bicep": return "bicep"
+        case "mdx": return "mdx"
+        case "cls.apex": return "apex"
+        case "abap": return "abap"
+        case "pug", "jade": return "pug"
+        case "hbs", "handlebars": return "handlebars"
+        case "twig": return "twig"
+        case "liquid": return "liquid"
+        case "wgsl": return "wgsl"
+        case "bb", "blade": return "html"
+        case "thrift": return "thrift"
+        case "sol": return "solidity"
+        case "pp": return "puppet"
+        case "dhall": return "dhall"
+        case "log": return "log"
+        case "diff", "patch": return "diff"
+        case "txt", "text": return "plaintext"
+        case "alg": return "algol"
+        default: return ext.isEmpty ? "plaintext" : ext
         }
     }
 
@@ -1423,14 +1552,16 @@ struct DiffView: View {
     }
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
                     DiffRow(line: line)
                 }
             }
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.kilnBg)
     }
 
@@ -1517,6 +1648,7 @@ struct DiffRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(DiffView.rowBackground(line.kind))
     }
 }

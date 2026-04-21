@@ -100,6 +100,50 @@ fi
 if [ -f "$ROOT/Sources/App/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Sources/App/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
+# SPM generates a per-target resource bundle (Kiln_Kiln.bundle) at build
+# time that holds everything declared under `resources:` in Package.swift
+# — the Monaco editor tree, editor/index.html, ClaudeMark.png, etc.
+# Bundle.module at runtime locates it next to the executable, so drop it
+# alongside the binary. Without this copy the .app ships with no editor
+# runtime, and Bundle.module falls back to whatever stale bundle lives
+# under .build/ (or nothing at all on a fresh machine).
+SPM_RES_BUNDLE="$BIN_PATH/${APP_NAME}_${APP_NAME}.bundle"
+if [ -d "$SPM_RES_BUNDLE" ]; then
+  # Resource bundle goes into Contents/Resources/ — anywhere else either
+  # fails codesign ("unsealed contents present in the bundle root" at
+  # .app root, or "bundle format unrecognized" in Contents/MacOS). The
+  # generated Bundle.module accessor looks at
+  # `Bundle.main.bundleURL/Kiln_Kiln.bundle` which isn't right for a
+  # .app, so CodeEditorView has a fallback that checks
+  # Bundle.main.resourceURL — that resolves to Contents/Resources and
+  # finds this copy.
+  DEST_BUNDLE="$APP/Contents/Resources/${APP_NAME}_${APP_NAME}.bundle"
+  # SPM emits a flat resource directory — no Info.plist, no Contents/
+  # wrapper — which codesign refuses to treat as a bundle (the outer
+  # --deep pass choked with "bundle format unrecognized"). Copy the
+  # resources into a properly-formed deep bundle instead: Contents/
+  # Info.plist plus Contents/Resources/<files>. Bundle.module / Bundle
+  # (url:) both handle deep-style bundles transparently.
+  mkdir -p "$DEST_BUNDLE/Contents/Resources"
+  # Use `.` + `cp -R` so dotfiles come along; we want the children of
+  # SPM_RES_BUNDLE (editor/, monaco/, ClaudeMark.png) mirrored directly
+  # under Contents/Resources/.
+  (cd "$SPM_RES_BUNDLE" && tar cf - .) | (cd "$DEST_BUNDLE/Contents/Resources" && tar xf -)
+  cat > "$DEST_BUNDLE/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID.resources</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>${APP_NAME}_${APP_NAME}</string>
+  <key>CFBundlePackageType</key><string>BNDL</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
+</dict>
+</plist>
+EOF
+fi
 # Bundle CHANGELOG so the "What's New" popup has something to read.
 if [ -f "$ROOT/CHANGELOG.md" ]; then
   cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"

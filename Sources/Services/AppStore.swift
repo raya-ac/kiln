@@ -13,6 +13,12 @@ final class AppStore: ObservableObject {
             // Clear "done" pulse when the user focuses the session.
             if let id = activeSessionId {
                 recentlyCompleted.removeValue(forKey: id)
+                // Persist so the next launch restores whatever was focused
+                // when the app was last closed, instead of booting into
+                // the fallback "first session" every time.
+                UserDefaults.standard.set(id, forKey: "kiln.activeSessionId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "kiln.activeSessionId")
             }
         }
     }
@@ -356,6 +362,16 @@ final class AppStore: ObservableObject {
         for i in sessions.indices where sessions[i].wasInterrupted {
             sessions[i].wasInterrupted = false
             Persistence.saveSession(sessions[i])
+        }
+
+        // Restore the last-focused session if that id still exists.
+        // Falls through to nil (sidebar renders "no selection") if the
+        // session was deleted between runs — better than silently jumping
+        // to a random other session. The sidebar's first-session fallback
+        // handles the empty case elsewhere.
+        if let savedId = UserDefaults.standard.string(forKey: "kiln.activeSessionId"),
+           sessions.contains(where: { $0.id == savedId }) {
+            activeSessionId = savedId
         }
 
         // Restore remote server config from UserDefaults and auto-start if enabled.
@@ -1319,12 +1335,14 @@ final class AppStore: ObservableObject {
         runtimeStates[sessionId] = SessionRuntimeState(isBusy: true)
         generatingSessionId = sessionId
 
-        // Mark the session as interrupted pre-emptively. If we complete
-        // cleanly, finalizeAssistantMessage clears the flag; if the process
-        // (or whole app) crashes mid-stream, the flag survives on disk and
-        // the next launch can offer to resume.
-        sessions[idx].wasInterrupted = true
-        Persistence.saveSession(sessions[idx])
+        // (Previously we set wasInterrupted=true pre-emptively here so a
+        // hard crash mid-stream would be surfaced on next launch. In
+        // practice the false-positive rate from tool-approval pauses,
+        // stream cancellations, and ordinary force-quits swamped the
+        // signal — the banner fired constantly for sessions that had
+        // never actually crashed. We now set the flag only in the
+        // explicit interrupt path, and rely on the launch-time sweep to
+        // keep the UI quiet.)
 
         await claude.sendMessage(
             sessionId: sessionId,

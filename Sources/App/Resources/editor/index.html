@@ -54,6 +54,77 @@
         try { window.webkit.messageHandlers.kiln.postMessage(msg); } catch (_) {}
       }
 
+      // Register a minimal Monarch tokenizer for a language Monaco doesn't
+      // ship. Gets us keyword / string / comment / number coloring — not
+      // full syntactic awareness, but enough that a Zig file reads as code
+      // instead of a wall of identical foreground bytes. Each spec is:
+      //   { id, keywords, types (optional), lineComment, blockComment,
+      //     strings ('double' | 'both'), extra (optional: more rules prepended) }
+      function registerBasic(spec) {
+        monaco.languages.register({ id: spec.id, extensions: spec.extensions || [] });
+        var stringRules = [];
+        if (spec.strings === 'both' || spec.strings === 'single') {
+          stringRules.push([/'([^'\\]|\\.)*'/, 'string']);
+        }
+        if (spec.strings !== 'single') {
+          stringRules.push([/"([^"\\]|\\.)*"/, 'string']);
+        }
+        var commentRules = [];
+        if (spec.blockComment) {
+          // Default to /* */ unless the spec overrides.
+          var open = spec.blockComment[0], close = spec.blockComment[1];
+          commentRules.push(
+            [new RegExp(open.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')), 'comment', '@blockComment']
+          );
+        }
+        if (spec.lineComment) {
+          var lc = spec.lineComment.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+          commentRules.push([new RegExp(lc + '.*$'), 'comment']);
+        }
+        monaco.languages.setMonarchTokensProvider(spec.id, {
+          keywords: spec.keywords || [],
+          typeKeywords: spec.types || [],
+          operators: spec.operators || [
+            '=', '>', '<', '!', '~', '?', ':', '==', '<=', '>=', '!=',
+            '&&', '||', '++', '--', '+', '-', '*', '/', '&', '|', '^', '%',
+            '<<', '>>', '+=', '-=', '*=', '/=', '&=', '|=', '^=', '%='
+          ],
+          symbols: /[=><!~?:&|+\-*\/\^%]+/,
+          tokenizer: {
+            root: [].concat(
+              commentRules,
+              [
+                [/@?[a-zA-Z_][\w$]*/, {
+                  cases: {
+                    '@typeKeywords': 'type',
+                    '@keywords': 'keyword',
+                    '@default': 'identifier'
+                  }
+                }],
+                [/\d+\.\d+([eE][\-+]?\d+)?/, 'number.float'],
+                [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+                [/\d+/, 'number']
+              ],
+              stringRules,
+              spec.extra || [],
+              [
+                [/[{}()\[\]]/, '@brackets'],
+                [/[;,.]/, 'delimiter'],
+                [/@symbols/, { cases: { '@operators': 'operator', '@default': '' } }]
+              ]
+            ),
+            blockComment: [
+              [/[^*\/]+/, 'comment'],
+              [/\*\//, 'comment', '@pop'],
+              [/./, 'comment']
+            ]
+          }
+        });
+        if (spec.config) {
+          monaco.languages.setLanguageConfiguration(spec.id, spec.config);
+        }
+      }
+
       require(['vs/editor/editor.main'], function () {
         // Dark theme tuned to the Kiln palette (roughly matches the
         // sidebar/surface tokens in Theme.swift).
@@ -196,6 +267,104 @@
             'editorBracketMatch.background':  '#ff7a4522',
             'editorBracketMatch.border':      '#ff7a4588'
           }
+        });
+
+        // Extra languages Monaco doesn't ship with. Keyword lists are the
+        // short canonical subsets — enough for keyword + string + number
+        // coloring to make the file legible.
+        registerBasic({
+          id: 'zig', extensions: ['.zig'],
+          lineComment: '//', strings: 'double',
+          keywords: [
+            'const','var','fn','pub','return','if','else','while','for','switch',
+            'break','continue','defer','errdefer','try','catch','struct','enum',
+            'union','error','test','comptime','inline','noinline','extern','export',
+            'packed','align','volatile','threadlocal','anytype','anyerror','asm',
+            'and','or','orelse','unreachable','undefined','null','true','false',
+            'usingnamespace','suspend','resume','async','await','nosuspend','opaque'
+          ],
+          types: ['i8','i16','i32','i64','i128','isize','u8','u16','u32','u64','u128','usize','f16','f32','f64','f128','bool','void','type','anyopaque','c_int','c_uint','c_long','c_ulong']
+        });
+        registerBasic({
+          id: 'nim', extensions: ['.nim','.nims'],
+          lineComment: '#', strings: 'both',
+          keywords: ['addr','and','as','asm','bind','block','break','case','cast','concept','const','continue','converter','defer','discard','distinct','div','do','elif','else','end','enum','except','export','finally','for','from','func','if','import','in','include','interface','is','isnot','iterator','let','macro','method','mixin','mod','nil','not','notin','object','of','or','out','proc','ptr','raise','ref','return','shl','shr','static','template','try','tuple','type','using','var','when','while','xor','yield'],
+          types: ['int','int8','int16','int32','int64','uint','uint8','uint16','uint32','uint64','float','float32','float64','bool','char','string','cstring','seq','array','openArray','pointer','byte','set','Natural','Positive']
+        });
+        registerBasic({
+          id: 'odin', extensions: ['.odin'],
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['package','import','foreign','using','proc','return','if','else','for','switch','case','break','continue','defer','when','where','in','not_in','struct','enum','union','bit_field','bit_set','map','dynamic','distinct','cast','transmute','auto_cast','const','do','fallthrough','or_else','or_return'],
+          types: ['i8','i16','i32','i64','i128','int','u8','u16','u32','u64','u128','uint','uintptr','f16','f32','f64','bool','b8','b16','b32','b64','string','cstring','rune','byte','any','typeid','rawptr']
+        });
+        registerBasic({
+          id: 'elm', extensions: ['.elm'],
+          lineComment: '--', blockComment: ['{-','-}'], strings: 'double',
+          keywords: ['module','where','import','as','exposing','type','alias','port','if','then','else','case','of','let','in','infix','infixl','infixr'],
+          types: ['Int','Float','String','Char','Bool','List','Maybe','Result','Cmd','Sub','Html']
+        });
+        registerBasic({
+          id: 'haskell', extensions: ['.hs','.lhs'],
+          lineComment: '--', blockComment: ['{-','-}'], strings: 'double',
+          keywords: ['case','class','data','default','deriving','do','else','forall','foreign','hiding','if','import','in','infix','infixl','infixr','instance','let','mdo','module','newtype','of','qualified','rec','then','type','where'],
+          types: ['Int','Integer','Float','Double','Char','String','Bool','Maybe','Either','IO','Ordering','Word']
+        });
+        registerBasic({
+          id: 'ocaml', extensions: ['.ml','.mli'],
+          blockComment: ['(*','*)'], strings: 'double',
+          keywords: ['and','as','assert','asr','begin','class','constraint','do','done','downto','else','end','exception','external','false','for','fun','function','functor','if','in','include','inherit','initializer','land','lazy','let','lor','lsl','lsr','lxor','match','method','mod','module','mutable','new','nonrec','object','of','open','or','private','rec','sig','struct','then','to','true','try','type','val','virtual','when','while','with'],
+          types: ['int','float','char','string','bool','unit','list','array','option','ref','exn']
+        });
+        registerBasic({
+          id: 'fortran', extensions: ['.f','.for','.f77','.f90','.f95','.f03','.f08'],
+          lineComment: '!', strings: 'both',
+          keywords: ['program','end','subroutine','function','module','use','contains','implicit','none','integer','real','double','precision','complex','logical','character','dimension','parameter','allocatable','allocate','deallocate','if','then','else','elseif','endif','do','while','enddo','select','case','default','continue','return','stop','exit','cycle','print','write','read','open','close','format','call','public','private','save','intrinsic','external','pure','elemental','recursive','interface','procedure','type','class','abstract','extends','generic'],
+          types: ['integer','real','complex','logical','character','double']
+        });
+        registerBasic({
+          id: 'nix', extensions: ['.nix'],
+          lineComment: '#', blockComment: ['/*','*/'], strings: 'double',
+          keywords: ['let','in','with','rec','if','then','else','inherit','assert','import','or','null','true','false'],
+          types: []
+        });
+        registerBasic({
+          id: 'makefile', extensions: ['.mk','.make'],
+          lineComment: '#', strings: 'double',
+          keywords: ['include','ifdef','ifndef','ifeq','ifneq','else','endif','define','endef','override','export','unexport','vpath','.PHONY','.SUFFIXES','.DEFAULT','.PRECIOUS','.INTERMEDIATE','.SECONDARY'],
+          extra: [
+            [/\$[({][\w-]+[)}]/, 'variable'],
+            [/^[A-Za-z_][\w-]*\s*(?=:)/, 'entity.name.function']
+          ]
+        });
+        registerBasic({
+          id: 'cmake', extensions: ['.cmake'],
+          lineComment: '#', strings: 'double',
+          keywords: ['if','else','elseif','endif','foreach','endforeach','while','endwhile','function','endfunction','macro','endmacro','return','break','continue','include','set','unset','list','find_package','find_library','find_path','find_program','add_executable','add_library','add_subdirectory','target_link_libraries','target_include_directories','target_compile_definitions','target_compile_options','install','message','option','project','cmake_minimum_required','enable_language','enable_testing','add_test'],
+          extra: [[/\$\{[^}]+\}/, 'variable']]
+        });
+        registerBasic({
+          id: 'v', extensions: ['.v.lang'],  // careful: .v also used for Verilog; handled below
+          lineComment: '//', blockComment: ['/*','*/'], strings: 'both',
+          keywords: ['as','asm','assert','atomic','break','const','continue','defer','else','enum','fn','for','go','goto','if','import','in','interface','is','isreftype','lock','match','module','mut','none','or','pub','return','rlock','select','shared','sizeof','spawn','static','struct','thread','true','false','type','typeof','union','unsafe','volatile','__offsetof'],
+          types: ['bool','string','int','i8','i16','i32','i64','i128','u8','u16','u32','u64','u128','f32','f64','byte','rune','voidptr','any','map','array']
+        });
+        registerBasic({
+          id: 'gleam', extensions: ['.gleam'],
+          lineComment: '//', strings: 'double',
+          keywords: ['as','assert','case','const','external','fn','if','import','let','opaque','panic','pub','todo','type','use'],
+          types: ['Int','Float','String','Bool','List','Result','Nil','BitArray']
+        });
+        registerBasic({
+          id: 'crystal', extensions: ['.cr'],
+          lineComment: '#', strings: 'both',
+          keywords: ['abstract','alias','as','asm','begin','break','case','class','def','do','else','elsif','end','ensure','enum','extend','false','for','fun','if','in','include','instance_sizeof','is_a?','lib','macro','module','next','nil','of','out','pointerof','private','protected','require','rescue','responds_to?','return','select','self','sizeof','struct','super','then','true','type','typeof','uninitialized','union','unless','until','when','while','with','yield'],
+          types: ['Int8','Int16','Int32','Int64','UInt8','UInt16','UInt32','UInt64','Float32','Float64','String','Bool','Nil','Array','Hash','Symbol','Proc','Char','Tuple','NamedTuple']
+        });
+        registerBasic({
+          id: 'toml-ext', extensions: ['.toml'],
+          lineComment: '#', strings: 'double',
+          keywords: ['true','false'],
+          extra: [[/^\s*\[[^\]]+\]/, 'type'], [/^\s*[A-Za-z_][\w-]*\s*(?==)/, 'key']]
         });
 
         var editor = monaco.editor.create(document.getElementById('editor'), {

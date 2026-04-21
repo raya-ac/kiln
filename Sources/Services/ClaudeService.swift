@@ -3,7 +3,18 @@ import Foundation
 /// Spawns and manages Claude CLI processes for chat sessions.
 @MainActor
 final class ClaudeService: ObservableObject {
-    private var cliSessionIds: [String: String] = [:] // sessionId -> CLI resume ID
+    // sessionId -> CLI resume ID. Persisted to UserDefaults so a restart
+    // reconnects each Kiln session to the same Claude CLI conversation
+    // (via `--resume <id>`) instead of silently starting fresh and
+    // losing the conversation context the user built up.
+    private static let cliMapKey = "kiln.cliSessionIds"
+    private var cliSessionIds: [String: String] = {
+        (UserDefaults.standard.dictionary(forKey: cliMapKey) as? [String: String]) ?? [:]
+    }() {
+        didSet {
+            UserDefaults.standard.set(cliSessionIds, forKey: Self.cliMapKey)
+        }
+    }
     private var runningProcesses: [String: Process] = [:]
 
     /// Reverse lookup: CLI session ID (as reported by the hook payload) → our

@@ -69,11 +69,28 @@ struct CodeEditorView: NSViewRepresentable {
 
     private static func loadHost(into web: WKWebView, coord: Coordinator) {
         // Find the editor host page bundled by SPM.
-        let candidates = [
-            Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "App/Resources/editor"),
-            Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "editor"),
-            Bundle.module.url(forResource: "index", withExtension: "html"),
-        ]
+        //
+        // Bundle.module's auto-generated accessor looks at
+        // `Bundle.main.bundleURL/Kiln_Kiln.bundle` — which for a packaged
+        // .app resolves to the app ROOT, a spot codesign forbids
+        // unsealed contents. So in shipped builds we copy the resource
+        // bundle to Contents/Resources/Kiln_Kiln.bundle instead, and
+        // load from there as a first-class fallback before letting
+        // Bundle.module try (which succeeds in dev via the baked-in
+        // .build/ path).
+        func appResourceBundleURL() -> URL? {
+            guard let resources = Bundle.main.resourceURL else { return nil }
+            let url = resources.appendingPathComponent("Kiln_Kiln.bundle")
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        var candidates: [URL?] = []
+        if let res = appResourceBundleURL(), let b = Bundle(url: res) {
+            candidates.append(b.url(forResource: "index", withExtension: "html", subdirectory: "editor"))
+            candidates.append(b.url(forResource: "index", withExtension: "html"))
+        }
+        candidates.append(Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "App/Resources/editor"))
+        candidates.append(Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "editor"))
+        candidates.append(Bundle.module.url(forResource: "index", withExtension: "html"))
         guard let url = candidates.compactMap({ $0 }).first else {
             web.loadHTMLString(Self.fallbackHTML(
                 title: "Editor resources missing",
@@ -168,6 +185,23 @@ struct CodeEditorView: NSViewRepresentable {
         case "cs", "csharp": return "csharp"
         case "vb": return "vb"
         case "powershell", "ps1": return "powershell"
+        // Custom-registered languages (see App/Resources/editor/index.html
+        // registerBasic calls). Monaco doesn't ship these — we register a
+        // minimal Monarch tokenizer at editor init so keywords/strings/
+        // comments get colored. These cases MUST match the `id` passed to
+        // registerBasic or setModelLanguage silently falls back to plaintext.
+        case "zig": return "zig"
+        case "nim": return "nim"
+        case "odin": return "odin"
+        case "elm": return "elm"
+        case "ocaml", "ml", "mli": return "ocaml"
+        case "fortran", "f", "f77", "f90", "f95", "f03", "f08": return "fortran"
+        case "nix": return "nix"
+        case "mk", "make": return "makefile"
+        case "cmake": return "cmake"
+        case "gleam": return "gleam"
+        case "crystal", "cr": return "crystal"
+        case "vlang": return "v"
         default: return "plaintext"
         }
     }
