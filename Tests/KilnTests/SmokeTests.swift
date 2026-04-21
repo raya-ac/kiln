@@ -10,19 +10,17 @@ final class SmokeTests: XCTestCase {
         // Any internal ClaudeModel case should have a non-empty rawValue
         // (the Anthropic model ID the CLI forwards).
         XCTAssertFalse(ClaudeModel.opus47.rawValue.isEmpty)
-        XCTAssertFalse(ClaudeModel.opus46.rawValue.isEmpty)
         XCTAssertFalse(ClaudeModel.sonnet46.rawValue.isEmpty)
         XCTAssertFalse(ClaudeModel.haiku45.rawValue.isEmpty)
 
-        // All four should map to distinct model IDs — regression guard
+        // All three should map to distinct model IDs — regression guard
         // against accidental aliasing when new models land.
         let ids = Set([
             ClaudeModel.opus47.rawValue,
-            ClaudeModel.opus46.rawValue,
             ClaudeModel.sonnet46.rawValue,
             ClaudeModel.haiku45.rawValue,
         ])
-        XCTAssertEqual(ids.count, 4, "ClaudeModel raw values collide: \(ids)")
+        XCTAssertEqual(ids.count, 3, "ClaudeModel raw values collide: \(ids)")
     }
 
     func testSessionKindHasDistinctRawValues() {
