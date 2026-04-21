@@ -394,26 +394,23 @@ struct ComposerView: View {
     /// shouldn't pull up every command that happens to have "t" in its
     /// description.
     private var slashMatches: [SlashCommand]? {
-        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return nil }
         // Only fire while the input is a single word (no spaces yet).
         if trimmed.contains(" ") { return nil }
         let query = String(trimmed.dropFirst()).lowercased()
         let all = SlashCommands.all()
         if query.isEmpty { return all }
-        // Score each candidate: 0 = exact, 1 = prefix, 2 = contains,
-        // nil = not a match. Stable sort within each bucket preserves
-        // the authored order in `SlashCommands.builtins`.
-        let scored: [(SlashCommand, Int)] = all.compactMap { c in
-            let body = c.label.lowercased().dropFirst() // strip the leading "/"
-            let labelLower = String(body)
-            if labelLower == query { return (c, 0) }
-            if labelLower.hasPrefix(query) { return (c, 1) }
-            if labelLower.contains(query) { return (c, 2) }
-            return nil
+        var exact: [SlashCommand] = []
+        var prefix: [SlashCommand] = []
+        var contains: [SlashCommand] = []
+        for c in all {
+            let body = String(c.label.dropFirst()).lowercased()
+            if body == query { exact.append(c) }
+            else if body.hasPrefix(query) { prefix.append(c) }
+            else if body.contains(query) { contains.append(c) }
         }
-        let sorted = scored.sorted { $0.1 < $1.1 }
-        return sorted.map { $0.0 }
+        return exact + prefix + contains
     }
 
     private func insertSlashCommand(_ cmd: SlashCommand) {
@@ -647,10 +644,13 @@ struct ComposerView: View {
             }
         case "/rewind":
             // /rewind N — drop the last N message pairs from the session.
-            // Default N = 1. Non-destructive on disk until saveSession runs.
-            let n = Int(arg.trimmingCharacters(in: .whitespaces)) ?? 1
-            if let id = store.activeSessionId, n > 0 {
+            // Default N = 1. Capped at 50 so a typo can't nuke a long
+            // session. Non-destructive on disk until saveSession runs.
+            let parsed = Int(arg.trimmingCharacters(in: .whitespaces)) ?? 1
+            let n = max(1, min(50, parsed))
+            if let id = store.activeSessionId {
                 store.rewindSession(id, count: n)
+                ToastCenter.shared.show("Rewound \(n) exchange\(n == 1 ? "" : "s")", kind: .info)
             }
         default:
             // Handle dynamic template aliases like `/t:review`.
@@ -1278,7 +1278,12 @@ struct SlashCommandPopup: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(Array(matches.prefix(8).enumerated()), id: \.element.id) { idx, cmd in
+                        // Identity by positional index so SwiftUI rebuilds
+                        // each row's body when `matches` changes (shrinking
+                        // the list used to leave stale rows cached under
+                        // `.id(idx)` while ForEach tracked element.id —
+                        // two conflicting identities). One signal only.
+                        ForEach(Array(matches.enumerated()), id: \.offset) { idx, cmd in
                             SlashCommandRow(cmd: cmd, selected: idx == selected)
                                 .id(idx)
                                 .onTapGesture { onPick(cmd) }

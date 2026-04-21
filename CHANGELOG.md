@@ -4,6 +4,27 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.5.2] — 2026-04-21
+
+### Fixed
+- **Slash popup stale rendering** — conflicting identity signals
+  (ForEach by `element.id` + row `.id(idx)`) kept old rows cached
+  when the matches list shrank. Unified on positional identity so
+  each row's body rebuilds with the current command.
+- **Slash popup now shows all commands** when the input is just `/` —
+  was capped at 8 entries; LazyVStack handles the full list fine.
+- **Toast auto-dismiss race** — between sleep and wake, a manual
+  tap-to-dismiss could cause the next queued toast to be skipped.
+  The auto-dismiss now verifies it's still the active toast by id.
+- **`/rewind` cap** — parse result clamped to [1, 50] so a typo
+  like `/rewind 999` can't quietly shred a session.
+- **DiffSheet performance** — switched to `LazyVStack` so a 10k-line
+  diff doesn't blow out the view hierarchy on open.
+
+### Added
+- Toast feedback for `/rewind` — confirms how many exchanges were
+  dropped.
+
 ## [1.5.1] — 2026-04-21
 
 ### Fixed

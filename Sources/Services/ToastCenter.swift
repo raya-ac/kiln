@@ -43,7 +43,13 @@ final class ToastCenter: ObservableObject {
         dismissTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(toast.duration * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            await MainActor.run { self?.dismissCurrent() }
+            await MainActor.run {
+                // Only auto-dismiss if we're still the active toast —
+                // otherwise a tap-to-dismiss between sleep and wake
+                // would pop the *next* queued toast prematurely.
+                guard self?.current?.id == toast.id else { return }
+                self?.dismissCurrent()
+            }
         }
     }
 }

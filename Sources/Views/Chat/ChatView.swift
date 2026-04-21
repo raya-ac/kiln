@@ -2351,7 +2351,10 @@ struct DiffSheet: View {
             .padding(12)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                // LazyVStack so a 10k-line diff doesn't blow out the
+                // view hierarchy up front — only the visible rows get
+                // materialized.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
                         Text(String(line).isEmpty ? " " : String(line))
                             .font(.system(size: 11, design: .monospaced))
