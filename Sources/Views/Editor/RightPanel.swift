@@ -528,6 +528,18 @@ struct FileTreeView: View {
             if preEditSnapshot[path] == nil {
                 if let existing = openFiles.first(where: { $0.path == path }) {
                     preEditSnapshot[path] = existing.originalContent
+                } else if call.name == "Write" && call.isDone {
+                    // The tool already ran before we got a chance to
+                    // observe it, so reading from disk would give us the
+                    // post-write content — which would render as
+                    // "identical before/after" in the diff viewer.
+                    // For Write specifically, missing the window almost
+                    // always means a new file, so "" is the right
+                    // pre-edit state. If it was actually an overwrite we
+                    // can't recover the old bytes, but the diff is still
+                    // more honest as an all-additions hunk than as a
+                    // silent no-op.
+                    preEditSnapshot[path] = ""
                 } else {
                     preEditSnapshot[path] = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
                 }

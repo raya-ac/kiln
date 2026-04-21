@@ -347,21 +347,15 @@ final class AppStore: ObservableObject {
         // user clearly moved on from. If a flagged session hasn't had
         // activity in the last 4 hours, assume the user closed the app
         // cleanly since the crash and clear the flag quietly.
-        let staleCutoff: TimeInterval = 4 * 60 * 60
-        let now = Date()
+        // Clear the interrupted flag on every launch. The flag was meant
+        // for crash recovery, but the false-positive rate from ordinary
+        // force-quits and pkill'd sessions made the banner more noisy
+        // than useful. If the user genuinely wants to resume, Retry
+        // Last Message (⌘⇧R) is one chord away — no need for a
+        // startup banner to remind them.
         for i in sessions.indices where sessions[i].wasInterrupted {
-            let lastActivity = sessions[i].messages.last?.timestamp ?? sessions[i].createdAt
-            // Clear the flag when we're confident there's nothing to
-            // resume. Either the session has been quiet for hours (user
-            // moved on cleanly), or the last turn is from Claude — which
-            // means the assistant finished replying and we just missed
-            // clearing the flag on exit. Resume only makes sense when a
-            // user message is stranded without a reply.
-            let lastIsAssistant = sessions[i].messages.last?.role == .assistant
-            if now.timeIntervalSince(lastActivity) > staleCutoff || lastIsAssistant {
-                sessions[i].wasInterrupted = false
-                Persistence.saveSession(sessions[i])
-            }
+            sessions[i].wasInterrupted = false
+            Persistence.saveSession(sessions[i])
         }
 
         // Restore remote server config from UserDefaults and auto-start if enabled.
