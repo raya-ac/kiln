@@ -9,6 +9,30 @@ enum GitStatus {
         let isRepo: Bool
     }
 
+    /// Per-file status drawn in the file tree. Condensed from porcelain
+    /// output — the two-character XY code tells us both the index and
+    /// worktree state, but the tree only needs to tell the user "something
+    /// changed here" with a hint at what kind.
+    enum FileState: Sendable {
+        case modified    // M in either column
+        case added       // A in index
+        case deleted     // D in either column
+        case untracked   // ??
+        case renamed     // R in index
+        case conflicted  // U or both-side changes
+
+        var marker: String {
+            switch self {
+            case .modified: return "M"
+            case .added: return "A"
+            case .deleted: return "D"
+            case .untracked: return "U"
+            case .renamed: return "R"
+            case .conflicted: return "!"
+            }
+        }
+    }
+
     /// Cache keyed by workdir → last probe. Avoids running git on every
     /// sidebar render. Invalidated after `ttl` seconds.
     private static let ttl: TimeInterval = 10
@@ -51,6 +75,69 @@ enum GitStatus {
             .filter { !$0.isEmpty }
             .count
         return Info(branch: branch, dirtyCount: dirty, isRepo: !branch.isEmpty)
+    }
+
+    /// Per-file status map keyed by absolute path. Used by the file tree
+    /// to draw per-row status markers. Cached with a separate, shorter
+    /// TTL than `info` — status churns fast while Claude edits, and the
+    /// tree wants to feel live.
+    private static let fileTTL: TimeInterval = 3
+    nonisolated(unsafe) private static var fileCache: [String: ([String: FileState], Date)] = [:]
+
+    static func fileStatuses(for workDir: String) -> [String: FileState] {
+        lock.lock()
+        if let (cached, date) = fileCache[workDir], Date().timeIntervalSince(date) < fileTTL {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        let fresh = probeFiles(workDir: workDir)
+        lock.lock()
+        fileCache[workDir] = (fresh, Date())
+        lock.unlock()
+        return fresh
+    }
+
+    /// Force the next call to `fileStatuses` to refetch. Call after tool
+    /// calls complete so the tree reflects Claude's edits immediately.
+    static func invalidate(workDir: String) {
+        lock.lock()
+        fileCache.removeValue(forKey: workDir)
+        cache.removeValue(forKey: workDir)
+        lock.unlock()
+    }
+
+    private static func probeFiles(workDir: String) -> [String: FileState] {
+        let gitDir = (workDir as NSString).appendingPathComponent(".git")
+        guard FileManager.default.fileExists(atPath: gitDir) else { return [:] }
+        let porcelain = run(["git", "-C", workDir, "status", "--porcelain=v1", "-uall"]) ?? ""
+        var out: [String: FileState] = [:]
+        for raw in porcelain.split(separator: "\n", omittingEmptySubsequences: true) {
+            // Porcelain v1 lines: "XY path" where X is index state, Y is
+            // worktree state. Either column can be a space. Renames show
+            // as "R  old -> new" — we only care about the new path.
+            let line = String(raw)
+            guard line.count >= 3 else { continue }
+            let xy = String(line.prefix(2))
+            let rest = String(line.dropFirst(3))
+            let path: String = {
+                if xy.contains("R"), let arrow = rest.range(of: " -> ") {
+                    return String(rest[arrow.upperBound...])
+                }
+                return rest
+            }()
+            let abs = (workDir as NSString).appendingPathComponent(path)
+            let state: FileState
+            if xy.contains("U") || xy == "AA" || xy == "DD" { state = .conflicted }
+            else if xy == "??" { state = .untracked }
+            else if xy.contains("R") { state = .renamed }
+            else if xy.contains("A") { state = .added }
+            else if xy.contains("D") { state = .deleted }
+            else if xy.contains("M") { state = .modified }
+            else { continue }
+            out[abs] = state
+        }
+        return out
     }
 
     private static func run(_ args: [String]) -> String? {

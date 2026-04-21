@@ -156,6 +156,10 @@ struct FileTreeView: View {
     @State private var pendingClaudeEdit: Set<String> = []
     // Paths currently shown in diff-view mode. Toggled from the banner.
     @State private var diffViewing: Set<String> = []
+    // Per-file git status map for the current workdir. Refreshed whenever
+    // the tree reloads or a Claude tool call finishes. Keyed by absolute
+    // path so FileRow lookups are cheap.
+    @State private var gitStatuses: [String: GitStatus.FileState] = [:]
 
     private var currentWorkDir: String {
         let dir = store.activeSession?.workDir ?? NSHomeDirectory()
@@ -362,6 +366,7 @@ struct FileTreeView: View {
                                 FileRow(
                                     entry: entry,
                                     activePath: activeIndex.flatMap { openFiles.indices.contains($0) ? openFiles[$0].path : nil },
+                                    gitStatuses: gitStatuses,
                                     onOpen: { path in openFile(at: path) },
                                     onPathRenamed: { old, new in renameOpenFile(from: old, to: new) },
                                     onPathDeleted: { path in closeOpenFile(at: path) },
@@ -913,9 +918,21 @@ struct FileTreeView: View {
             }
 
             await MainActor.run { self.entries = result }
+            await refreshGitStatuses(workDir: workDir)
         } catch {
             print("Failed to load directory: \(error)")
         }
+    }
+
+    /// Probe git for per-file status and publish to `gitStatuses`. Runs
+    /// off the main actor so the shell-out doesn't stall the UI thread;
+    /// the result is hopped back on.
+    private func refreshGitStatuses(workDir: String) async {
+        let map = await Task.detached(priority: .utility) {
+            GitStatus.invalidate(workDir: workDir)
+            return GitStatus.fileStatuses(for: workDir)
+        }.value
+        await MainActor.run { self.gitStatuses = map }
     }
 }
 
@@ -925,6 +942,10 @@ struct FileRow: View {
     /// highlighting the row. The row doesn't read or write files itself;
     /// that all routes through `onOpen`.
     let activePath: String?
+    /// Per-file git status, keyed by absolute path. Rendered as a single-
+    /// letter marker next to the filename ("M", "A", "U", etc.) colored
+    /// by state. Empty dict = not a repo or nothing changed.
+    var gitStatuses: [String: GitStatus.FileState] = [:]
     let onOpen: (String) -> Void
     /// Notify the tree when a file gets renamed so open-tabs can update.
     var onPathRenamed: (String, String) -> Void = { _, _ in }
@@ -967,9 +988,15 @@ struct FileRow: View {
                         .frame(width: 14)
                     Text(entry.name)
                         .font(.system(size: 11))
-                        .foregroundStyle(activePath == entry.path ? Color.kilnAccent : Color.kilnText)
+                        .foregroundStyle(gitTintForName(activePath == entry.path))
                         .lineLimit(1)
                     Spacer()
+                    if let marker = gitMarker {
+                        Text(marker.letter)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(marker.color)
+                            .frame(width: 12, alignment: .trailing)
+                    }
                 }
                 .padding(.vertical, 3)
                 .padding(.horizontal, 4)
@@ -1026,6 +1053,7 @@ struct FileRow: View {
                     FileRow(
                         entry: child,
                         activePath: activePath,
+                        gitStatuses: gitStatuses,
                         onOpen: onOpen,
                         onPathRenamed: onPathRenamed,
                         onPathDeleted: onPathDeleted,
@@ -1035,6 +1063,72 @@ struct FileRow: View {
                 }
             }
         }
+    }
+
+    // MARK: Git markers
+    //
+    // Directory rows summarize the worst child state (untracked < modified
+    // < conflicted). File rows show their own state directly. Colors match
+    // the Git panel's palette for consistency.
+
+    private struct Marker {
+        let letter: String
+        let color: SwiftUI.Color
+    }
+
+    private var gitMarker: Marker? {
+        guard !gitStatuses.isEmpty else { return nil }
+        if entry.isDirectory {
+            // Summarize children: show the "strongest" state nested under
+            // this directory so the user can see at a glance which folders
+            // contain changes without expanding every branch.
+            let prefix = entry.path + "/"
+            var strongest: GitStatus.FileState?
+            for (path, state) in gitStatuses where path.hasPrefix(prefix) {
+                strongest = combine(strongest, state)
+            }
+            return strongest.map { Marker(letter: $0.marker, color: color(for: $0).opacity(0.55)) }
+        }
+        guard let state = gitStatuses[entry.path] else { return nil }
+        return Marker(letter: state.marker, color: color(for: state))
+    }
+
+    /// Combine two file states into the "stronger" one for directory
+    /// summarization. Conflicted beats everything; modified/added/deleted
+    /// beat untracked.
+    private func combine(_ a: GitStatus.FileState?, _ b: GitStatus.FileState) -> GitStatus.FileState {
+        guard let a else { return b }
+        func rank(_ s: GitStatus.FileState) -> Int {
+            switch s {
+            case .conflicted: return 5
+            case .deleted: return 4
+            case .modified: return 3
+            case .renamed: return 3
+            case .added: return 2
+            case .untracked: return 1
+            }
+        }
+        return rank(b) > rank(a) ? b : a
+    }
+
+    private func color(for state: GitStatus.FileState) -> SwiftUI.Color {
+        switch state {
+        case .modified, .renamed: return Color.kilnAccent
+        case .added:              return Color.kilnSuccess
+        case .deleted:            return Color.kilnError
+        case .untracked:          return Color.kilnTextTertiary
+        case .conflicted:         return Color.kilnError
+        }
+    }
+
+    private func gitTintForName(_ isActive: Bool) -> SwiftUI.Color {
+        if isActive { return Color.kilnAccent }
+        // Dim untracked file names so changed files stand out, without
+        // making them hard to read.
+        if let state = gitStatuses[entry.path], case .untracked = state {
+            return Color.kilnTextSecondary
+        }
+        return Color.kilnText
     }
 
     private func loadChildren() {
