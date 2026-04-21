@@ -150,6 +150,12 @@ struct ChatView: View {
                     .environmentObject(store)
                     .preferredColorScheme(Color.kilnPreferredColorScheme)
             }
+            .sheet(isPresented: $store.showToolTimeline) {
+                if let s = store.activeSession {
+                    ToolTimelineSheet(session: s)
+                        .preferredColorScheme(Color.kilnPreferredColorScheme)
+                }
+            }
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
@@ -921,6 +927,18 @@ struct ToolCallCard: View {
 
                     Spacer()
 
+                    // Duration badge — only shown once the call finished
+                    // and we captured both timestamps. Kept deliberately
+                    // subtle (tertiary) so it doesn't compete with the name.
+                    if tool.isDone,
+                       let started = tool.startedAt,
+                       let finished = tool.completedAt {
+                        Text(formatDuration(finished.timeIntervalSince(started)))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.kilnTextTertiary)
+                            .help("Elapsed: \(started.formatted(date: .omitted, time: .standard)) → \(finished.formatted(date: .omitted, time: .standard))")
+                    }
+
                     // Status badge
                     if tool.isError {
                         HStack(spacing: 3) {
@@ -958,6 +976,16 @@ struct ToolCallCard: View {
                         .padding(.top, 8)
                 } else {
                     inputJSONView
+                }
+
+                // Inline image preview — if Claude wrote or edited an
+                // image file, show the result alongside the diff. Sniffs
+                // file_path from the input JSON; only loads on-demand
+                // once the tool has finished (to avoid thrashing disk
+                // while Claude is mid-write).
+                if tool.isDone, let imagePath = imagePathFromInput(tool.input) {
+                    ToolImagePreview(path: imagePath, refreshKey: tool.completedAt)
+                        .padding(.top, 8)
                 }
 
                 // Result section — collapsible. Long Bash output and file
@@ -1062,6 +1090,33 @@ struct ToolCallCard: View {
 
     private func firstLine(_ s: String) -> String {
         s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? s
+    }
+
+    /// Sniff a file_path/path key out of the tool input JSON and return
+    /// it only if the extension looks like an image. We deliberately
+    /// keep this narrow — png/jpg/gif/webp/heic/tiff/bmp/svg — so we
+    /// don't try to render a 200MB tiff by accident later.
+    private func imagePathFromInput(_ raw: String) -> String? {
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let path = (json["file_path"] as? String) ?? (json["path"] as? String)
+        guard let p = path, !p.isEmpty else { return nil }
+        let ext = (p as NSString).pathExtension.lowercased()
+        let ok: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tiff", "tif", "bmp", "svg"]
+        return ok.contains(ext) ? p : nil
+    }
+
+    /// Humanize a tool-call duration. Sub-second → ms; under a minute →
+    /// seconds with one decimal; otherwise mm:ss. Keeps the header badge
+    /// narrow no matter how slow a tool was.
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 0 { return "0ms" }
+        if seconds < 1 { return "\(Int((seconds * 1000).rounded()))ms" }
+        if seconds < 60 { return String(format: "%.1fs", seconds) }
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     private func formatJSON(_ str: String) -> String {
@@ -2075,5 +2130,186 @@ struct BranchBadge: View {
         .onAppear { info = GitStatus.info(for: workDir) }
         .onChange(of: workDir) { _, newDir in info = GitStatus.info(for: newDir) }
         .onReceive(timer) { _ in info = GitStatus.info(for: workDir) }
+    }
+}
+
+// MARK: - Inline image preview for Write/Edit tool calls
+
+/// Thumbnail-style preview of a file Claude just wrote. Reloads when
+/// `refreshKey` changes so repeated edits to the same path bust the
+/// NSImage cache. Capped at 240pt tall so a huge screenshot doesn't
+/// blow out the chat. Failures are silent — no point showing a
+/// placeholder if the file doesn't exist yet.
+struct ToolImagePreview: View {
+    let path: String
+    let refreshKey: Date?
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PREVIEW")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .tracking(0.5)
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: 240, alignment: .leading)
+                        .background(Color.kilnBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.kilnBorderSubtle, lineWidth: 1)
+                        )
+                        .onTapGesture(count: 2) {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                        }
+                        .help("Double-click to open in default viewer")
+                }
+            }
+        }
+        .onAppear(perform: reload)
+        .onChange(of: refreshKey) { _, _ in reload() }
+    }
+
+    private func reload() {
+        let expanded = (path as NSString).expandingTildeInPath
+        // Off-main-thread load to keep scrolling smooth. NSImage can
+        // decode large files synchronously and would otherwise hitch.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = NSImage(contentsOfFile: expanded)
+            DispatchQueue.main.async { self.image = loaded }
+        }
+    }
+}
+
+// MARK: - Tool-call timeline sheet
+
+/// Summary of every tool call in the active session — name, count, total
+/// duration, mean. Lets you see where time went in a long session at a
+/// glance. Invoked via `/timeline`.
+struct ToolTimelineSheet: View {
+    let session: Session
+    @Environment(\.dismiss) private var dismiss
+
+    private struct Row: Identifiable {
+        let id = UUID()
+        let name: String
+        let count: Int
+        let total: TimeInterval
+        let mean: TimeInterval
+        let errors: Int
+    }
+
+    private var rows: [Row] {
+        var buckets: [String: (count: Int, total: TimeInterval, errors: Int)] = [:]
+        for msg in session.messages {
+            for block in msg.blocks {
+                guard case .toolUse(let t) = block else { continue }
+                let dur: TimeInterval = {
+                    guard let s = t.startedAt, let e = t.completedAt else { return 0 }
+                    return max(0, e.timeIntervalSince(s))
+                }()
+                var entry = buckets[t.name] ?? (0, 0, 0)
+                entry.count += 1
+                entry.total += dur
+                if t.isError { entry.errors += 1 }
+                buckets[t.name] = entry
+            }
+        }
+        return buckets.map { name, v in
+            Row(name: name, count: v.count, total: v.total,
+                mean: v.count > 0 ? v.total / Double(v.count) : 0,
+                errors: v.errors)
+        }
+        .sorted { $0.total > $1.total }
+    }
+
+    private var grandTotal: TimeInterval {
+        rows.reduce(0) { $0 + $1.total }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Tool timeline").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+            Divider()
+
+            if rows.isEmpty {
+                Text("No tool calls in this session yet.")
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            HStack(spacing: 8) {
+                                Text(row.name)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .frame(width: 140, alignment: .leading)
+                                Text("\(row.count)×")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Color.kilnTextSecondary)
+                                    .frame(width: 40, alignment: .trailing)
+                                // Bar scaled against the largest total.
+                                GeometryReader { geo in
+                                    let w = grandTotal > 0
+                                        ? geo.size.width * (row.total / grandTotal)
+                                        : 0
+                                    Rectangle()
+                                        .fill(row.errors > 0 ? Color.kilnError.opacity(0.4) : Color.kilnAccent.opacity(0.35))
+                                        .frame(width: max(1, w))
+                                        .frame(maxHeight: .infinity, alignment: .leading)
+                                }
+                                .frame(height: 14)
+                                Text(formatDur(row.total))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Color.kilnTextSecondary)
+                                    .frame(width: 60, alignment: .trailing)
+                                Text("avg \(formatDur(row.mean))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+                                    .frame(width: 70, alignment: .trailing)
+                                if row.errors > 0 {
+                                    Text("\(row.errors) err")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Color.kilnError)
+                                        .frame(width: 50, alignment: .trailing)
+                                } else {
+                                    Spacer().frame(width: 50)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            Divider()
+                        }
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Text("Total: \(formatDur(grandTotal))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                }
+                .padding(12)
+            }
+        }
+        .frame(width: 580, height: 420)
+    }
+
+    private func formatDur(_ s: TimeInterval) -> String {
+        if s < 1 { return "\(Int((s * 1000).rounded()))ms" }
+        if s < 60 { return String(format: "%.1fs", s) }
+        let m = Int(s) / 60
+        let r = Int(s) % 60
+        return String(format: "%d:%02d", m, r)
     }
 }

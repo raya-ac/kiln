@@ -4,6 +4,37 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.5.0] — 2026-04-21
+
+Observability, git, and prompt ergonomics — a full feature sweep.
+
+### Added
+- **Tool-call timing** — every tool invocation is now stamped with
+  `startedAt`/`completedAt`. The ToolCallCard header shows a compact
+  monospace duration (`450ms` / `1.2s` / `2:05`) once the call
+  finishes. Timestamps persist across session reloads.
+- **`/timeline`** — opens a per-session tool-usage sheet. Each row
+  shows the tool name, call count, a bar proportional to total time,
+  total duration, mean duration, and any errors. Sorted by time spent,
+  so the biggest spenders rise to the top.
+- **Inline image previews** — when Claude writes or edits an image
+  (`.png`/`.jpg`/`.heic`/`.webp`/`.svg`/etc.), the ToolCallCard renders
+  the result inline. Double-click to open in the default viewer.
+- **`/commit [message]`** — runs `git add -A && git commit -m …` in
+  the session's workdir. No message → a dated `wip:` fallback. The
+  branch badge refreshes right after.
+- **`/status`** — injects `branch X, N uncommitted changes` as a
+  user message so Claude sees the working-tree state without having
+  to shell out for it.
+- **Prompt templates (`/template` and `/t:name`)** — saved reusable
+  prompt snippets, stored per-user. Seeds with `review`, `explain`,
+  and `tests`. `/t:name` appears in `/`-autocomplete; invoking it
+  drops the template body into the composer. Trailing args after
+  `/t:name …` get appended as extra context.
+- **`/rewind [N]`** — drops the last N message exchanges from the
+  active session. Defaults to 1. Peels trailing tool/assistant blocks
+  then one user turn per count — "undo N exchanges" as expected.
+
 ## [1.4.3] — 2026-04-21
 
 ### Added

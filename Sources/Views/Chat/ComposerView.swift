@@ -568,7 +568,54 @@ struct ComposerView: View {
                 store.pendingSearchQuery = q
             }
             store.showGlobalSearch = true
+        case "/timeline":
+            store.showToolTimeline = true
+        case "/commit":
+            // Stage everything and commit with the provided message. If
+            // no message was given, fall back to a dated placeholder —
+            // better than failing silently. Runs in the session's workdir.
+            let msg = arg.trimmingCharacters(in: .whitespaces)
+            let message = msg.isEmpty
+                ? "wip: \(Date().formatted(date: .abbreviated, time: .shortened))"
+                : msg
+            if let dir = store.activeSession?.workDir {
+                Task.detached { GitQuickCommit.run(workDir: dir, message: message) }
+            }
+        case "/status":
+            // Inject current git status as a plain user message so Claude
+            // sees the working-tree state. Dead cheap, avoids asking
+            // Claude to shell out.
+            if let dir = store.activeSession?.workDir,
+               let info = GitStatus.info(for: dir) {
+                let note = "Current git status — branch `\(info.branch)`, \(info.dirtyCount) uncommitted change\(info.dirtyCount == 1 ? "" : "s")."
+                Task { await store.sendMessage(note) }
+            }
+        case "/template", "/tmpl":
+            let name = arg.trimmingCharacters(in: .whitespaces)
+            if let t = PromptTemplateStore.shared.template(named: name) {
+                input = t.body
+                isFocused = true
+            }
+        case "/rewind":
+            // /rewind N — drop the last N message pairs from the session.
+            // Default N = 1. Non-destructive on disk until saveSession runs.
+            let n = Int(arg.trimmingCharacters(in: .whitespaces)) ?? 1
+            if let id = store.activeSessionId, n > 0 {
+                store.rewindSession(id, count: n)
+            }
         default:
+            // Handle dynamic template aliases like `/t:review`.
+            if cmd.hasPrefix("/t:") {
+                let name = String(cmd.dropFirst(3))
+                if let t = PromptTemplateStore.shared.template(named: name) {
+                    // Preserve any trailing args as extra context appended
+                    // after a newline — e.g. `/t:review look at auth.swift`.
+                    let extra = arg.trimmingCharacters(in: .whitespaces)
+                    input = extra.isEmpty ? t.body : "\(t.body)\n\n\(extra)"
+                    isFocused = true
+                    return
+                }
+            }
             // Unknown command — send as plain text so Claude can respond to it.
             Task { await store.sendMessage(raw) }
         }

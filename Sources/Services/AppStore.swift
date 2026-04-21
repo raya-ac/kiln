@@ -146,6 +146,8 @@ final class AppStore: ObservableObject {
     @Published var showGlobalSearch = false
     /// In-session find bar visibility (⌘F). Search text lives on ChatView.
     @Published var showInSessionFind = false
+    /// Tool-call timeline sheet toggle. Flipped by `/timeline`.
+    @Published var showToolTimeline = false
 
     /// Tool-approval requests awaiting the user. The ApprovalDialog sheet
     /// renders the first entry; the HTTP hook handler is blocked on a
@@ -917,6 +919,32 @@ final class AppStore: ObservableObject {
         Persistence.saveSession(sessions[idx])
     }
 
+    /// Drop the last `count` user/assistant message pairs from the session.
+    /// Walks backward from the end peeling off messages until we've dropped
+    /// `count` user turns — this keeps the rewind intuitive ("undo N
+    /// exchanges") even when assistant turns have many blocks.
+    func rewindSession(_ id: String, count: Int) {
+        guard count > 0,
+              let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        var msgs = sessions[idx].messages
+        var dropped = 0
+        while dropped < count, !msgs.isEmpty {
+            // Peel trailing assistant/tool messages first, then one user
+            // message — that's one "exchange."
+            while let last = msgs.last, last.role != .user {
+                msgs.removeLast()
+            }
+            if msgs.last?.role == .user {
+                msgs.removeLast()
+                dropped += 1
+            } else {
+                break
+            }
+        }
+        sessions[idx].messages = msgs
+        Persistence.saveSession(sessions[idx])
+    }
+
     /// Export session as markdown
     func exportSessionMarkdown(_ id: String) -> String {
         guard let session = sessions.first(where: { $0.id == id }) else { return "" }
@@ -1566,7 +1594,13 @@ final class AppStore: ObservableObject {
                         state.activeToolCalls[idx].input = input
                     }
                 } else {
-                    state.activeToolCalls.append(ToolUseBlock(id: id, name: name, input: input, isDone: false))
+                    // First sighting of this tool id — stamp startedAt.
+                    // Later toolStart events for the same id are input-
+                    // delta updates and must NOT overwrite startedAt.
+                    state.activeToolCalls.append(ToolUseBlock(
+                        id: id, name: name, input: input, isDone: false,
+                        startedAt: Date()
+                    ))
                 }
                 state.currentToolId = id
 
@@ -1591,6 +1625,7 @@ final class AppStore: ObservableObject {
                     state.activeToolCalls[idx].result = content
                     state.activeToolCalls[idx].isError = isError
                     state.activeToolCalls[idx].isDone = true
+                    state.activeToolCalls[idx].completedAt = Date()
                 }
 
             case .usage(let input, let output):

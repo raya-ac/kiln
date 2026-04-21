@@ -37,7 +37,29 @@ enum SlashCommands {
         .init(id: "merge", label: "/merge", description: "Merge selected sessions into the oldest one", kind: .kiln),
         .init(id: "link", label: "/link", description: "Copy a kiln:// link to this session", kind: .kiln),
         .init(id: "rename", label: "/rename", description: "Rename this session — /rename new name here", kind: .kiln),
+        .init(id: "timeline", label: "/timeline", description: "Show per-tool timing summary for this session", kind: .kiln),
+        .init(id: "commit", label: "/commit", description: "Stage everything and commit — /commit message here", kind: .kiln),
+        .init(id: "status", label: "/status", description: "Inject current git status as context", kind: .kiln),
+        .init(id: "template", label: "/template", description: "Insert a saved prompt template — /template name", kind: .kiln),
+        .init(id: "rewind", label: "/rewind", description: "Drop the last N message pairs — /rewind 3", kind: .kiln),
     ]
+
+    /// Expand the slash list with dynamic prompt templates so they show up
+    /// in autocomplete as `/t:name`. Keeps the top-level namespace clean
+    /// while still surfacing them.
+    @MainActor
+    static func promptTemplateCommands() -> [SlashCommand] {
+        PromptTemplateStore.shared.templates
+            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+            .map { t in
+                SlashCommand(
+                    id: "tmpl.\(t.id)",
+                    label: "/t:\(t.name)",
+                    description: t.description.isEmpty ? "Insert template" : t.description,
+                    kind: .kiln
+                )
+            }
+    }
 
     /// No longer used — kept empty for source compat. Previously held `//`
     /// commands; everything is `/` now.
@@ -61,7 +83,8 @@ enum SlashCommands {
             }
     }
 
+    @MainActor
     static func all() -> [SlashCommand] {
-        builtins + kilnCommands + loadAgents()
+        builtins + kilnCommands + promptTemplateCommands() + loadAgents()
     }
 }

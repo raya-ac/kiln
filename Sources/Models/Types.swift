@@ -266,6 +266,13 @@ struct ToolUseBlock: Identifiable, Sendable {
     var isDone: Bool
     var result: String?
     var isError: Bool = false
+    /// Wall-clock timestamp for when the CLI reported the tool starting.
+    /// Nil on pre-1.4.4 persisted sessions — timeline skips those entries.
+    var startedAt: Date? = nil
+    /// Set when the matching tool_result lands. Nil while the call is in
+    /// flight. `completedAt - startedAt` gives the duration rendered in
+    /// the tool card and the session timeline.
+    var completedAt: Date? = nil
 }
 
 /// Live generation state for a single session. Kept out of views so

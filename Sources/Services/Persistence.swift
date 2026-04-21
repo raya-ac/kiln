@@ -215,6 +215,10 @@ struct BlockData: Codable {
     let isError: Bool?
     let suggestions: [SuggestionPrompt]?
     let attachment: ComposerAttachment?
+    /// Tool-call timing — optional so older session files still decode.
+    /// Epoch seconds to keep JSON compact and tool-inspectable.
+    let toolStartedAt: Double?
+    let toolCompletedAt: Double?
 
     init(from block: MessageBlock) {
         self.toolId = {
@@ -228,33 +232,40 @@ struct BlockData: Codable {
             self.text = t
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
             self.suggestions = nil; self.attachment = nil
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .thinking(let t):
             self.type = "thinking"
             self.text = t
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
             self.suggestions = nil; self.attachment = nil
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .toolUse(let tool):
             self.type = "tool_use"
             self.text = nil
             self.toolName = tool.name; self.toolInput = tool.input
             self.toolResult = tool.result; self.isError = tool.isError
             self.suggestions = nil; self.attachment = nil
+            self.toolStartedAt = tool.startedAt?.timeIntervalSince1970
+            self.toolCompletedAt = tool.completedAt?.timeIntervalSince1970
         case .toolResult(let r):
             self.type = "tool_result"
             self.text = r.content
             self.toolName = nil; self.toolInput = nil
             self.toolResult = nil; self.isError = r.isError
             self.suggestions = nil; self.attachment = nil
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .suggestions(let s):
             self.type = "suggestions"
             self.text = nil
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
             self.suggestions = s; self.attachment = nil
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .attachment(let a):
             self.type = "attachment"
             self.text = nil
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
             self.suggestions = nil; self.attachment = a
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
         }
     }
 
@@ -271,7 +282,9 @@ struct BlockData: Codable {
                 input: toolInput ?? "{}",
                 isDone: true,
                 result: toolResult,
-                isError: isError ?? false
+                isError: isError ?? false,
+                startedAt: toolStartedAt.map { Date(timeIntervalSince1970: $0) },
+                completedAt: toolCompletedAt.map { Date(timeIntervalSince1970: $0) }
             ))
         case "tool_result":
             return .toolResult(ToolResultBlock(
