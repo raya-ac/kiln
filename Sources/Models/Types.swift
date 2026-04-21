@@ -835,7 +835,11 @@ struct KilnSettings: Codable, Sendable, Equatable {
     var defaultModel: ClaudeModel = .sonnet46
     var defaultWorkDir: String = NSHomeDirectory()
     var systemPrompt: String = KilnSettings.defaultSystemPrompt
-    var useEngram: Bool = true
+    // Off by default — new users get a clean slate and can opt in from
+    // onboarding or Settings. Existing installs with a settings file keep
+    // whatever they had (the decoder fallback below preserves the old
+    // `true` behavior if the key was never written).
+    var useEngram: Bool = false
     var useAutoMemory: Bool = false
     var defaultPermissions: PermissionMode = .bypass
     var defaultMode: SessionMode = .build
@@ -926,7 +930,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     }
 
     init(defaultModel: ClaudeModel = .sonnet46, defaultWorkDir: String = NSHomeDirectory(),
-         systemPrompt: String = KilnSettings.defaultSystemPrompt, useEngram: Bool = true,
+         systemPrompt: String = KilnSettings.defaultSystemPrompt, useEngram: Bool = false,
          useAutoMemory: Bool = false, defaultPermissions: PermissionMode = .bypass,
          defaultMode: SessionMode = .build, theme: String = "dark", language: AppLanguage = .en) {
         self.defaultModel = defaultModel; self.defaultWorkDir = defaultWorkDir
@@ -935,7 +939,14 @@ struct KilnSettings: Codable, Sendable, Equatable {
         self.defaultMode = defaultMode; self.theme = theme; self.language = language
     }
 
-    static let defaultSystemPrompt = """
+    // Ship with an empty system prompt by default — users add their own
+    // from Settings. The engram block below is only applied when the user
+    // opts into engram during onboarding (or toggles it on later).
+    static let defaultSystemPrompt = ""
+
+    /// System prompt snippet applied when the user enables engram. Written
+    /// into `systemPrompt` on opt-in so Claude knows the tools exist.
+    static let engramSystemPrompt = """
     You have access to engram, a cognitive memory system. Use it for ALL memory operations:
     - Use `recall` before starting work to load relevant context
     - Use `remember` after learning something worth keeping

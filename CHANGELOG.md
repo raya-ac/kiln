@@ -4,6 +4,22 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.3.3] — 2026-04-21
+
+### Changed
+- Engram (the optional cognitive memory system) is now **off by default**
+  for new installs. Existing settings files preserve their current value.
+- Default system prompt is empty for new users. The engram-primer prompt
+  now lives in a separate constant and is only applied when a user opts in.
+
+### Added
+- Onboarding gains a fifth step dedicated to Engram: an in-depth
+  explanation of what it actually does (memory storage, 5-channel hybrid
+  recall, entity graph, decision/error tracking, local-first), the
+  trade-offs, a detector for whether `engram` is installed, copy-
+  pasteable install commands, and a toggle that wires the engram system
+  prompt into settings on opt-in. Skippable with a single click.
+
 ## [1.3.2] — 2026-04-21
 
 ### Added

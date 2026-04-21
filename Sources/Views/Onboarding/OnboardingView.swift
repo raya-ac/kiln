@@ -22,8 +22,16 @@ struct OnboardingView: View {
     @State private var claudePath: String?
     @State private var claudeVersion: String?
     @State private var pickedWorkDir: String?
+    @State private var engramStatus: EngramStatus = .checking
+    @State private var engramPath: String?
 
-    enum Step: Int, CaseIterable { case welcome, install, login, workDir }
+    enum Step: Int, CaseIterable { case welcome, install, login, engram, workDir }
+
+    enum EngramStatus {
+        case checking
+        case installed   // `engram` found on PATH
+        case missing     // not installed
+    }
 
     enum ClaudeStatus {
         case checking
@@ -52,6 +60,7 @@ struct OnboardingView: View {
                 case .welcome:  welcomePane
                 case .install:  installPane
                 case .login:    loginPane
+                case .engram:   engramPane
                 case .workDir:  workDirPane
                 }
             }
@@ -196,6 +205,187 @@ struct OnboardingView: View {
         }
     }
 
+    private var engramPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+            Text("Memory (optional)")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.kilnText)
+
+            Text("Engram is an optional memory layer for Claude. Off by default — skip this unless you specifically want persistent recall across sessions.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.kilnTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What it actually does")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.kilnText)
+                engramBullet(
+                    "Stores things Claude learns",
+                    "Each session Claude picks up facts about your code, your preferences, decisions you made, errors you hit. Normally that context evaporates when the session ends. Engram keeps it on disk as `memories` — small structured notes with content, tags, and timestamps."
+                )
+                engramBullet(
+                    "Recalls them later with hybrid search",
+                    "Next time you ask something, Claude can query engram and get back relevant prior memories. It uses five channels in parallel: HNSW vector search, BM25 keyword match, graph traversal over entity links, a Hopfield associative network, and a trained cross-encoder reranker on top. Fast (~20ms) and scales to ~1M memories."
+                )
+                engramBullet(
+                    "Builds an entity graph",
+                    "People, projects, files, tools — engram extracts and canonicalizes them as graph nodes with typed relationships. You can ask \"everything about project X\" and it pulls the full subgraph."
+                )
+                engramBullet(
+                    "Tracks decisions, errors, and patterns",
+                    "Special memory types for decisions (with rationale), error patterns (with prevention notes), and extracted procedural patterns. Over time it compresses, deduplicates, and checks itself for drift against the filesystem."
+                )
+                engramBullet(
+                    "Runs entirely local",
+                    "All storage is on-disk at `~/Ash/engram/`. No network calls required (embedding backends are pluggable — local MLX/sentence-transformers or API-backed if you configure one)."
+                )
+            }
+            .padding(12)
+            .background(Color.kilnSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Trade-offs")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.kilnText)
+                Text("Claude will spend tokens querying memory at the start of turns and writing memories at the end. For casual use that's waste. For long-running projects where context compounds, it's the whole point.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            engramStatusBadge
+
+            if engramStatus == .missing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Install it with:")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                    CopyableCommand(command: engramInstallCommand)
+                    Text("Then register it with Claude Code:")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .padding(.top, 4)
+                    CopyableCommand(command: "claude mcp add engram engram --scope user -- mcp")
+                }
+                .padding(12)
+                .background(Color.kilnSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                HStack(spacing: 8) {
+                    Button("Open Terminal") { openTerminal() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.kilnText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    Button("Re-check") {
+                        Task { await probeEngram() }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.kilnText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.kilnSurfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+            }
+
+            if engramStatus == .installed {
+                Toggle(isOn: engramToggleBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Enable engram for new sessions")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.kilnText)
+                        Text("Adds a memory-tool primer to Kiln's system prompt.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.kilnTextTertiary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(Color.kilnAccent)
+                .padding(.top, 4)
+            }
+
+            Text("You can change this any time in Settings → Memory.")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.kilnTextTertiary)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func engramBullet(_ title: String, _ body: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(Color.kilnAccent)
+                .frame(width: 4, height: 4)
+                .padding(.top, 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.kilnText)
+                Text(body)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var engramToggleBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.useEngram },
+            set: { on in
+                var s = store.settings
+                s.useEngram = on
+                if on, s.systemPrompt.isEmpty {
+                    s.systemPrompt = KilnSettings.engramSystemPrompt
+                }
+                store.settings = s
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var engramStatusBadge: some View {
+        HStack(spacing: 8) {
+            switch engramStatus {
+            case .checking:
+                ProgressView().controlSize(.small)
+                Text("Looking for `engram`…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.kilnTextSecondary)
+            case .installed:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color(hex: 0x22C55E))
+                Text("Engram is installed at \(engramPath ?? "engram")")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.kilnText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            case .missing:
+                Image(systemName: "circle.dashed")
+                    .foregroundStyle(Color.kilnTextSecondary)
+                Text("Engram isn't installed. Skip this unless you want it.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.kilnTextSecondary)
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.kilnSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var engramInstallCommand: String {
+        "pip install engram-memory"
+    }
+
     private var workDirPane: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Pick a starting folder")
@@ -295,6 +485,7 @@ struct OnboardingView: View {
         case .welcome:  return "Get started"
         case .install:  return claudeStatus == .installed ? "Continue" : "Continue anyway"
         case .login:    return "I'm logged in"
+        case .engram:   return store.settings.useEngram ? "Continue with engram" : "Skip engram"
         case .workDir:  return "Finish"
         }
     }
@@ -325,6 +516,9 @@ struct OnboardingView: View {
             step = s
             if s == .install && claudeStatus == .checking {
                 Task { await probeClaude() }
+            }
+            if s == .engram {
+                Task { await probeEngram() }
             }
         }
     }
@@ -375,6 +569,29 @@ struct OnboardingView: View {
             claudeVersion = v.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
             claudeStatus = .broken
+        }
+    }
+
+    private func probeEngram() async {
+        engramStatus = .checking
+        // Common install locations for a pip-installed binary. We don't
+        // shell out to `which` because that requires a login shell to pick
+        // up the user's PATH — checking the likely paths directly is
+        // faster and works from app bundles.
+        let candidates = [
+            "\(NSHomeDirectory())/.local/bin/engram",
+            "/usr/local/bin/engram",
+            "/opt/homebrew/bin/engram",
+            "\(NSHomeDirectory())/Library/Python/3.12/bin/engram",
+            "\(NSHomeDirectory())/Library/Python/3.11/bin/engram",
+        ]
+        let found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        if let path = found {
+            engramPath = path
+            engramStatus = .installed
+        } else {
+            engramPath = nil
+            engramStatus = .missing
         }
     }
 
