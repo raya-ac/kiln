@@ -678,14 +678,425 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
             s.statsActiveDays = "アクティブ日数"; s.statsSessions = "セッション"; s.statsModels = "モデル"
             s.thinkingLower = "思考中…"
             return s
-        default:
-            // Languages without a full UI translation fall back to English
-            // strings. Claude's chat output still respects the choice via
-            // claudeInstruction — the chat is where localisation matters
-            // most anyway. langDescription is rewritten so the Settings
-            // row doesn't falsely promise that UI labels change.
-            var s = AppLanguage.en.ui
-            s.langDescription = "Claude will respond in \(label). The Kiln UI stays in English for this language."
+        case .it:
+            var s = UIStrings(
+                newSession: "Nuova sessione", settings: "Impostazioni", noSessions: "Nessuna sessione",
+                messagePlaceholder: "Scrivi a Claude…", thinking: "Sta pensando…", working: "in corso…",
+                writing: "sta scrivendo…", disclaimer: "Kiln usa Claude e può commettere errori. Ricontrolla sempre le risposte.",
+                learnMore: "Scopri di più", send: "Invia", stop: "Stop", selectFile: "Seleziona un file",
+                files: "File", git: "Git", terminal: "Terminale", delete: "Elimina", cancel: "Annulla",
+                rename: "Rinomina", pin: "Fissa", unpin: "Sblocca", fork: "Fork", copy: "Copia",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Modifiche",
+                recentCommits: "Commit recenti", cleanTree: "Working tree pulito",
+                search: "Cerca sessioni…", clearMessages: "Cancella messaggi",
+                deleteConfirm: "Vuoi davvero eliminare", cantUndo: "L'operazione non è annullabile."
+            )
+            s.forked = "fork"; s.you = "Tu"; s.save = "Salva"; s.loading = "Caricamento…"
+            s.notGitRepo = "Non è un repo git"; s.commitMessage = "Messaggio di commit…"
+            s.browse = "Sfoglia"; s.createSession = "Crea sessione"
+            s.workingDirectory = "CARTELLA DI LAVORO"; s.model = "MODELLO"
+            s.tagline = "Una casa nativa per Claude."
+            s.defaults = "PREDEFINITI"; s.language = "LINGUA"; s.memory = "MEMORIA (ENGRAM)"; s.about = "INFO"
+            s.systemPrompt = "Prompt di sistema"; s.resetToDefault = "Ripristina"; s.enableEngram = "Abilita Engram"
+            s.setGroup = "Imposta gruppo…"; s.moveToGroup = "Sposta nel gruppo"
+            s.removeFromGroup = "Rimuovi dal gruppo"; s.deleteSession = "Elimina sessione"
+            s.groupName = "Nome del gruppo"; s.set = "Imposta"; s.removeGroup = "Rimuovi gruppo"
+            s.error = "errore"; s.done = "fatto"; s.running = "in esecuzione…"
+            s.input = "INPUT"; s.output = "OUTPUT"
+            s.justNow = "adesso"; s.yesterday = "ieri"
+            s.mAgo = "min fa"; s.hAgo = "h fa"; s.dAgo = "g fa"; s.msgs = "msg"
+            s.path = "Percorso"; s.permissionsLabel = "Permessi"; s.workDir = "Cartella"
+            s.modeLabel = "Modalità"; s.modelLabel = "Modello"; s.languageLabel = "Lingua"
+            s.langDescription = "Claude risponderà nella lingua selezionata. Anche l'interfaccia verrà aggiornata."
+            s.code = "Codice"; s.chat = "Chat"
+            s.chatModeHint = "Chat pura — niente file, niente strumenti, solo conversazione."
+            s.activity = "Attività"; s.noActivityYet = "Ancora nessuna attività"
+            s.activityHint = "Il codice che Claude scrive e i comandi che esegue appariranno qui."
+            s.callsSuffix = "chiamate"
+            s.filterFiles = "Filtra file…"; s.noFilesMatch = "Nessun file corrisponde a"
+            s.think = "pensa"; s.noThink = "non pensare"; s.turnsSuffix = "turni"
+            s.effortLow = "basso"; s.effortMed = "medio"; s.effortHigh = "alto"; s.effortMax = "max"
+            s.stats = "Statistiche"; s.statsMessages = "Messaggi"; s.statsStreak = "Serie"
+            s.statsActiveDays = "Giorni attivi"; s.statsSessions = "Sessioni"; s.statsModels = "Modelli"
+            s.thinkingLower = "sta pensando…"
+            return s
+        case .pt:
+            var s = UIStrings(
+                newSession: "Nova sessão", settings: "Definições", noSessions: "Sem sessões",
+                messagePlaceholder: "Mensagem para o Claude…", thinking: "A pensar…", working: "a trabalhar…",
+                writing: "a escrever…", disclaimer: "O Kiln usa o Claude e pode cometer erros. Verifique sempre as respostas.",
+                learnMore: "Saber mais", send: "Enviar", stop: "Parar", selectFile: "Selecionar ficheiro",
+                files: "Ficheiros", git: "Git", terminal: "Terminal", delete: "Eliminar", cancel: "Cancelar",
+                rename: "Renomear", pin: "Fixar", unpin: "Desafixar", fork: "Fork", copy: "Copiar",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Alterações",
+                recentCommits: "Commits recentes", cleanTree: "Working tree limpa",
+                search: "Procurar sessões…", clearMessages: "Limpar mensagens",
+                deleteConfirm: "Tem a certeza que quer eliminar", cantUndo: "Esta ação não pode ser desfeita."
+            )
+            s.forked = "fork"; s.you = "Tu"; s.save = "Guardar"; s.loading = "A carregar…"
+            s.notGitRepo = "Não é um repo git"; s.commitMessage = "Mensagem de commit…"
+            s.browse = "Procurar"; s.createSession = "Criar sessão"
+            s.workingDirectory = "DIRETÓRIO DE TRABALHO"; s.model = "MODELO"
+            s.tagline = "Uma casa nativa para o Claude."
+            s.defaults = "PREDEFINIÇÕES"; s.language = "IDIOMA"; s.memory = "MEMÓRIA (ENGRAM)"; s.about = "SOBRE"
+            s.systemPrompt = "Prompt do sistema"; s.resetToDefault = "Repor"; s.enableEngram = "Ativar Engram"
+            s.setGroup = "Definir grupo…"; s.moveToGroup = "Mover para grupo"
+            s.removeFromGroup = "Remover do grupo"; s.deleteSession = "Eliminar sessão"
+            s.groupName = "Nome do grupo"; s.set = "Definir"; s.removeGroup = "Remover grupo"
+            s.error = "erro"; s.done = "concluído"; s.running = "a executar…"
+            s.input = "ENTRADA"; s.output = "SAÍDA"
+            s.justNow = "agora mesmo"; s.yesterday = "ontem"
+            s.mAgo = "min"; s.hAgo = "h"; s.dAgo = "d"; s.msgs = "msgs"
+            s.path = "Caminho"; s.permissionsLabel = "Permissões"; s.workDir = "Diretório"
+            s.modeLabel = "Modo"; s.modelLabel = "Modelo"; s.languageLabel = "Idioma"
+            s.langDescription = "O Claude responderá no idioma selecionado. A interface também será atualizada."
+            s.code = "Código"; s.chat = "Chat"
+            s.chatModeHint = "Chat puro — sem ficheiros, sem ferramentas, apenas conversa."
+            s.activity = "Atividade"; s.noActivityYet = "Ainda sem atividade"
+            s.activityHint = "O código que o Claude escreve e os comandos que executa aparecerão aqui."
+            s.callsSuffix = "chamadas"
+            s.filterFiles = "Filtrar ficheiros…"; s.noFilesMatch = "Nenhum ficheiro corresponde a"
+            s.think = "pensar"; s.noThink = "não pensar"; s.turnsSuffix = "turnos"
+            s.effortLow = "baixo"; s.effortMed = "méd"; s.effortHigh = "alto"; s.effortMax = "máx"
+            s.stats = "Estatísticas"; s.statsMessages = "Mensagens"; s.statsStreak = "Sequência"
+            s.statsActiveDays = "Dias ativos"; s.statsSessions = "Sessões"; s.statsModels = "Modelos"
+            s.thinkingLower = "a pensar…"
+            return s
+        case .ru:
+            var s = UIStrings(
+                newSession: "Новая сессия", settings: "Настройки", noSessions: "Нет сессий",
+                messagePlaceholder: "Сообщение для Claude…", thinking: "Думаю…", working: "работаю…",
+                writing: "пишу…", disclaimer: "Kiln использует Claude и может ошибаться. Пожалуйста, перепроверяйте ответы.",
+                learnMore: "Узнать больше", send: "Отправить", stop: "Стоп", selectFile: "Выберите файл",
+                files: "Файлы", git: "Git", terminal: "Терминал", delete: "Удалить", cancel: "Отмена",
+                rename: "Переименовать", pin: "Закрепить", unpin: "Открепить", fork: "Форк", copy: "Копировать",
+                commit: "Коммит", push: "Push", pull: "Pull", changes: "Изменения",
+                recentCommits: "Последние коммиты", cleanTree: "Рабочее дерево чисто",
+                search: "Поиск сессий…", clearMessages: "Очистить сообщения",
+                deleteConfirm: "Вы уверены, что хотите удалить", cantUndo: "Это действие нельзя отменить."
+            )
+            s.forked = "форк"; s.you = "Вы"; s.save = "Сохранить"; s.loading = "Загрузка…"
+            s.notGitRepo = "Не git-репо"; s.commitMessage = "Сообщение коммита…"
+            s.browse = "Обзор"; s.createSession = "Создать сессию"
+            s.workingDirectory = "РАБОЧАЯ ПАПКА"; s.model = "МОДЕЛЬ"
+            s.tagline = "Родной дом для Claude."
+            s.defaults = "ПО УМОЛЧАНИЮ"; s.language = "ЯЗЫК"; s.memory = "ПАМЯТЬ (ENGRAM)"; s.about = "О ПРОГРАММЕ"
+            s.systemPrompt = "Системный промпт"; s.resetToDefault = "Сбросить"; s.enableEngram = "Включить Engram"
+            s.setGroup = "Задать группу…"; s.moveToGroup = "Переместить в группу"
+            s.removeFromGroup = "Убрать из группы"; s.deleteSession = "Удалить сессию"
+            s.groupName = "Название группы"; s.set = "Задать"; s.removeGroup = "Удалить группу"
+            s.error = "ошибка"; s.done = "готово"; s.running = "выполняется…"
+            s.input = "ВХОД"; s.output = "ВЫХОД"
+            s.justNow = "только что"; s.yesterday = "вчера"
+            s.mAgo = "мин"; s.hAgo = "ч"; s.dAgo = "д"; s.msgs = "сообщ."
+            s.path = "Путь"; s.permissionsLabel = "Разрешения"; s.workDir = "Папка"
+            s.modeLabel = "Режим"; s.modelLabel = "Модель"; s.languageLabel = "Язык"
+            s.langDescription = "Claude будет отвечать на выбранном языке. Интерфейс также обновится."
+            s.code = "Код"; s.chat = "Чат"
+            s.chatModeHint = "Чистый чат — без файлов, без инструментов, только беседа."
+            s.activity = "Активность"; s.noActivityYet = "Активности пока нет"
+            s.activityHint = "Здесь появится код, который пишет Claude, и команды, которые он запускает."
+            s.callsSuffix = "вызовов"
+            s.filterFiles = "Фильтр файлов…"; s.noFilesMatch = "Нет файлов, соответствующих"
+            s.think = "думать"; s.noThink = "не думать"; s.turnsSuffix = "ходов"
+            s.effortLow = "низк."; s.effortMed = "ср."; s.effortHigh = "выс."; s.effortMax = "макс"
+            s.stats = "Статистика"; s.statsMessages = "Сообщения"; s.statsStreak = "Серия"
+            s.statsActiveDays = "Активных дней"; s.statsSessions = "Сессии"; s.statsModels = "Модели"
+            s.thinkingLower = "думает…"
+            return s
+        case .ko:
+            var s = UIStrings(
+                newSession: "새 세션", settings: "설정", noSessions: "세션 없음",
+                messagePlaceholder: "Claude에게 메시지…", thinking: "생각 중…", working: "작업 중…",
+                writing: "작성 중…", disclaimer: "Kiln은 Claude를 사용하며 실수를 할 수 있습니다. 응답을 꼭 확인해 주세요.",
+                learnMore: "더 알아보기", send: "보내기", stop: "중지", selectFile: "파일 선택",
+                files: "파일", git: "Git", terminal: "터미널", delete: "삭제", cancel: "취소",
+                rename: "이름 변경", pin: "고정", unpin: "고정 해제", fork: "포크", copy: "복사",
+                commit: "커밋", push: "푸시", pull: "풀", changes: "변경 사항",
+                recentCommits: "최근 커밋", cleanTree: "작업 트리가 깨끗합니다",
+                search: "세션 검색…", clearMessages: "메시지 지우기",
+                deleteConfirm: "정말 삭제하시겠습니까", cantUndo: "이 작업은 되돌릴 수 없습니다."
+            )
+            s.forked = "포크됨"; s.you = "나"; s.save = "저장"; s.loading = "로딩 중…"
+            s.notGitRepo = "git 저장소가 아님"; s.commitMessage = "커밋 메시지…"
+            s.browse = "찾아보기"; s.createSession = "세션 만들기"
+            s.workingDirectory = "작업 디렉터리"; s.model = "모델"
+            s.tagline = "Claude를 위한 네이티브 공간."
+            s.defaults = "기본값"; s.language = "언어"; s.memory = "메모리 (ENGRAM)"; s.about = "정보"
+            s.systemPrompt = "시스템 프롬프트"; s.resetToDefault = "기본값으로 재설정"; s.enableEngram = "Engram 활성화"
+            s.setGroup = "그룹 설정…"; s.moveToGroup = "그룹으로 이동"
+            s.removeFromGroup = "그룹에서 제거"; s.deleteSession = "세션 삭제"
+            s.groupName = "그룹 이름"; s.set = "설정"; s.removeGroup = "그룹 제거"
+            s.error = "오류"; s.done = "완료"; s.running = "실행 중…"
+            s.input = "입력"; s.output = "출력"
+            s.justNow = "방금"; s.yesterday = "어제"
+            s.mAgo = "분 전"; s.hAgo = "시간 전"; s.dAgo = "일 전"; s.msgs = "메시지"
+            s.path = "경로"; s.permissionsLabel = "권한"; s.workDir = "작업 디렉터리"
+            s.modeLabel = "모드"; s.modelLabel = "모델"; s.languageLabel = "언어"
+            s.langDescription = "Claude가 선택한 언어로 답변합니다. UI 레이블도 함께 업데이트됩니다."
+            s.code = "코드"; s.chat = "채팅"
+            s.chatModeHint = "순수 채팅 — 파일도 도구도 없이, 대화만."
+            s.activity = "활동"; s.noActivityYet = "아직 활동이 없습니다"
+            s.activityHint = "Claude가 작성한 코드와 실행한 명령어가 여기에 표시됩니다."
+            s.callsSuffix = "호출"
+            s.filterFiles = "파일 필터…"; s.noFilesMatch = "일치하는 파일이 없습니다"
+            s.think = "사고"; s.noThink = "사고 안 함"; s.turnsSuffix = "턴"
+            s.effortLow = "낮음"; s.effortMed = "중간"; s.effortHigh = "높음"; s.effortMax = "최대"
+            s.stats = "통계"; s.statsMessages = "메시지"; s.statsStreak = "연속"
+            s.statsActiveDays = "활동 일수"; s.statsSessions = "세션"; s.statsModels = "모델"
+            s.thinkingLower = "생각 중…"
+            return s
+        case .nl:
+            var s = UIStrings(
+                newSession: "Nieuwe sessie", settings: "Instellingen", noSessions: "Geen sessies",
+                messagePlaceholder: "Bericht aan Claude…", thinking: "Denkt na…", working: "bezig…",
+                writing: "schrijft…", disclaimer: "Kiln gebruikt Claude en kan fouten maken. Controleer de antwoorden.",
+                learnMore: "Meer info", send: "Verstuur", stop: "Stop", selectFile: "Kies een bestand",
+                files: "Bestanden", git: "Git", terminal: "Terminal", delete: "Verwijderen", cancel: "Annuleer",
+                rename: "Hernoemen", pin: "Vastzetten", unpin: "Losmaken", fork: "Fork", copy: "Kopiëren",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Wijzigingen",
+                recentCommits: "Recente commits", cleanTree: "Werkboom schoon",
+                search: "Sessies zoeken…", clearMessages: "Berichten wissen",
+                deleteConfirm: "Weet je zeker dat je wilt verwijderen", cantUndo: "Dit kan niet ongedaan worden gemaakt."
+            )
+            s.forked = "geforkt"; s.you = "Jij"; s.save = "Opslaan"; s.loading = "Laden…"
+            s.notGitRepo = "Geen git-repo"; s.commitMessage = "Commitbericht…"
+            s.browse = "Bladeren"; s.createSession = "Sessie maken"
+            s.workingDirectory = "WERKMAP"; s.model = "MODEL"
+            s.tagline = "Een native thuis voor Claude."
+            s.defaults = "STANDAARDWAARDEN"; s.language = "TAAL"; s.memory = "GEHEUGEN (ENGRAM)"; s.about = "OVER"
+            s.systemPrompt = "Systeemprompt"; s.resetToDefault = "Standaard herstellen"; s.enableEngram = "Engram inschakelen"
+            s.setGroup = "Groep instellen…"; s.moveToGroup = "Naar groep verplaatsen"
+            s.removeFromGroup = "Uit groep halen"; s.deleteSession = "Sessie verwijderen"
+            s.groupName = "Groepsnaam"; s.set = "Instellen"; s.removeGroup = "Groep verwijderen"
+            s.error = "fout"; s.done = "klaar"; s.running = "loopt…"
+            s.input = "INVOER"; s.output = "UITVOER"
+            s.justNow = "zojuist"; s.yesterday = "gisteren"
+            s.mAgo = "min"; s.hAgo = "u"; s.dAgo = "d"; s.msgs = "berichten"
+            s.path = "Pad"; s.permissionsLabel = "Rechten"; s.workDir = "Werkmap"
+            s.modeLabel = "Modus"; s.modelLabel = "Model"; s.languageLabel = "Taal"
+            s.langDescription = "Claude antwoordt in de gekozen taal. UI-labels worden ook bijgewerkt."
+            s.code = "Code"; s.chat = "Chat"
+            s.chatModeHint = "Pure chat — geen bestanden, geen tools, alleen gesprek."
+            s.activity = "Activiteit"; s.noActivityYet = "Nog geen activiteit"
+            s.activityHint = "Code die Claude schrijft en commando's die het uitvoert verschijnen hier."
+            s.callsSuffix = "aanroepen"
+            s.filterFiles = "Bestanden filteren…"; s.noFilesMatch = "Geen bestanden komen overeen met"
+            s.think = "denken"; s.noThink = "niet denken"; s.turnsSuffix = "beurten"
+            s.effortLow = "laag"; s.effortMed = "mid"; s.effortHigh = "hoog"; s.effortMax = "max"
+            s.stats = "Statistieken"; s.statsMessages = "Berichten"; s.statsStreak = "Reeks"
+            s.statsActiveDays = "Actieve dagen"; s.statsSessions = "Sessies"; s.statsModels = "Modellen"
+            s.thinkingLower = "denkt…"
+            return s
+        case .hi:
+            var s = UIStrings(
+                newSession: "नया सत्र", settings: "सेटिंग्स", noSessions: "कोई सत्र नहीं",
+                messagePlaceholder: "Claude को संदेश…", thinking: "सोच रहा है…", working: "काम कर रहा है…",
+                writing: "लिख रहा है…", disclaimer: "Kiln Claude का उपयोग करता है और गलतियाँ कर सकता है। कृपया उत्तरों की दोबारा जाँच करें।",
+                learnMore: "और जानें", send: "भेजें", stop: "रोकें", selectFile: "फ़ाइल चुनें",
+                files: "फ़ाइलें", git: "Git", terminal: "टर्मिनल", delete: "हटाएँ", cancel: "रद्द करें",
+                rename: "नाम बदलें", pin: "पिन करें", unpin: "अनपिन", fork: "फ़ोर्क", copy: "कॉपी",
+                commit: "कमिट", push: "पुश", pull: "पुल", changes: "परिवर्तन",
+                recentCommits: "हाल के कमिट", cleanTree: "वर्किंग ट्री साफ़ है",
+                search: "सत्र खोजें…", clearMessages: "संदेश साफ़ करें",
+                deleteConfirm: "क्या आप वाकई हटाना चाहते हैं", cantUndo: "यह पूर्ववत नहीं किया जा सकता।"
+            )
+            s.forked = "फ़ोर्क किया गया"; s.you = "आप"; s.save = "सहेजें"; s.loading = "लोड हो रहा है…"
+            s.notGitRepo = "git रेपो नहीं"; s.commitMessage = "कमिट संदेश…"
+            s.browse = "ब्राउज़ करें"; s.createSession = "सत्र बनाएँ"
+            s.workingDirectory = "कार्य निर्देशिका"; s.model = "मॉडल"
+            s.tagline = "Claude के लिए एक मूल घर।"
+            s.defaults = "डिफ़ॉल्ट"; s.language = "भाषा"; s.memory = "मेमोरी (ENGRAM)"; s.about = "जानकारी"
+            s.systemPrompt = "सिस्टम प्रॉम्प्ट"; s.resetToDefault = "डिफ़ॉल्ट पर रीसेट करें"; s.enableEngram = "Engram सक्षम करें"
+            s.setGroup = "समूह सेट करें…"; s.moveToGroup = "समूह में ले जाएँ"
+            s.removeFromGroup = "समूह से हटाएँ"; s.deleteSession = "सत्र हटाएँ"
+            s.groupName = "समूह का नाम"; s.set = "सेट करें"; s.removeGroup = "समूह हटाएँ"
+            s.error = "त्रुटि"; s.done = "पूर्ण"; s.running = "चल रहा है…"
+            s.input = "इनपुट"; s.output = "आउटपुट"
+            s.justNow = "अभी"; s.yesterday = "कल"
+            s.mAgo = "मि"; s.hAgo = "घं"; s.dAgo = "दि"; s.msgs = "संदेश"
+            s.path = "पथ"; s.permissionsLabel = "अनुमतियाँ"; s.workDir = "कार्य निर्देशिका"
+            s.modeLabel = "मोड"; s.modelLabel = "मॉडल"; s.languageLabel = "भाषा"
+            s.langDescription = "Claude चयनित भाषा में उत्तर देगा। UI लेबल भी अपडेट होंगे।"
+            s.code = "कोड"; s.chat = "चैट"
+            s.chatModeHint = "शुद्ध चैट — कोई फ़ाइल नहीं, कोई टूल नहीं, बस बातचीत।"
+            s.activity = "गतिविधि"; s.noActivityYet = "अभी तक कोई गतिविधि नहीं"
+            s.activityHint = "Claude जो कोड लिखता है और जो कमांड चलाता है, वे यहाँ दिखेंगे।"
+            s.callsSuffix = "कॉल"
+            s.filterFiles = "फ़ाइलें फ़िल्टर करें…"; s.noFilesMatch = "कोई फ़ाइल मेल नहीं खाती"
+            s.think = "सोचें"; s.noThink = "न सोचें"; s.turnsSuffix = "बारी"
+            s.effortLow = "कम"; s.effortMed = "मध्यम"; s.effortHigh = "उच्च"; s.effortMax = "अधिकतम"
+            s.stats = "आँकड़े"; s.statsMessages = "संदेश"; s.statsStreak = "स्ट्रीक"
+            s.statsActiveDays = "सक्रिय दिन"; s.statsSessions = "सत्र"; s.statsModels = "मॉडल"
+            s.thinkingLower = "सोच रहा है…"
+            return s
+        case .ar:
+            var s = UIStrings(
+                newSession: "جلسة جديدة", settings: "الإعدادات", noSessions: "لا توجد جلسات",
+                messagePlaceholder: "رسالة إلى Claude…", thinking: "يفكر…", working: "يعمل…",
+                writing: "يكتب…", disclaimer: "يستخدم Kiln نموذج Claude وقد يرتكب أخطاء. يرجى التحقق من الردود.",
+                learnMore: "اعرف المزيد", send: "إرسال", stop: "إيقاف", selectFile: "اختر ملفًا",
+                files: "الملفات", git: "Git", terminal: "الطرفية", delete: "حذف", cancel: "إلغاء",
+                rename: "إعادة تسمية", pin: "تثبيت", unpin: "إلغاء التثبيت", fork: "تفريع", copy: "نسخ",
+                commit: "إيداع", push: "دفع", pull: "سحب", changes: "التغييرات",
+                recentCommits: "الإيداعات الأخيرة", cleanTree: "شجرة العمل نظيفة",
+                search: "بحث في الجلسات…", clearMessages: "مسح الرسائل",
+                deleteConfirm: "هل أنت متأكد من الحذف", cantUndo: "لا يمكن التراجع عن هذا."
+            )
+            s.forked = "متفرع"; s.you = "أنت"; s.save = "حفظ"; s.loading = "جارٍ التحميل…"
+            s.notGitRepo = "ليس مستودع git"; s.commitMessage = "رسالة الإيداع…"
+            s.browse = "استعراض"; s.createSession = "إنشاء جلسة"
+            s.workingDirectory = "مجلد العمل"; s.model = "النموذج"
+            s.tagline = "منزل أصلي لـ Claude."
+            s.defaults = "الافتراضيات"; s.language = "اللغة"; s.memory = "الذاكرة (ENGRAM)"; s.about = "حول"
+            s.systemPrompt = "موجّه النظام"; s.resetToDefault = "إعادة التعيين"; s.enableEngram = "تفعيل Engram"
+            s.setGroup = "تعيين مجموعة…"; s.moveToGroup = "نقل إلى مجموعة"
+            s.removeFromGroup = "إزالة من المجموعة"; s.deleteSession = "حذف الجلسة"
+            s.groupName = "اسم المجموعة"; s.set = "تعيين"; s.removeGroup = "إزالة المجموعة"
+            s.error = "خطأ"; s.done = "تم"; s.running = "قيد التشغيل…"
+            s.input = "المدخلات"; s.output = "المخرجات"
+            s.justNow = "الآن"; s.yesterday = "أمس"
+            s.mAgo = "د"; s.hAgo = "س"; s.dAgo = "ي"; s.msgs = "رسائل"
+            s.path = "المسار"; s.permissionsLabel = "الأذونات"; s.workDir = "مجلد العمل"
+            s.modeLabel = "الوضع"; s.modelLabel = "النموذج"; s.languageLabel = "اللغة"
+            s.langDescription = "سيرد Claude باللغة المختارة. ستُحدَّث تسميات الواجهة أيضًا."
+            s.code = "كود"; s.chat = "دردشة"
+            s.chatModeHint = "دردشة نقية — بلا ملفات ولا أدوات، مجرد محادثة."
+            s.activity = "النشاط"; s.noActivityYet = "لا يوجد نشاط بعد"
+            s.activityHint = "سيظهر هنا الكود الذي يكتبه Claude والأوامر التي يشغّلها."
+            s.callsSuffix = "استدعاءات"
+            s.filterFiles = "تصفية الملفات…"; s.noFilesMatch = "لا توجد ملفات تطابق"
+            s.think = "فكّر"; s.noThink = "لا تفكّر"; s.turnsSuffix = "أدوار"
+            s.effortLow = "منخفض"; s.effortMed = "متوسط"; s.effortHigh = "مرتفع"; s.effortMax = "أقصى"
+            s.stats = "إحصاءات"; s.statsMessages = "الرسائل"; s.statsStreak = "سلسلة"
+            s.statsActiveDays = "أيام نشطة"; s.statsSessions = "الجلسات"; s.statsModels = "النماذج"
+            s.thinkingLower = "يفكر…"
+            return s
+        case .pl:
+            var s = UIStrings(
+                newSession: "Nowa sesja", settings: "Ustawienia", noSessions: "Brak sesji",
+                messagePlaceholder: "Wiadomość do Claude…", thinking: "Myśli…", working: "pracuje…",
+                writing: "pisze…", disclaimer: "Kiln używa Claude i może popełniać błędy. Prosimy o weryfikację odpowiedzi.",
+                learnMore: "Dowiedz się więcej", send: "Wyślij", stop: "Zatrzymaj", selectFile: "Wybierz plik",
+                files: "Pliki", git: "Git", terminal: "Terminal", delete: "Usuń", cancel: "Anuluj",
+                rename: "Zmień nazwę", pin: "Przypnij", unpin: "Odepnij", fork: "Fork", copy: "Kopiuj",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Zmiany",
+                recentCommits: "Ostatnie commity", cleanTree: "Drzewo robocze czyste",
+                search: "Szukaj sesji…", clearMessages: "Wyczyść wiadomości",
+                deleteConfirm: "Czy na pewno chcesz usunąć", cantUndo: "Tego nie można cofnąć."
+            )
+            s.forked = "sforkowane"; s.you = "Ty"; s.save = "Zapisz"; s.loading = "Ładowanie…"
+            s.notGitRepo = "To nie repozytorium git"; s.commitMessage = "Wiadomość commita…"
+            s.browse = "Przeglądaj"; s.createSession = "Utwórz sesję"
+            s.workingDirectory = "KATALOG ROBOCZY"; s.model = "MODEL"
+            s.tagline = "Natywny dom dla Claude."
+            s.defaults = "DOMYŚLNE"; s.language = "JĘZYK"; s.memory = "PAMIĘĆ (ENGRAM)"; s.about = "O PROGRAMIE"
+            s.systemPrompt = "Prompt systemowy"; s.resetToDefault = "Przywróć domyślne"; s.enableEngram = "Włącz Engram"
+            s.setGroup = "Ustaw grupę…"; s.moveToGroup = "Przenieś do grupy"
+            s.removeFromGroup = "Usuń z grupy"; s.deleteSession = "Usuń sesję"
+            s.groupName = "Nazwa grupy"; s.set = "Ustaw"; s.removeGroup = "Usuń grupę"
+            s.error = "błąd"; s.done = "gotowe"; s.running = "uruchamia się…"
+            s.input = "WEJŚCIE"; s.output = "WYJŚCIE"
+            s.justNow = "przed chwilą"; s.yesterday = "wczoraj"
+            s.mAgo = "min"; s.hAgo = "godz"; s.dAgo = "d"; s.msgs = "wiad."
+            s.path = "Ścieżka"; s.permissionsLabel = "Uprawnienia"; s.workDir = "Katalog"
+            s.modeLabel = "Tryb"; s.modelLabel = "Model"; s.languageLabel = "Język"
+            s.langDescription = "Claude odpowie w wybranym języku. Etykiety UI również zostaną zaktualizowane."
+            s.code = "Kod"; s.chat = "Czat"
+            s.chatModeHint = "Czysty czat — bez plików, bez narzędzi, tylko rozmowa."
+            s.activity = "Aktywność"; s.noActivityYet = "Brak aktywności"
+            s.activityHint = "Kod, który pisze Claude, i polecenia, które uruchamia, pojawią się tutaj."
+            s.callsSuffix = "wywołań"
+            s.filterFiles = "Filtruj pliki…"; s.noFilesMatch = "Brak plików pasujących do"
+            s.think = "myśl"; s.noThink = "bez myślenia"; s.turnsSuffix = "tur"
+            s.effortLow = "niski"; s.effortMed = "śr."; s.effortHigh = "wysoki"; s.effortMax = "max"
+            s.stats = "Statystyki"; s.statsMessages = "Wiadomości"; s.statsStreak = "Passa"
+            s.statsActiveDays = "Aktywne dni"; s.statsSessions = "Sesje"; s.statsModels = "Modele"
+            s.thinkingLower = "myśli…"
+            return s
+        case .tr:
+            var s = UIStrings(
+                newSession: "Yeni oturum", settings: "Ayarlar", noSessions: "Oturum yok",
+                messagePlaceholder: "Claude'a mesaj…", thinking: "Düşünüyor…", working: "çalışıyor…",
+                writing: "yazıyor…", disclaimer: "Kiln, Claude kullanır ve hata yapabilir. Lütfen yanıtları kontrol edin.",
+                learnMore: "Daha fazla bilgi", send: "Gönder", stop: "Durdur", selectFile: "Dosya seç",
+                files: "Dosyalar", git: "Git", terminal: "Terminal", delete: "Sil", cancel: "İptal",
+                rename: "Yeniden adlandır", pin: "Sabitle", unpin: "Sabitlemeyi kaldır", fork: "Fork", copy: "Kopyala",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Değişiklikler",
+                recentCommits: "Son commit'ler", cleanTree: "Çalışma ağacı temiz",
+                search: "Oturum ara…", clearMessages: "Mesajları temizle",
+                deleteConfirm: "Silmek istediğinize emin misiniz", cantUndo: "Bu geri alınamaz."
+            )
+            s.forked = "forklandı"; s.you = "Sen"; s.save = "Kaydet"; s.loading = "Yükleniyor…"
+            s.notGitRepo = "Git deposu değil"; s.commitMessage = "Commit mesajı…"
+            s.browse = "Gözat"; s.createSession = "Oturum oluştur"
+            s.workingDirectory = "ÇALIŞMA DİZİNİ"; s.model = "MODEL"
+            s.tagline = "Claude için yerli bir yuva."
+            s.defaults = "VARSAYILANLAR"; s.language = "DİL"; s.memory = "BELLEK (ENGRAM)"; s.about = "HAKKINDA"
+            s.systemPrompt = "Sistem istemi"; s.resetToDefault = "Varsayılana sıfırla"; s.enableEngram = "Engram'ı etkinleştir"
+            s.setGroup = "Grup ayarla…"; s.moveToGroup = "Gruba taşı"
+            s.removeFromGroup = "Gruptan çıkar"; s.deleteSession = "Oturumu sil"
+            s.groupName = "Grup adı"; s.set = "Ayarla"; s.removeGroup = "Grubu kaldır"
+            s.error = "hata"; s.done = "tamam"; s.running = "çalışıyor…"
+            s.input = "GİRDİ"; s.output = "ÇIKTI"
+            s.justNow = "az önce"; s.yesterday = "dün"
+            s.mAgo = "dk"; s.hAgo = "sa"; s.dAgo = "g"; s.msgs = "mesaj"
+            s.path = "Yol"; s.permissionsLabel = "İzinler"; s.workDir = "Dizin"
+            s.modeLabel = "Mod"; s.modelLabel = "Model"; s.languageLabel = "Dil"
+            s.langDescription = "Claude seçilen dilde yanıt verecek. Arayüz etiketleri de güncellenir."
+            s.code = "Kod"; s.chat = "Sohbet"
+            s.chatModeHint = "Saf sohbet — dosya yok, araç yok, sadece konuşma."
+            s.activity = "Etkinlik"; s.noActivityYet = "Henüz etkinlik yok"
+            s.activityHint = "Claude'un yazdığı kod ve çalıştırdığı komutlar burada görünür."
+            s.callsSuffix = "çağrı"
+            s.filterFiles = "Dosyaları filtrele…"; s.noFilesMatch = "Eşleşen dosya yok"
+            s.think = "düşün"; s.noThink = "düşünme"; s.turnsSuffix = "tur"
+            s.effortLow = "düşük"; s.effortMed = "orta"; s.effortHigh = "yüksek"; s.effortMax = "maks"
+            s.stats = "İstatistik"; s.statsMessages = "Mesajlar"; s.statsStreak = "Seri"
+            s.statsActiveDays = "Aktif günler"; s.statsSessions = "Oturumlar"; s.statsModels = "Modeller"
+            s.thinkingLower = "düşünüyor…"
+            return s
+        case .sv:
+            var s = UIStrings(
+                newSession: "Ny session", settings: "Inställningar", noSessions: "Inga sessioner",
+                messagePlaceholder: "Meddelande till Claude…", thinking: "Tänker…", working: "arbetar…",
+                writing: "skriver…", disclaimer: "Kiln använder Claude och kan göra misstag. Dubbelkolla alltid svaren.",
+                learnMore: "Läs mer", send: "Skicka", stop: "Stopp", selectFile: "Välj en fil",
+                files: "Filer", git: "Git", terminal: "Terminal", delete: "Radera", cancel: "Avbryt",
+                rename: "Byt namn", pin: "Fäst", unpin: "Lossa", fork: "Forka", copy: "Kopiera",
+                commit: "Commit", push: "Push", pull: "Pull", changes: "Ändringar",
+                recentCommits: "Senaste commits", cleanTree: "Arbetsträd rent",
+                search: "Sök sessioner…", clearMessages: "Rensa meddelanden",
+                deleteConfirm: "Vill du verkligen radera", cantUndo: "Detta kan inte ångras."
+            )
+            s.forked = "forkad"; s.you = "Du"; s.save = "Spara"; s.loading = "Laddar…"
+            s.notGitRepo = "Inte ett git-repo"; s.commitMessage = "Commit-meddelande…"
+            s.browse = "Bläddra"; s.createSession = "Skapa session"
+            s.workingDirectory = "ARBETSMAPP"; s.model = "MODELL"
+            s.tagline = "Ett nativt hem för Claude."
+            s.defaults = "STANDARD"; s.language = "SPRÅK"; s.memory = "MINNE (ENGRAM)"; s.about = "OM"
+            s.systemPrompt = "Systemprompt"; s.resetToDefault = "Återställ standard"; s.enableEngram = "Aktivera Engram"
+            s.setGroup = "Ange grupp…"; s.moveToGroup = "Flytta till grupp"
+            s.removeFromGroup = "Ta bort från grupp"; s.deleteSession = "Radera session"
+            s.groupName = "Gruppnamn"; s.set = "Ange"; s.removeGroup = "Ta bort grupp"
+            s.error = "fel"; s.done = "klar"; s.running = "körs…"
+            s.input = "INDATA"; s.output = "UTDATA"
+            s.justNow = "just nu"; s.yesterday = "igår"
+            s.mAgo = "min"; s.hAgo = "h"; s.dAgo = "d"; s.msgs = "medd."
+            s.path = "Sökväg"; s.permissionsLabel = "Behörigheter"; s.workDir = "Arbetsmapp"
+            s.modeLabel = "Läge"; s.modelLabel = "Modell"; s.languageLabel = "Språk"
+            s.langDescription = "Claude svarar på det valda språket. UI-etiketter uppdateras också."
+            s.code = "Kod"; s.chat = "Chatt"
+            s.chatModeHint = "Ren chatt — inga filer, inga verktyg, bara samtal."
+            s.activity = "Aktivitet"; s.noActivityYet = "Ingen aktivitet ännu"
+            s.activityHint = "Kod som Claude skriver och kommandon den kör visas här."
+            s.callsSuffix = "anrop"
+            s.filterFiles = "Filtrera filer…"; s.noFilesMatch = "Inga filer matchar"
+            s.think = "tänk"; s.noThink = "tänk inte"; s.turnsSuffix = "turer"
+            s.effortLow = "låg"; s.effortMed = "med"; s.effortHigh = "hög"; s.effortMax = "max"
+            s.stats = "Statistik"; s.statsMessages = "Meddelanden"; s.statsStreak = "Svit"
+            s.statsActiveDays = "Aktiva dagar"; s.statsSessions = "Sessioner"; s.statsModels = "Modeller"
+            s.thinkingLower = "tänker…"
             return s
         }
     }

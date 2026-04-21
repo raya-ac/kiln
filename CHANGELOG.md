@@ -4,6 +4,18 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.8.3] — 2026-04-21
+
+### Added
+- **Full UI translations for the ten new languages.** Italian,
+  Portuguese, Russian, Korean, Dutch, Hindi, Arabic, Polish, Turkish,
+  and Swedish now translate every label that German / Spanish /
+  Chinese / French / Japanese already did — sidebar, composer,
+  settings sections, git chips, activity panel, stats, relative
+  timestamps, effort labels, the whole lot. Switching language in
+  Settings now actually repaints the UI rather than only steering
+  Claude's replies.
+
 ## [1.8.2] — 2026-04-21
 
 ### Added

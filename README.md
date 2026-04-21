@@ -39,10 +39,9 @@ It's still early. I use it every day; you might want to wait.
 - ~60 local slash commands for git, repo inspection, clipboard/export,
   and quick session ops — typed right in the composer.
 - Cmd+Opt+1..9 to jump to the Nth visible session in the current tab.
-- 16 languages in Settings — English, German, Chinese, French, Spanish,
-  Japanese ship with full UI translations; Italian, Portuguese, Russian,
-  Korean, Dutch, Hindi, Arabic, Polish, Turkish, Swedish steer Claude's
-  chat output while leaving the UI in English.
+- 16 languages in Settings with full UI translations — English, German,
+  Chinese, French, Spanish, Japanese, Italian, Portuguese, Russian,
+  Korean, Dutch, Hindi, Arabic, Polish, Turkish, Swedish.
 - Per-session Cloudflare tunnels for remote control from your phone.
 - Real approval dialogs, not terminal prompts.
 - Dock icon that live-tints to your accent color and follows dark mode.
