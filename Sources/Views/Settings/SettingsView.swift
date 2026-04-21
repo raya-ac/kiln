@@ -243,6 +243,48 @@ struct SettingsView: View {
                         SettingsRow(label: store.settings.language.ui.enableEngram) {
                             SettingsToggle(value: store.settings.useEngram) { v in
                                 store.settings.useEngram = v
+                                // Auto-apply the engram primer on opt-in when
+                                // the prompt is blank, so new users don't have
+                                // to copy-paste it from docs.
+                                if v && store.settings.systemPrompt.isEmpty {
+                                    store.settings.systemPrompt = KilnSettings.engramSystemPrompt
+                                }
+                            }
+                        }
+
+                        // Manual path override. Detected path auto-discovery
+                        // covers the common cases; this lets users point Kiln
+                        // at a venv / shim / dev checkout when engram lives
+                        // somewhere unusual. Empty = auto-detect.
+                        SettingsRow(label: "Engram binary") {
+                            HStack(spacing: 6) {
+                                Text(store.settings.engramPath.isEmpty ? "auto-detect" : store.settings.engramPath)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(store.settings.engramPath.isEmpty ? Color.kilnTextTertiary : Color.kilnText)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Pick…") {
+                                    let panel = NSOpenPanel()
+                                    panel.canChooseFiles = true
+                                    panel.canChooseDirectories = false
+                                    panel.allowsMultipleSelection = false
+                                    panel.prompt = "Use this binary"
+                                    panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+                                    if panel.runModal() == .OK, let url = panel.url,
+                                       FileManager.default.isExecutableFile(atPath: url.path) {
+                                        store.settings.engramPath = url.path
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.kilnTextSecondary)
+                                if !store.settings.engramPath.isEmpty {
+                                    Button("Clear") { store.settings.engramPath = "" }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Color.kilnTextTertiary)
+                                }
                             }
                         }
 
@@ -267,7 +309,12 @@ struct SettingsView: View {
 
                                 HStack {
                                     Button(store.settings.language.ui.resetToDefault) {
-                                        store.settings.systemPrompt = KilnSettings.defaultSystemPrompt
+                                        // With engram on, "default" is the
+                                        // engram primer — the empty base
+                                        // prompt would disable the tools.
+                                        store.settings.systemPrompt = store.settings.useEngram
+                                            ? KilnSettings.engramSystemPrompt
+                                            : KilnSettings.defaultSystemPrompt
                                         store.saveSettings()
                                     }
                                     .buttonStyle(.plain)

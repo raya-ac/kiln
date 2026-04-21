@@ -20,9 +20,11 @@ struct ShortcutsOverlay: View {
             ("⌘2", "Show chat sessions"),
             ("⌘[", "Previous session"),
             ("⌘]", "Next session"),
+            ("⌘⌥F", "Toggle focus mode"),
         ]),
         ("Session", [
             ("⌘N", "New session"),
+            ("⌘I", "Session info"),
             ("⌘⇧T", "Session templates"),
             ("⌘⇧E", "Export chat as markdown"),
             ("⌘W", "Close active session"),
@@ -56,6 +58,8 @@ struct ShortcutsOverlay: View {
             ("/export", "Export chat as markdown"),
             ("/search <q>", "Open global search with query"),
             ("/settings", "Open settings"),
+            ("/memory", "Open engram dashboard"),
+            ("/focus", "Toggle focus mode"),
         ]),
     ]
 

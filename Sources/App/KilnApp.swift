@@ -48,6 +48,17 @@ struct KilnApp: App {
                 }
                 .keyboardShortcut("f", modifiers: .command)
 
+                Button("Toggle Focus Mode") {
+                    store.toggleFocusMode()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+
+                Button("Session Info") {
+                    store.showSessionInfo = true
+                }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(store.activeSessionId == nil)
+
                 Divider()
 
                 Button("Keyboard Shortcuts") {

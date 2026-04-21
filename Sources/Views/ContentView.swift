@@ -22,6 +22,11 @@ struct ContentView: View {
     @AppStorage("chatSideWidth") private var chatSideWidth: Double = 460
     @AppStorage("sidebarCollapsed") private var sidebarCollapsed: Bool = false
     @AppStorage("rightPanelCollapsed") private var rightPanelCollapsed: Bool = false
+    /// Saved panel state captured when entering focus mode, so we can
+    /// restore exactly what the user had open when they leave it.
+    @AppStorage("focusMode") private var focusMode: Bool = false
+    @AppStorage("focusModePreSidebar") private var focusModePreSidebar: Bool = false
+    @AppStorage("focusModePreRight") private var focusModePreRight: Bool = false
 
     private let sidebarMin: Double = 180
     private let sidebarMax: Double = 420
@@ -228,6 +233,16 @@ struct ContentView: View {
             SessionTemplatesView()
                 .environmentObject(store)
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
+        }
+        .sheet(isPresented: $store.showSessionInfo) {
+            if let session = store.activeSession {
+                SessionInfoView(
+                    session: session,
+                    tokens: store.runtimeStates[session.id],
+                    onDismiss: { store.showSessionInfo = false }
+                )
+                .preferredColorScheme(Color.kilnPreferredColorScheme)
+            }
         }
         .sheet(isPresented: $store.showWhatsNew) {
             if let version = WhatsNew.currentVersion,

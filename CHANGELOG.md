@@ -4,6 +4,29 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.3.4] — 2026-04-21
+
+### Added
+- **Focus Mode** (`⌘⌥F` or `/focus`) — hides both side panels for a
+  distraction-free chat column. Restores exactly what was open when you
+  toggle back out.
+- **Session Info** sheet (`⌘I`) — compact "about this session" popup:
+  model, workdir, message count, tool call count, created / last-active
+  timestamps, tokens from the current turn, fork lineage, tags. Session
+  ID is one click away for scripts.
+- `/memory` slash command — opens the engram dashboard
+  (http://127.0.0.1:8420) in your default browser.
+- Onboarding's engram step now lets you pick the binary path manually
+  via a "Pick path…" file picker. Useful when engram lives in a custom
+  venv, a mise/asdf shim, or a dev checkout outside the usual pip-install
+  locations. The pick is persisted to `settings.engramPath` and the probe
+  honors it ahead of the auto-detect candidates.
+- Settings → Memory gains an "Engram binary" row exposing the same path
+  override, with Pick / Clear buttons. Enabling engram while the system
+  prompt is blank now auto-applies the engram primer so you don't have
+  to copy it from docs.
+- Keyboard shortcuts overlay lists the new bindings and slash commands.
+
 ## [1.3.3] — 2026-04-21
 
 ### Changed

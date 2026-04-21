@@ -30,6 +30,8 @@ enum SlashCommands {
         .init(id: "title", label: "/title", description: "Ask Claude for a short title, rename the session", kind: .kiln),
         .init(id: "settings", label: "/settings", description: "Open app settings", kind: .kiln),
         .init(id: "search", label: "/search", description: "Search all messages across sessions", kind: .kiln),
+        .init(id: "memory", label: "/memory", description: "Open the engram dashboard in your browser", kind: .kiln),
+        .init(id: "focus", label: "/focus", description: "Toggle focus mode (hide side panels)", kind: .kiln),
     ]
 
     /// No longer used — kept empty for source compat. Previously held `//`

@@ -422,6 +422,16 @@ struct ComposerView: View {
             Task { await store.generateSessionTitle() }
         case "/settings":
             store.showSettings = true
+        case "/memory":
+            // Engram's bundled web dashboard listens on 127.0.0.1:8420.
+            // Works whether the user ran `engram serve --web` already or
+            // not — if the server isn't up, the browser just shows a
+            // connection error and the user knows to start it.
+            if let url = URL(string: "http://127.0.0.1:8420") {
+                NSWorkspace.shared.open(url)
+            }
+        case "/focus":
+            store.toggleFocusMode()
         case "/search":
             let q = arg.trimmingCharacters(in: .whitespaces)
             if !q.isEmpty {

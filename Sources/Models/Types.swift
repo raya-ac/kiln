@@ -840,6 +840,11 @@ struct KilnSettings: Codable, Sendable, Equatable {
     // whatever they had (the decoder fallback below preserves the old
     // `true` behavior if the key was never written).
     var useEngram: Bool = false
+    /// Optional manual override for the `engram` binary location. Empty
+    /// means "auto-detect on PATH / common install locations." Set via
+    /// Onboarding's "Pick path…" or Settings → Memory when the binary
+    /// lives somewhere unusual (custom venv, mise shim, dev checkout).
+    var engramPath: String = ""
     var useAutoMemory: Bool = false
     var defaultPermissions: PermissionMode = .bypass
     var defaultMode: SessionMode = .build
@@ -895,6 +900,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
         defaultWorkDir = (try? c.decode(String.self, forKey: .defaultWorkDir)) ?? NSHomeDirectory()
         systemPrompt = (try? c.decode(String.self, forKey: .systemPrompt)) ?? KilnSettings.defaultSystemPrompt
         useEngram = (try? c.decode(Bool.self, forKey: .useEngram)) ?? true
+        engramPath = (try? c.decode(String.self, forKey: .engramPath)) ?? ""
         useAutoMemory = (try? c.decode(Bool.self, forKey: .useAutoMemory)) ?? false
         defaultPermissions = (try? c.decode(PermissionMode.self, forKey: .defaultPermissions)) ?? .bypass
         defaultMode = (try? c.decode(SessionMode.self, forKey: .defaultMode)) ?? .build

@@ -19,6 +19,7 @@ final class AppStore: ObservableObject {
     @Published var showNewSessionSheet = false
     @Published var showSessionTemplates = false
     @Published var showWhatsNew = false
+    @Published var showSessionInfo = false
     @Published var showShortcutsOverlay = false
     /// First-run onboarding. Drives the OnboardingSheet overlay — walks
     /// through the welcome, checks for Claude Code, and helps install it
@@ -521,6 +522,27 @@ final class AppStore: ObservableObject {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].isPinned.toggle()
         Persistence.saveSession(sessions[idx])
+    }
+
+    /// Focus mode: hide both side panels so just the chat column remains,
+    /// restoring whatever was open when focus mode exits. Driven from the
+    /// ⌘⌥F menu item in KilnApp.commands.
+    func toggleFocusMode() {
+        let defaults = UserDefaults.standard
+        let inFocus = defaults.bool(forKey: "focusMode")
+        if inFocus {
+            // Leaving focus — restore snapshot.
+            defaults.set(defaults.bool(forKey: "focusModePreSidebar"), forKey: "sidebarCollapsed")
+            defaults.set(defaults.bool(forKey: "focusModePreRight"), forKey: "rightPanelCollapsed")
+            defaults.set(false, forKey: "focusMode")
+        } else {
+            // Entering focus — stash current state, then hide both.
+            defaults.set(defaults.bool(forKey: "sidebarCollapsed"), forKey: "focusModePreSidebar")
+            defaults.set(defaults.bool(forKey: "rightPanelCollapsed"), forKey: "focusModePreRight")
+            defaults.set(true, forKey: "sidebarCollapsed")
+            defaults.set(true, forKey: "rightPanelCollapsed")
+            defaults.set(true, forKey: "focusMode")
+        }
     }
 
     /// Build a ready-to-paste continuation prompt from a session. Packs the

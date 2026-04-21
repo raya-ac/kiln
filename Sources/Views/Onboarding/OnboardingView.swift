@@ -291,7 +291,19 @@ struct OnboardingView: View {
                     .padding(.vertical, 6)
                     .background(Color.kilnSurfaceElevated)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
+                    Button("Pick path…") { pickEngramPath() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.kilnText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.kilnSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
+
+                Text("Installed somewhere unusual (custom venv, mise shim, a dev checkout)? Use \"Pick path…\" to point Kiln at the binary directly.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if engramStatus == .installed {
@@ -308,6 +320,11 @@ struct OnboardingView: View {
                 .toggleStyle(.switch)
                 .tint(Color.kilnAccent)
                 .padding(.top, 4)
+
+                Button("Change path…") { pickEngramPath() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.kilnTextSecondary)
             }
 
             Text("You can change this any time in Settings → Memory.")
@@ -574,6 +591,15 @@ struct OnboardingView: View {
 
     private func probeEngram() async {
         engramStatus = .checking
+        // Honor a user-supplied override first — covers custom venvs,
+        // mise/asdf shims, dev checkouts, anywhere the binary lives
+        // outside the usual pip-install locations.
+        let override = store.settings.engramPath
+        if !override.isEmpty, FileManager.default.isExecutableFile(atPath: override) {
+            engramPath = override
+            engramStatus = .installed
+            return
+        }
         // Common install locations for a pip-installed binary. We don't
         // shell out to `which` because that requires a login shell to pick
         // up the user's PATH — checking the likely paths directly is
@@ -593,6 +619,33 @@ struct OnboardingView: View {
             engramPath = nil
             engramStatus = .missing
         }
+    }
+
+    /// Open a file picker and let the user point Kiln at an `engram`
+    /// binary directly. Writes the pick into `settings.engramPath` so
+    /// the override survives across launches, then re-probes.
+    private func pickEngramPath() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use this binary"
+        panel.message = "Pick the engram executable. Usually named `engram` — inside a venv's bin/ or wherever you installed it."
+        panel.treatsFilePackagesAsDirectories = true
+        // Default to the home directory so users land somewhere sensible.
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.path
+        // Guard against picks that clearly aren't executables — saves a
+        // confusing "still missing" state after the user clicks through.
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            engramStatus = .missing
+            return
+        }
+        var s = store.settings
+        s.engramPath = path
+        store.settings = s
+        Task { await probeEngram() }
     }
 
     private func runForOutput(_ path: String, args: [String]) async -> String? {
