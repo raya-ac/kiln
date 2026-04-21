@@ -351,7 +351,14 @@ final class AppStore: ObservableObject {
         let now = Date()
         for i in sessions.indices where sessions[i].wasInterrupted {
             let lastActivity = sessions[i].messages.last?.timestamp ?? sessions[i].createdAt
-            if now.timeIntervalSince(lastActivity) > staleCutoff {
+            // Clear the flag when we're confident there's nothing to
+            // resume. Either the session has been quiet for hours (user
+            // moved on cleanly), or the last turn is from Claude — which
+            // means the assistant finished replying and we just missed
+            // clearing the flag on exit. Resume only makes sense when a
+            // user message is stranded without a reply.
+            let lastIsAssistant = sessions[i].messages.last?.role == .assistant
+            if now.timeIntervalSince(lastActivity) > staleCutoff || lastIsAssistant {
                 sessions[i].wasInterrupted = false
                 Persistence.saveSession(sessions[i])
             }
