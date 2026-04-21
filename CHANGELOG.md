@@ -4,6 +4,34 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.4.1] — 2026-04-21
+
+A follow-up patch — stability, session persistence, and the editor gets
+a wider vocabulary.
+
+### Added
+- **Syntax highlighting for a dozen more languages** — Zig, Nim, Odin,
+  Elm, Haskell, OCaml, Fortran, Nix, Makefile, CMake, Gleam, Crystal.
+  Monaco doesn't ship tokenizers for these, so Kiln now registers a
+  minimal Monarch grammar (keywords, strings, comments, numbers) at
+  editor init — enough to make the file read as code instead of a wall
+  of identical foreground bytes.
+
+### Fixed
+- **Active session persists across restarts** — the session you were
+  last working in is restored on launch instead of dropping back to a
+  fresh "New Session" pane.
+- **Claude CLI resume IDs persist** — the `claude --resume <id>` tie
+  now survives a quit, so continuing a conversation after reopening
+  Kiln actually continues, instead of starting a brand-new chat.
+- **Diff viewer for new files** — captures the pre-edit content before
+  the streaming Write clobbers it, so the left column shows the real
+  original instead of matching the right column.
+- **Diff viewer fills the pane** — no longer centered/squeezed into a
+  narrow column when the editor is wide.
+- **Interrupt banner** — stops falsely claiming a session was
+  interrupted after a clean restart.
+
 ## [1.4.0] — 2026-04-21
 
 A meaty milestone release — a batch of session-management and composer
