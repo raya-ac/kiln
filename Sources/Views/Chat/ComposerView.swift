@@ -1524,7 +1524,7 @@ struct ComposerToolbar: View {
     }
 }
 
-// MARK: - Model Pill with Claude Icon
+// MARK: - Model Pill with Provider Icon
 
 struct ModelPill: View {
     let model: ClaudeModel
@@ -1540,8 +1540,7 @@ struct ModelPill: View {
             store.setModel(model)
         } label: {
             HStack(spacing: 4) {
-                // Claude sparkle icon
-                ClaudeIcon(size: 10)
+                ModelProviderIcon(provider: model.provider, size: 10)
                     .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextTertiary)
                 Text(model.label)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -1574,14 +1573,21 @@ struct ModelPill: View {
     }
 }
 
-// MARK: - Claude Icon (sparkle shape)
+// MARK: - Provider Icon
 
-struct ClaudeIcon: View {
+struct ModelProviderIcon: View {
+    let provider: ModelProvider
     let size: CGFloat
 
     var body: some View {
-        Image(systemName: "sparkle")
-            .font(.system(size: size, weight: .semibold))
+        switch provider {
+        case .claude:
+            Image(systemName: "sparkle")
+                .font(.system(size: size, weight: .semibold))
+        case .codex:
+            Image(systemName: "terminal")
+                .font(.system(size: size, weight: .semibold))
+        }
     }
 }
 

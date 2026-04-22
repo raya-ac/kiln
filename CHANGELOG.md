@@ -4,6 +4,23 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.9.1] — 2026-04-22
+
+### Added
+- **Codex edit-event bridging.** Codex `file_change` events now get mapped
+  into Kiln's existing edit/tool runtime so changed files surface through
+  the same editor flow Claude already uses for auto-open, pending edit,
+  and diff/revert handling.
+
+### Changed
+- **Chat copy is more provider-neutral.** The main chat disclaimer now says
+  `Kiln can make mistakes. Please double-check responses.` instead of
+  claiming every session is Claude.
+- **Codex sessions look like Codex sessions.** Provider-specific avatar and
+  model icon treatment now show a terminal-style Codex mark instead of
+  reusing Claude branding in the chat UI and model pill.
+- **The remote control composer placeholder no longer says `Message Claude…`.**
+
 ## [1.9.0] — 2026-04-22
 
 ### Added

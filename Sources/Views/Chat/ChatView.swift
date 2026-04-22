@@ -419,7 +419,10 @@ struct MessageRow: View {
             HStack(alignment: .top, spacing: 12) {
                 // Avatar — can be hidden via settings
                 if store.settings.showAvatars {
-                    UserClaudeAvatar(isUser: isUser)
+                    UserClaudeAvatar(
+                        isUser: isUser,
+                        provider: store.activeSession?.model.provider ?? .claude
+                    )
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -761,31 +764,18 @@ struct LiveAssistantRow: View {
     @EnvironmentObject var store: AppStore
 
     private var assistantName: String {
-        store.activeSession?.model.assistantName ?? "Claude"
+        store.activeSession?.model.assistantName ?? "Assistant"
     }
 
-    private var showsClaudeMark: Bool {
-        store.activeSession?.model.provider != .codex
+    private var assistantProvider: ModelProvider {
+        store.activeSession?.model.provider ?? .claude
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 // Avatar
-                ZStack {
-                    Circle()
-                        .fill(Color.kilnAccentMuted)
-                        .frame(width: 26, height: 26)
-                    if showsClaudeMark {
-                        ClaudeMark()
-                            .foregroundStyle(Color.kilnAccent)
-                            .frame(width: 14, height: 14)
-                    } else {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.kilnAccent)
-                    }
-                }
+                AssistantAvatar(provider: assistantProvider)
 
                 VStack(alignment: .leading, spacing: 6) {
                     // Role label
@@ -1990,6 +1980,7 @@ struct ClaudeMark: View {
 
 struct UserClaudeAvatar: View {
     let isUser: Bool
+    let provider: ModelProvider
     @ObservedObject private var avatars: AvatarStore = .shared
 
     var body: some View {
@@ -2009,12 +2000,33 @@ struct UserClaudeAvatar: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.kilnTextSecondary)
             } else {
-                ClaudeMark()
-                    .foregroundStyle(Color.kilnAccent)
-                    .frame(width: 14, height: 14)
+                AssistantAvatar(provider: provider)
             }
         }
         .overlay(Circle().stroke(Color.kilnBorder, lineWidth: isUser && avatars.avatar != nil ? 1 : 0))
+    }
+}
+
+struct AssistantAvatar: View {
+    let provider: ModelProvider
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.kilnAccentMuted)
+                .frame(width: 26, height: 26)
+
+            switch provider {
+            case .claude:
+                ClaudeMark()
+                    .foregroundStyle(Color.kilnAccent)
+                    .frame(width: 14, height: 14)
+            case .codex:
+                Image(systemName: "terminal")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.kilnAccent)
+            }
+        }
     }
 }
 

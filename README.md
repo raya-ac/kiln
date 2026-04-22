@@ -26,16 +26,17 @@ It's still early. I use it every day; you might want to wait.
 
 - Sessions per project, code and chat split into two sidebars.
 - Command palette (⌘K), Quick Open (⌘P), global message search (⇧⌘F).
-- Built-in editor with inline Claude diffs (accept / revert), breadcrumbs,
-  and keyboard shortcuts.
+- Built-in editor with inline agent edit diffs (accept / revert),
+  breadcrumbs, and keyboard shortcuts.
 - Git-aware file tree — per-file status markers, directory roll-up, branch
   pill in the workdir header, "Show Diff vs HEAD" on any modified file,
-  and "Ask Claude About This File" right from the context menu.
-- Workdir activity chip above the composer — shows what Claude's tools
+  and "Ask About This File" right from the context menu.
+- Workdir activity chip above the composer — shows what the active agent's tools
   touched since HEAD, click a row for the diff. Event-driven, no polling.
-- Session keeps working when you move its workdir — the underlying Claude
+- Claude sessions keep working when you move their workdir — the underlying
   CLI conversation file is migrated into the new project dir so context
-  carries across the move.
+  carries across the move. Codex sessions currently start fresh after a
+  workdir change.
 - ~60 local slash commands for git, repo inspection, clipboard/export,
   and quick session ops — typed right in the composer.
 - Cmd+Opt+1..9 to jump to the Nth visible session in the current tab.
@@ -43,7 +44,7 @@ It's still early. I use it every day; you might want to wait.
   Chinese, French, Spanish, Japanese, Italian, Portuguese, Russian,
   Korean, Dutch, Hindi, Arabic, Polish, Turkish, Swedish.
 - Per-session Cloudflare tunnels for remote control from your phone.
-- Real approval dialogs, not terminal prompts.
+- Real approval dialogs for Claude sessions instead of terminal prompts.
 - Dock icon that live-tints to your accent color and follows dark mode.
 - Sparkle auto-updates.
 
@@ -61,8 +62,8 @@ open .build/release/Kiln
 That gets you the raw binary. To produce a real `Kiln.app` bundle (the kind Finder recognises, with auto-updates wired up):
 
 ```bash
-./scripts/make-app-bundle.sh 0.1.0 arm64      # Apple Silicon
-./scripts/make-app-bundle.sh 0.1.0 x86_64     # Intel
+./scripts/make-app-bundle.sh 1.9.1 arm64      # Apple Silicon
+./scripts/make-app-bundle.sh 1.9.1 x86_64     # Intel
 open dist/arm64/Kiln.app
 ```
 
@@ -70,7 +71,7 @@ Either works fine for trying it out.
 
 ## Releases & auto-updates
 
-Push a tag like `v0.1.0` and GitHub Actions will:
+Push a tag like `v1.9.1` and GitHub Actions will:
 
 1. Build separate Apple Silicon and Intel `.app` bundles.
 2. Code-sign and notarise them (if you've added the Apple secrets).
@@ -117,7 +118,7 @@ For Apple code-signing and notarisation (optional — leave blank and the workfl
 Sources/
   App/          entry point, AppDelegate
   Views/        SwiftUI views — sidebar, chat, settings
-  Services/     AppStore, Claude subprocess, remote control, tunnels, updater
+  Services/     AppStore, Claude/Codex backends, remote control, tunnels, updater
   Models/       domain types
 scripts/        make-app-bundle.sh + entitlements
 .github/        CI + release workflows
@@ -130,7 +131,7 @@ Common commands are wrapped in a `Makefile`:
 ```bash
 make           # lists everything
 make run       # debug build + open the binary
-make bundle VERSION=0.2.0 ARCH=arm64
+make bundle VERSION=1.9.1 ARCH=arm64
 make lint      # swift-format --lint
 make format    # swift-format --in-place
 make logo      # re-render the brand mark

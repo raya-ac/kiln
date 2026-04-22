@@ -1122,7 +1122,7 @@ final class RemoteControlServer: ObservableObject {
             <div class="composer-row">
               <button class="composer-attach" id="attachBtn" title="Attach files or images">📎</button>
               <input type="file" id="fileInput" multiple style="display:none">
-              <textarea class="composer-input" id="composerInput" rows="1" placeholder="Message Claude…"></textarea>
+              <textarea class="composer-input" id="composerInput" rows="1" placeholder="Message assistant…"></textarea>
               <button class="composer-send" id="sendBtn" title="Send">➤</button>
               <button class="composer-stop" id="stopBtn" title="Stop" style="display:none;">■</button>
             </div>

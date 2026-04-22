@@ -242,6 +242,9 @@ final class CodexService: ObservableObject {
                     .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                 return [.toolStart(id: id, name: "Bash", input: input)]
             }
+            if itemType == "file_change" {
+                return fileChangeEvents(from: item, completed: false)
+            }
             return []
 
         case "item.completed":
@@ -261,6 +264,8 @@ final class CodexService: ObservableObject {
                 let output = item["aggregated_output"] as? String ?? ""
                 let exitCode = item["exit_code"] as? Int ?? 0
                 return [.toolResult(toolUseId: id, content: output, isError: exitCode != 0)]
+            case "file_change":
+                return fileChangeEvents(from: item, completed: true)
             default:
                 return []
             }
@@ -277,5 +282,78 @@ final class CodexService: ObservableObject {
             return expanded
         }
         return NSHomeDirectory()
+    }
+
+    nonisolated private static func fileChangeEvents(from item: [String: Any], completed: Bool) -> [ClaudeEvent] {
+        guard let itemId = item["id"] as? String,
+              let changes = item["changes"] as? [[String: Any]],
+              !changes.isEmpty
+        else { return [] }
+
+        var events: [ClaudeEvent] = []
+        for (index, change) in changes.enumerated() {
+            let path = change["path"] as? String ?? ""
+            let kind = change["kind"] as? String ?? "modify"
+            let toolId = "\(itemId):\(index)"
+            let toolName = toolName(for: kind)
+            let input = fileChangeInput(path: path, kind: kind, metadata: change)
+
+            events.append(.toolStart(id: toolId, name: toolName, input: input))
+            if completed {
+                events.append(.toolResult(
+                    toolUseId: toolId,
+                    content: fileChangeResultSummary(path: path, kind: kind),
+                    isError: false
+                ))
+            }
+        }
+        return events
+    }
+
+    nonisolated private static func toolName(for changeKind: String) -> String {
+        switch changeKind {
+        case "add":
+            return "Write"
+        case "delete", "remove":
+            return "Edit"
+        case "rename", "move":
+            return "MultiEdit"
+        default:
+            return "Edit"
+        }
+    }
+
+    nonisolated private static func fileChangeInput(path: String, kind: String, metadata: [String: Any]) -> String {
+        var payload: [String: Any] = [
+            "file_path": path,
+            "path": path,
+            "kind": kind,
+        ]
+
+        for key in ["old_path", "previous_path", "from_path", "to_path", "new_path"] {
+            if let value = metadata[key] {
+                payload[key] = value
+            }
+        }
+
+        if let json = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+           let string = String(data: json, encoding: .utf8) {
+            return string
+        }
+        return #"{"file_path":"","kind":"modify"}"#
+    }
+
+    nonisolated private static func fileChangeResultSummary(path: String, kind: String) -> String {
+        let filename = path.isEmpty ? "file" : URL(fileURLWithPath: path).lastPathComponent
+        switch kind {
+        case "add":
+            return "Created \(filename)"
+        case "delete", "remove":
+            return "Deleted \(filename)"
+        case "rename", "move":
+            return "Renamed \(filename)"
+        default:
+            return "Updated \(filename)"
+        }
     }
 }
