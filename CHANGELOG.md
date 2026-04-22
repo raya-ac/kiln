@@ -4,6 +4,19 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.9.2] — 2026-04-22
+
+### Changed
+- **Codex sessions now respect Kiln's `Ask` permission mode more honestly.**
+  Kiln passes Codex's own `on-request` approval policy through instead of
+  silently treating most Codex sessions like bypass mode.
+- **Codex resume no longer flips into `--full-auto` for plan sessions.**
+  That behavior was backwards and could turn a read-only planning session
+  into a more permissive execution mode after resume.
+- **Codex `Deny` sessions now get an explicit no-tools instruction.**
+  Read-only sandboxing was already in place, but the prompt now also tells
+  Codex not to run shell commands or modify files.
+
 ## [1.9.1] — 2026-04-22
 
 ### Added

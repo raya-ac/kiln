@@ -45,13 +45,12 @@ final class CodexService: ObservableObject {
         if codexPath == "/usr/bin/env" {
             args.append("codex")
         }
+        args += Self.approvalArgs(for: options)
 
         if let threadId = threadIds[sessionId] {
             args += ["exec", "resume", "--json", threadId, "-m", model.rawValue, "-"]
             if options.permissions == .bypass {
                 args.append("--dangerously-bypass-approvals-and-sandbox")
-            } else if options.mode == .plan {
-                args.append("--full-auto")
             }
         } else {
             args += ["exec", "--json", "--skip-git-repo-check", "--model", model.rawValue, "--cd", resolvedDir, "-"]
@@ -189,6 +188,8 @@ final class CodexService: ObservableObject {
         var parts: [String] = []
         if options.chatMode {
             parts.append("You are in chat-only mode. Do not modify files or run shell commands unless the user explicitly asks. Prefer plain text answers.")
+        } else if options.permissions == .deny {
+            parts.append("You are in no-tools mode. Do not modify files or run shell commands. Read and respond with text only.")
         } else if options.mode == .plan {
             parts.append("You are in planning mode. Inspect and explain, but do not make filesystem changes.")
         }
@@ -197,6 +198,15 @@ final class CodexService: ObservableObject {
         }
         parts.append(message)
         return parts.joined(separator: "\n\n")
+    }
+
+    nonisolated private static func approvalArgs(for options: SendOptions) -> [String] {
+        switch options.permissions {
+        case .ask:
+            return ["-a", "on-request"]
+        default:
+            return []
+        }
     }
 
     nonisolated private static func sandboxMode(for options: SendOptions) -> String {
