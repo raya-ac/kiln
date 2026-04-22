@@ -4,7 +4,7 @@
 
 <h1 align="center">Kiln</h1>
 
-<p align="center">A native Mac app for agent CLIs like <a href="https://claude.com/claude-code">Claude Code</a> and Codex.</p>
+<p align="center">A native Mac app for agent CLIs like <a href="https://claude.com/claude-code">Claude Code</a> and <a href="https://developers.openai.com/codex/cli">Codex</a>.</p>
 
 <p align="center">
   <a href="https://github.com/raya-ac/kiln/actions/workflows/ci.yml"><img src="https://github.com/raya-ac/kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
