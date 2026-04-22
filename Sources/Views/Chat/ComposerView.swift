@@ -1566,6 +1566,10 @@ struct ModelPill: View {
         case .opus47: Color(hex: 0xD97706)   // deep amber
         case .sonnet46: Color.kilnAccent
         case .haiku45: Color(hex: 0x8B8B8E)  // muted gray
+        case .gpt54: Color(hex: 0x2563EB)    // blue
+        case .gpt54Mini: Color(hex: 0x0EA5E9) // sky
+        case .gpt52: Color(hex: 0x14B8A6)    // teal
+        case .gpt53CodexSpark: Color(hex: 0x7C3AED) // violet
         }
     }
 }

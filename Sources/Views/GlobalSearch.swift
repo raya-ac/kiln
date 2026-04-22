@@ -128,7 +128,7 @@ struct GlobalSearchView: View {
                         .foregroundStyle(Color.kilnText)
                     Text("·")
                         .foregroundStyle(Color.kilnTextTertiary)
-                    Text(r.role == .user ? "You" : "Claude")
+                    Text(r.role == .user ? "You" : (store.sessions.first(where: { $0.id == r.sessionId })?.model.assistantName ?? "Assistant"))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(r.role == .user ? Color.kilnTextSecondary : Color.kilnAccent)
                     Text("·")

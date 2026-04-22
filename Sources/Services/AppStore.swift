@@ -384,6 +384,7 @@ final class AppStore: ObservableObject {
     // MARK: - Services
 
     let claude = ClaudeService()
+    let codex = CodexService()
     let wardenTunnels = WardenTunnelService()
     lazy var remoteServer: RemoteControlServer = RemoteControlServer(store: self)
 
@@ -675,7 +676,15 @@ final class AppStore: ObservableObject {
     }
 
     func deleteSession(_ id: String) {
-        claude.kill(sessionId: id)
+        if let session = sessions.first(where: { $0.id == id }) {
+            switch session.model.provider {
+            case .claude:
+                claude.kill(sessionId: id)
+            case .codex:
+                codex.kill(sessionId: id)
+                codex.forgetThread(for: id)
+            }
+        }
         sessions.removeAll { $0.id == id }
         if activeSessionId == id {
             activeSessionId = sessions.first?.id
@@ -785,18 +794,20 @@ final class AppStore: ObservableObject {
     func setWorkDir(_ id: String, workDir: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         let old = sessions[idx]
-        // Workdir changed? Claude Code stores sessions per-workdir-hash
-        // under `~/.claude/projects/<dashed-abs-path>/<cliId>.jsonl`, so a
-        // resume-id created in workdir A cannot be resolved from workdir B
-        // — `claude --resume` errors with "No conversation found". Migrate
-        // the session file across project dirs so the conversation keeps
-        // working after the move. Also kill any live process; you can't
-        // chdir mid-run.
         if old.workDir != workDir {
-            // migrateCLISession terminates any live subprocess + waits for
-            // exit before copying, so we don't need a separate kill here —
-            // doing both would double-signal the process.
-            claude.migrateCLISession(for: id, from: old.workDir, to: workDir)
+            switch old.model.provider {
+            case .claude:
+                // Claude CLI stores sessions per-workdir-hash under
+                // ~/.claude/projects/, so move the transcript when the
+                // workdir changes.
+                claude.migrateCLISession(for: id, from: old.workDir, to: workDir)
+            case .codex:
+                // Codex resume threads are global, but resume doesn't offer
+                // an explicit --cd override. Drop the thread mapping when the
+                // workdir changes so the next send starts fresh in the new dir.
+                codex.kill(sessionId: id)
+                codex.forgetThread(for: id)
+            }
         }
         var fresh = Session(
             id: old.id,
@@ -1032,7 +1043,7 @@ final class AppStore: ObservableObject {
         md += "**Date:** \(session.createdAt.formatted())\n\n---\n\n"
 
         for msg in session.messages {
-            let role = msg.role == .user ? "**You**" : "**Claude**"
+            let role = msg.role == .user ? "**You**" : "**\(session.model.assistantName)**"
             md += "\(role)\n\n"
             for block in msg.blocks {
                 switch block {
@@ -1310,7 +1321,7 @@ final class AppStore: ObservableObject {
         Read this chat excerpt and reply with a terse 3–5 word title capturing the session's actual subject. No quotes, no punctuation at the end, no "Session about …" preamble. Just the title.
 
         \(excerpt)
-        """, workDir: sessions[idx].workDir)
+        """, workDir: sessions[idx].workDir, model: sessions[idx].model)
         guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return }
         renameSession(sessionId, name: String(title.prefix(60)))
     }
@@ -1318,26 +1329,63 @@ final class AppStore: ObservableObject {
     /// Run `claude --print` once and return the full response text. Used
     /// for short helper calls (titling, etc.) that shouldn't clutter a
     /// real session.
-    nonisolated static func oneShotAsk(prompt: String, workDir: String) async -> String? {
+    nonisolated static func oneShotAsk(prompt: String, workDir: String, model: ClaudeModel) async -> String? {
         await Task.detached { () -> String? in
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            proc.arguments = ["claude", "--print", "--output-format", "text"]
-            proc.currentDirectoryURL = URL(fileURLWithPath: workDir)
-            let stdin = Pipe()
-            let stdout = Pipe()
-            proc.standardInput = stdin
-            proc.standardOutput = stdout
-            proc.standardError = Pipe()
-            do {
-                try proc.run()
-                stdin.fileHandleForWriting.write(prompt.data(using: .utf8) ?? Data())
-                try? stdin.fileHandleForWriting.close()
-                let data = stdout.fileHandleForReading.readDataToEndOfFile()
-                proc.waitUntilExit()
-                return String(data: data, encoding: .utf8)
-            } catch {
-                return nil
+            switch model.provider {
+            case .claude:
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                proc.arguments = ["claude", "--print", "--output-format", "text"]
+                proc.currentDirectoryURL = URL(fileURLWithPath: workDir)
+                let stdin = Pipe()
+                let stdout = Pipe()
+                proc.standardInput = stdin
+                proc.standardOutput = stdout
+                proc.standardError = Pipe()
+                do {
+                    try proc.run()
+                    stdin.fileHandleForWriting.write(prompt.data(using: .utf8) ?? Data())
+                    try? stdin.fileHandleForWriting.close()
+                    let data = stdout.fileHandleForReading.readDataToEndOfFile()
+                    proc.waitUntilExit()
+                    return String(data: data, encoding: .utf8)
+                } catch {
+                    return nil
+                }
+            case .codex:
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                proc.arguments = [
+                    "codex", "exec", "--json", "--skip-git-repo-check",
+                    "--sandbox", "read-only", "--model", model.rawValue, "-",
+                ]
+                proc.currentDirectoryURL = URL(fileURLWithPath: workDir)
+                let stdin = Pipe()
+                let stdout = Pipe()
+                proc.standardInput = stdin
+                proc.standardOutput = stdout
+                proc.standardError = Pipe()
+                do {
+                    try proc.run()
+                    stdin.fileHandleForWriting.write(prompt.data(using: .utf8) ?? Data())
+                    try? stdin.fileHandleForWriting.close()
+                    let data = stdout.fileHandleForReading.readDataToEndOfFile()
+                    proc.waitUntilExit()
+                    guard let out = String(data: data, encoding: .utf8) else { return nil }
+                    let lines = out.split(separator: "\n")
+                    let texts = lines.compactMap { line -> String? in
+                        guard let data = line.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              json["type"] as? String == "item.completed",
+                              let item = json["item"] as? [String: Any],
+                              item["type"] as? String == "agent_message"
+                        else { return nil }
+                        return item["text"] as? String
+                    }
+                    return texts.joined(separator: "\n\n")
+                } catch {
+                    return nil
+                }
             }
         }.value
     }
@@ -1479,15 +1527,29 @@ final class AppStore: ObservableObject {
         // explicit interrupt path, and rely on the launch-time sweep to
         // keep the UI quiet.)
 
-        await claude.sendMessage(
-            sessionId: sessionId,
-            message: expanded,
-            model: model,
-            workDir: workDir,
-            options: options
-        ) { [weak self] event in
-            guard let self else { return }
-            self.handleClaudeEvent(event, sessionId: sessionId)
+        switch model.provider {
+        case .claude:
+            await claude.sendMessage(
+                sessionId: sessionId,
+                message: expanded,
+                model: model,
+                workDir: workDir,
+                options: options
+            ) { [weak self] event in
+                guard let self else { return }
+                self.handleClaudeEvent(event, sessionId: sessionId)
+            }
+        case .codex:
+            await codex.sendMessage(
+                sessionId: sessionId,
+                message: expanded,
+                model: model,
+                workDir: workDir,
+                options: options
+            ) { [weak self] event in
+                guard let self else { return }
+                self.handleClaudeEvent(event, sessionId: sessionId)
+            }
         }
     }
 
@@ -1679,7 +1741,13 @@ final class AppStore: ObservableObject {
         // Prefer the session that's actually generating; fall back to active.
         let id = generatingSessionId ?? activeSessionId
         guard let id = id else { return }
-        claude.interrupt(sessionId: id)
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        switch session.model.provider {
+        case .claude:
+            claude.interrupt(sessionId: id)
+        case .codex:
+            codex.interrupt(sessionId: id)
+        }
     }
 
     private func handleClaudeEvent(_ event: ClaudeEvent, sessionId: String) {

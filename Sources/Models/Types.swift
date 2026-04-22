@@ -2,14 +2,37 @@ import AppKit
 import Foundation
 import SwiftUI
 
-// MARK: - Claude Models
+// MARK: - Models
+
+enum ModelProvider: String, Sendable, Codable {
+    case claude
+    case codex
+
+    var assistantName: String {
+        switch self {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        }
+    }
+}
 
 enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     case opus47 = "claude-opus-4-7"
     case sonnet46 = "claude-sonnet-4-6"
     case haiku45 = "claude-haiku-4-5-20251001"
+    case gpt54 = "gpt-5.4"
+    case gpt54Mini = "gpt-5.4-mini"
+    case gpt52 = "gpt-5.2"
+    case gpt53CodexSpark = "gpt-5.3-codex-spark"
 
     var id: String { rawValue }
+
+    var provider: ModelProvider {
+        switch self {
+        case .opus47, .sonnet46, .haiku45: .claude
+        case .gpt54, .gpt54Mini, .gpt52, .gpt53CodexSpark: .codex
+        }
+    }
 
     /// Full CLI model ID (same as rawValue)
     var fullId: String { rawValue }
@@ -19,6 +42,10 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Opus 4.7"
         case .sonnet46: "Sonnet 4.6"
         case .haiku45: "Haiku 4.5"
+        case .gpt54: "GPT-5.4"
+        case .gpt54Mini: "GPT-5.4 Mini"
+        case .gpt52: "GPT-5.2"
+        case .gpt53CodexSpark: "Codex Spark"
         }
     }
 
@@ -27,6 +54,10 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Opus"
         case .sonnet46: "Sonnet"
         case .haiku45: "Haiku"
+        case .gpt54: "5.4"
+        case .gpt54Mini: "5.4 Mini"
+        case .gpt52: "5.2"
+        case .gpt53CodexSpark: "Spark"
         }
     }
 
@@ -35,8 +66,14 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Flagship"
         case .sonnet46: "Balanced"
         case .haiku45: "Fast"
+        case .gpt54: "Frontier"
+        case .gpt54Mini: "Efficient"
+        case .gpt52: "Balanced"
+        case .gpt53CodexSpark: "Fast"
         }
     }
+
+    var assistantName: String { provider.assistantName }
 
     /// Standard context window in tokens
     var contextWindow: Int {
@@ -44,6 +81,10 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: 200_000
         case .sonnet46: 200_000
         case .haiku45: 200_000
+        case .gpt54: 272_000
+        case .gpt54Mini: 272_000
+        case .gpt52: 272_000
+        case .gpt53CodexSpark: 128_000
         }
     }
 
@@ -51,12 +92,29 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     var extendedContextWindow: Int? {
         switch self {
         case .opus47, .sonnet46: 1_000_000
+        case .gpt54: 1_000_000
         default: nil
         }
     }
 
     var supportsExtendedContext: Bool {
         extendedContextWindow != nil
+    }
+
+    static var groupedByProvider: [(provider: ModelProvider, models: [ClaudeModel])] {
+        [
+            (.claude, allCases.filter { $0.provider == .claude }),
+            (.codex, allCases.filter { $0.provider == .codex }),
+        ]
+    }
+}
+
+extension ModelProvider {
+    var label: String {
+        switch self {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        }
     }
 }
 

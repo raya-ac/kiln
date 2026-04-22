@@ -112,19 +112,26 @@ struct ChatView: View {
                     // Click model pill to switch mid-session. Current model
                     // gets a checkmark; others are one-click swaps.
                     Menu {
-                        ForEach(ClaudeModel.allCases) { m in
-                            Button {
-                                store.setModel(m)
-                            } label: {
-                                if m == session.model {
-                                    Label(m.label, systemImage: "checkmark")
-                                } else {
-                                    Text(m.label + " — " + m.fullId)
+                        ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
+                            Section(group.provider.label) {
+                                ForEach(group.models) { m in
+                                    Button {
+                                        store.setModel(m)
+                                    } label: {
+                                        if m == session.model {
+                                            Label(m.label, systemImage: "checkmark")
+                                        } else {
+                                            Text(m.label + " — " + m.fullId)
+                                        }
+                                    }
                                 }
                             }
                         }
                     } label: {
                         HStack(spacing: 3) {
+                            Text(session.model.provider.label)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color.kilnTextSecondary)
                             Text(session.model.shortLabel)
                                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             Image(systemName: "chevron.down")
@@ -403,6 +410,10 @@ struct MessageRow: View {
         }
     }
 
+    private var assistantName: String {
+        store.activeSession?.model.assistantName ?? "Claude"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
@@ -414,7 +425,7 @@ struct MessageRow: View {
                 VStack(alignment: .leading, spacing: 6) {
                     // Role label
                     HStack(spacing: 6) {
-                        Text(isUser ? userLabel : "Claude")
+                        Text(isUser ? userLabel : assistantName)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(isUser ? Color.kilnTextSecondary : Color.kilnAccent)
 
@@ -749,6 +760,14 @@ extension MarkdownUI.Theme {
 struct LiveAssistantRow: View {
     @EnvironmentObject var store: AppStore
 
+    private var assistantName: String {
+        store.activeSession?.model.assistantName ?? "Claude"
+    }
+
+    private var showsClaudeMark: Bool {
+        store.activeSession?.model.provider != .codex
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
@@ -757,14 +776,20 @@ struct LiveAssistantRow: View {
                     Circle()
                         .fill(Color.kilnAccentMuted)
                         .frame(width: 26, height: 26)
-                    ClaudeMark()
-                        .foregroundStyle(Color.kilnAccent)
-                        .frame(width: 14, height: 14)
+                    if showsClaudeMark {
+                        ClaudeMark()
+                            .foregroundStyle(Color.kilnAccent)
+                            .frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.kilnAccent)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
                     // Role label
-                    Text("Claude")
+                    Text(assistantName)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.kilnAccent)
 
@@ -1403,7 +1428,7 @@ struct PinnedMessagesStrip: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Text(msg.role == .user ? "You" : "Claude")
+                Text(msg.role == .user ? "You" : (store.activeSession?.model.assistantName ?? "Claude"))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(msg.role == .user ? Color.kilnTextSecondary : Color.kilnAccent)
                     .frame(width: 38, alignment: .leading)
@@ -1796,7 +1821,7 @@ struct ResumeInterruptedBanner: View {
                 Text("This session was interrupted")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
-                Text("Claude didn't finish the previous message. Resume to retry the last prompt, or dismiss to continue fresh.")
+                Text("\((store.activeSession?.model.assistantName ?? "Claude")) didn't finish the previous message. Resume to retry the last prompt, or dismiss to continue fresh.")
                     .font(.system(size: 11))
                     .foregroundStyle(Color.kilnTextSecondary)
             }

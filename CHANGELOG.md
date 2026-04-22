@@ -4,6 +4,41 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.9.0] — 2026-04-22
+
+### Added
+- **Codex CLI backend.** Kiln can now run Codex-backed sessions alongside
+  the existing Claude ones instead of pretending every session is the same
+  subprocess under the hood. Codex sessions use `codex exec --json`,
+  persist their thread IDs for resume, and surface command executions in
+  the same activity/timeline model Kiln already uses for tool calls.
+- **Codex models in the picker.** `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.2`,
+  and `gpt-5.3-codex-spark` are available anywhere Kiln chooses a model:
+  defaults, new-session creation, template editing, and in-session model
+  switching.
+- **Provider-grouped model menus.** Model pickers now separate Claude and
+  Codex into distinct sections instead of dumping every model into one flat
+  row. It reads better, and it stops the UI from feeling like a pile of
+  raw IDs once both backends exist.
+
+### Changed
+- **The app no longer overclaims that it is Claude-only.** The onboarding
+  flow, stats hero copy, notifications, search results, markdown export,
+  and key chat labels now use the active provider where it matters, and
+  more neutral wording where it doesn't.
+- **Workdir changes on Codex sessions now reset the saved thread mapping.**
+  Claude transcripts can be migrated between workdirs because the resume
+  files are path-scoped on disk. Codex resume threads are global, but the
+  non-interactive resume flow doesn't expose a clean way to rebind cwd, so
+  Kiln drops the mapping and starts fresh in the new directory instead of
+  resuming under the wrong root.
+
+### Notes
+- **This is a first Codex pass, not full parity.** Codex `exec --json`
+  doesn't stream token deltas the same way Claude does, so live text
+  updates are coarser. Claude's PreToolUse approval flow also hasn't been
+  ported across yet.
+
 ## [1.8.4] — 2026-04-21
 
 ### Fixed

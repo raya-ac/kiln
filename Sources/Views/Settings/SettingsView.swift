@@ -99,23 +99,32 @@ struct SettingsView: View {
                         // Default model
                         SettingsRow(label: store.settings.language.ui.modelLabel) {
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 2) {
-                                    ForEach(ClaudeModel.allCases) { model in
-                                        let selected = store.settings.defaultModel == model
-                                        Button {
-                                            store.settings.defaultModel = model
-                                            store.saveSettings()
-                                        } label: {
-                                            Text(model.label)
-                                                .font(.system(size: 11, weight: .medium))
-                                                .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 5)
-                                                .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(group.provider.label)
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(Color.kilnTextTertiary)
+                                            HStack(spacing: 2) {
+                                                ForEach(group.models) { model in
+                                                    let selected = store.settings.defaultModel == model
+                                                    Button {
+                                                        store.settings.defaultModel = model
+                                                        store.saveSettings()
+                                                    } label: {
+                                                        Text(model.label)
+                                                            .font(.system(size: 11, weight: .medium))
+                                                            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                                            .padding(.horizontal, 12)
+                                                            .padding(.vertical, 5)
+                                                            .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .help(model.fullId)
+                                                }
+                                            }
                                         }
-                                        .buttonStyle(.plain)
-                                        .help(model.fullId)
                                     }
                                 }
                                 Text(store.settings.defaultModel.fullId)

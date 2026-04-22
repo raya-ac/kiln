@@ -4,7 +4,7 @@
 
 <h1 align="center">Kiln</h1>
 
-<p align="center">A native Mac app for <a href="https://claude.com/claude-code">Claude Code</a>.</p>
+<p align="center">A native Mac app for agent CLIs like <a href="https://claude.com/claude-code">Claude Code</a> and Codex.</p>
 
 <p align="center">
   <a href="https://github.com/raya-ac/kiln/actions/workflows/ci.yml"><img src="https://github.com/raya-ac/kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -14,11 +14,11 @@
   <img src="https://img.shields.io/badge/Swift-6.0-orange?logo=swift&logoColor=white" alt="Swift 6.0">
 </p>
 
-Kiln runs Claude Code as a proper desktop app instead of another terminal tab. Sessions live in a sidebar, approvals pop up as real dialogs, and the whole thing feels like the rest of your Mac. Built in SwiftUI. macOS 14 or later, Apple Silicon or Intel.
+Kiln runs agent CLIs as a proper desktop app instead of another terminal tab. Sessions live in a sidebar, approvals pop up as real dialogs, and the whole thing feels like the rest of your Mac. Built in SwiftUI. macOS 14 or later, Apple Silicon or Intel.
 
 ## Why
 
-I wanted the feel of a native editor — command palette, keyboard shortcuts, a sidebar — without giving up Claude Code's terminal-native workflow underneath. So Kiln wraps the CLI, keeps a session per project, and adds the stuff that's awkward to do in a terminal: per-session tunnels, remote control from another device, real video/image previews, clean export.
+I wanted the feel of a native editor — command palette, keyboard shortcuts, a sidebar — without giving up the CLI workflow underneath. So Kiln wraps the agent CLI, keeps a session per project, and adds the stuff that's awkward to do in a terminal: per-session tunnels, remote control from another device, real video/image previews, clean export.
 
 It's still early. I use it every day; you might want to wait.
 

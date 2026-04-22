@@ -350,6 +350,7 @@ struct ContentView: View {
             if wasBusy && !isBusy && store.settings.notifyOnCompletion {
                 CompletionNotifier.shared.notifyIfUnfocused(
                     sessionName: store.activeSession?.name ?? "Session",
+                    assistantName: store.activeSession?.model.assistantName ?? "Assistant",
                     playSound: store.settings.notifySound
                 )
             }
@@ -824,26 +825,36 @@ struct NewSessionSheet: View {
                     .foregroundStyle(Color.kilnTextTertiary)
                     .tracking(1)
                 VStack(spacing: 4) {
-                    HStack(spacing: 2) {
-                        ForEach(ClaudeModel.allCases) { m in
-                            Button {
-                                model = m
-                            } label: {
-                                VStack(spacing: 1) {
-                                    Text(m.label)
-                                        .font(.system(size: 12, weight: .medium))
-                                    Text(m.tier)
-                                        .font(.system(size: 9, weight: .regular))
-                                        .foregroundStyle(model == m ? Color.kilnBg.opacity(0.7) : Color.kilnTextTertiary)
+                    VStack(spacing: 6) {
+                        ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(group.provider.label)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Color.kilnTextTertiary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack(spacing: 2) {
+                                    ForEach(group.models) { m in
+                                        Button {
+                                            model = m
+                                        } label: {
+                                            VStack(spacing: 1) {
+                                                Text(m.label)
+                                                    .font(.system(size: 12, weight: .medium))
+                                                Text(m.tier)
+                                                    .font(.system(size: 9, weight: .regular))
+                                                    .foregroundStyle(model == m ? Color.kilnBg.opacity(0.7) : Color.kilnTextTertiary)
+                                            }
+                                            .foregroundStyle(model == m ? Color.kilnBg : Color.kilnTextSecondary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(model == m ? Color.kilnAccent : Color.kilnSurface)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help(m.fullId)
+                                    }
                                 }
-                                .foregroundStyle(model == m ? Color.kilnBg : Color.kilnTextSecondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(model == m ? Color.kilnAccent : Color.kilnSurface)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
-                            .buttonStyle(.plain)
-                            .help(m.fullId)
                         }
                     }
                     .padding(3)
@@ -1176,11 +1187,11 @@ final class CompletionNotifier {
         }
     }
 
-    func notifyIfUnfocused(sessionName: String, playSound: Bool = true) {
+    func notifyIfUnfocused(sessionName: String, assistantName: String = "Assistant", playSound: Bool = true) {
         guard usable, authorized else { return }
         if NSApp.isActive { return }
         let content = UNMutableNotificationContent()
-        content.title = "Claude is done"
+        content.title = "\(assistantName) is done"
         content.body = sessionName
         if playSound { content.sound = .default }
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

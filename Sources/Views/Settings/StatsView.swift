@@ -12,7 +12,7 @@ struct StatsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 // Hero: total time chatted
                 HeroStatCard(
-                    title: "Time with Claude",
+                    title: "Time in Kiln",
                     value: stats.formattedTotalHours,
                     subtitle: stats.totalSessions == 0 ? "no sessions yet" : "\(stats.totalSessions) sessions, \(stats.totalMessages) messages",
                     icon: "clock.fill",

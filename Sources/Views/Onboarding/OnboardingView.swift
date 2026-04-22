@@ -113,7 +113,7 @@ struct OnboardingView: View {
                     Text("Welcome to Kiln")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Color.kilnText)
-                    Text("A native macOS front-end for Claude Code.")
+                    Text("A native macOS front-end for agent CLIs.")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }
@@ -121,10 +121,10 @@ struct OnboardingView: View {
             .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 10) {
-                bullet("Chat with Claude across multiple sessions, each with its own working directory.")
-                bullet("Watch Claude edit files live in a built-in Monaco editor.")
+                bullet("Run multiple coding sessions side by side, each with its own working directory.")
+                bullet("Watch the active agent edit files live in a built-in Monaco editor.")
                 bullet("Git, terminal, tunnel, and activity panels alongside every session.")
-                bullet("Everything runs locally — your Claude API key and files never leave the machine.")
+                bullet("Everything runs locally — your files stay on the machine.")
             }
             .padding(.top, 4)
         }
@@ -132,11 +132,11 @@ struct OnboardingView: View {
 
     private var installPane: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Claude Code")
+            Text("CLI Backends")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Kiln drives Anthropic's `claude` CLI under the hood.")
+            Text("Kiln can drive `claude` and `codex` from a native macOS shell around them.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
 
@@ -184,12 +184,12 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Claude Code handles its own authentication. Run it once in a Terminal and follow the browser prompt — Kiln inherits the session from there.")
+            Text("Claude and Codex each handle their own authentication. Run the CLI you want once in Terminal, complete login there, and Kiln will inherit that session.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            CopyableCommand(command: "claude")
+            CopyableCommand(command: "claude   # or codex login")
 
             Button("Open Terminal") { openTerminal() }
                 .buttonStyle(.plain)
@@ -212,7 +212,7 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Engram is an optional memory layer for Claude. Off by default — skip this unless you specifically want persistent recall across sessions.")
+            Text("Engram is an optional memory layer for the agent backends Kiln runs. Off by default — skip it unless you actually want persistent recall across sessions.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -222,12 +222,12 @@ struct OnboardingView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
                 engramBullet(
-                    "Stores things Claude learns",
-                    "Each session Claude picks up facts about your code, your preferences, decisions you made, errors you hit. Normally that context evaporates when the session ends. Engram keeps it on disk as `memories` — small structured notes with content, tags, and timestamps."
+                    "Stores things the agent learns",
+                    "Each session picks up facts about your code, your preferences, decisions you made, and mistakes you hit. Normally that context disappears when the session ends. Engram keeps it on disk as `memories` — small structured notes with content, tags, and timestamps."
                 )
                 engramBullet(
                     "Recalls them later with hybrid search",
-                    "Next time you ask something, Claude can query engram and get back relevant prior memories. It uses five channels in parallel: HNSW vector search, BM25 keyword match, graph traversal over entity links, a Hopfield associative network, and a trained cross-encoder reranker on top. Fast (~20ms) and scales to ~1M memories."
+                    "Next time you ask something, the agent can query engram and pull back relevant prior memories. It uses five channels in parallel: HNSW vector search, BM25 keyword match, graph traversal over entity links, a Hopfield associative network, and a trained cross-encoder reranker on top. Fast (~20ms) and scales to ~1M memories."
                 )
                 engramBullet(
                     "Builds an entity graph",
@@ -250,7 +250,7 @@ struct OnboardingView: View {
                 Text("Trade-offs")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
-                Text("Claude will spend tokens querying memory at the start of turns and writing memories at the end. For casual use that's waste. For long-running projects where context compounds, it's the whole point.")
+                Text("The active agent will spend tokens querying memory at the start of turns and writing memories at the end. For casual use that can feel wasteful. For long-running projects where context compounds, it's the point.")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.kilnTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
