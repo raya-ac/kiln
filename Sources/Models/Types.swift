@@ -34,6 +34,18 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         }
     }
 
+    var brand: ModelBrand {
+        switch self {
+        case .opus47, .sonnet46, .haiku45: .claude
+        case .gpt54, .gpt54Mini, .gpt52: .chatgpt
+        case .gpt53CodexSpark: .codex
+        }
+    }
+
+    var supportsOpenAIFastMode: Bool {
+        self == .gpt54
+    }
+
     /// Full CLI model ID (same as rawValue)
     var fullId: String { rawValue }
 
@@ -116,6 +128,12 @@ extension ModelProvider {
         case .codex: "Codex"
         }
     }
+}
+
+enum ModelBrand: Sendable {
+    case claude
+    case chatgpt
+    case codex
 }
 
 // MARK: - Session Kind (Code vs Chat)
@@ -207,6 +225,7 @@ struct SendOptions: Sendable {
     var chatMode: Bool = false     // disables all tools, pure chat
     var thinkingEnabled: Bool = false // prepend think keyword + pass effort
     var effortLevel: EffortLevel? = nil // --effort <level>
+    var openAIFastMode: Bool = false
     // PreToolUse hook target. Only used when permissions == .ask. The hook
     // script reads both from env vars at invocation time and POSTs tool
     // calls to http://127.0.0.1:<hookPort>/api/hooks/pretooluse with the
@@ -388,6 +407,9 @@ struct Session: Identifiable, Sendable {
     /// the next launch, we know the previous run was interrupted (app crash,
     /// `claude` crash, force-quit) and can offer a retry.
     var wasInterrupted: Bool = false
+    /// Codex fast mode for ChatGPT-backed GPT-5.4 sessions. This maps to
+    /// Codex's own fast service tier rather than changing models.
+    var openAIFastMode: Bool = false
     /// Free-form cross-cutting tags. Lower-cased, deduped on write.
     var tags: [String] = []
     /// Local dev-server port to expose via warden tunnel when the session's
@@ -401,7 +423,7 @@ struct Session: Identifiable, Sendable {
     /// as a small dot next to the session name in the sidebar.
     var colorLabel: String? = nil
 
-    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .sonnet46, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .sonnet46, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
         self.id = id
         self.workDir = workDir
         self.name = name
@@ -419,6 +441,7 @@ struct Session: Identifiable, Sendable {
         self.tunnelPort = tunnelPort
         self.tunnelSub = tunnelSub
         self.colorLabel = colorLabel
+        self.openAIFastMode = openAIFastMode
     }
 }
 
@@ -529,8 +552,8 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
         case .de:
             var s = UIStrings(
                 newSession: "Neue Sitzung", settings: "Einstellungen", noSessions: "Keine Sitzungen",
-                messagePlaceholder: "Nachricht an Claude…", thinking: "Denkt nach…", working: "arbeitet…",
-                writing: "schreibt…", disclaimer: "Kiln verwendet Claude und kann Fehler machen. Bitte überprüfen Sie die Antworten.",
+                messagePlaceholder: "Nachricht an den Assistenten…", thinking: "Denkt nach…", working: "arbeitet…",
+                writing: "schreibt…", disclaimer: "Kiln kann Fehler machen. Bitte überprüfen Sie die Antworten.",
                 learnMore: "Mehr erfahren", send: "Senden", stop: "Stopp", selectFile: "Datei auswählen",
                 files: "Dateien", git: "Git", terminal: "Terminal", delete: "Löschen", cancel: "Abbrechen",
                 rename: "Umbenennen", pin: "Anheften", unpin: "Lösen", fork: "Abzweigen", copy: "Kopieren",

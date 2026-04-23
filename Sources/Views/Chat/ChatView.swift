@@ -31,6 +31,17 @@ struct ChatView: View {
         }
     }
 
+    private var disclaimerURL: URL? {
+        switch store.activeSession?.model.provider {
+        case .claude:
+            return URL(string: "https://support.claude.com/en/articles/8525154-claude-is-providing-incorrect-or-misleading-responses-what-s-going-on")
+        case .codex:
+            return URL(string: "https://help.openai.com/en/articles/8313428-chatgpt-accuracy-and-limitations")
+        case .none:
+            return nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
@@ -119,9 +130,15 @@ struct ChatView: View {
                                         store.setModel(m)
                                     } label: {
                                         if m == session.model {
-                                            Label(m.label, systemImage: "checkmark")
+                                            HStack(spacing: 6) {
+                                                ModelBrandIcon(brand: m.brand, size: 10)
+                                                Label(m.label, systemImage: "checkmark")
+                                            }
                                         } else {
-                                            Text(m.label + " — " + m.fullId)
+                                            HStack(spacing: 6) {
+                                                ModelBrandIcon(brand: m.brand, size: 10)
+                                                Text(m.label + " — " + m.fullId)
+                                            }
                                         }
                                     }
                                 }
@@ -129,7 +146,8 @@ struct ChatView: View {
                         }
                     } label: {
                         HStack(spacing: 3) {
-                            Text(session.model.provider.label)
+                            ModelBrandIcon(brand: session.model.brand, size: 10)
+                            Text(session.model.brand == .chatgpt ? "ChatGPT" : session.model.provider.label)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(Color.kilnTextSecondary)
                             Text(session.model.shortLabel)
@@ -147,6 +165,25 @@ struct ChatView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("Switch model for this session")
+
+                    if session.model.supportsOpenAIFastMode {
+                        Button {
+                            store.setOpenAIFastMode(!session.openAIFastMode)
+                        } label: {
+                            HStack(spacing: 4) {
+                                ModelBrandIcon(brand: .chatgpt, size: 9)
+                                Text("Fast")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(session.openAIFastMode ? Color.kilnBg : Color.kilnTextSecondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(session.openAIFastMode ? Color(hex: 0x0EA5E9) : Color.kilnSurfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                        .buttonStyle(.plain)
+                        .help(session.openAIFastMode ? "Fast mode is on for this GPT-5.4 session" : "Enable Codex fast mode for this GPT-5.4 session")
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -204,10 +241,12 @@ struct ChatView: View {
                                     .font(.system(size: 10))
                                 Text(store.settings.language.ui.disclaimer)
                                     .font(.system(size: 11))
-                                Link(destination: URL(string: "https://support.claude.com/en/articles/8525154-claude-is-providing-incorrect-or-misleading-responses-what-s-going-on")!) {
-                                    Text(store.settings.language.ui.learnMore)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Color.kilnAccent)
+                                if let disclaimerURL {
+                                    Link(destination: disclaimerURL) {
+                                        Text(store.settings.language.ui.learnMore)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(Color.kilnAccent)
+                                    }
                                 }
                             }
                             .foregroundStyle(Color.kilnTextTertiary)
@@ -411,7 +450,7 @@ struct MessageRow: View {
     }
 
     private var assistantName: String {
-        store.activeSession?.model.assistantName ?? "Claude"
+        store.activeSession?.model.assistantName ?? "Assistant"
     }
 
     var body: some View {
@@ -421,7 +460,7 @@ struct MessageRow: View {
                 if store.settings.showAvatars {
                     UserClaudeAvatar(
                         isUser: isUser,
-                        provider: store.activeSession?.model.provider ?? .claude
+                        brand: store.activeSession?.model.brand ?? .claude
                     )
                 }
 
@@ -767,15 +806,15 @@ struct LiveAssistantRow: View {
         store.activeSession?.model.assistantName ?? "Assistant"
     }
 
-    private var assistantProvider: ModelProvider {
-        store.activeSession?.model.provider ?? .claude
+    private var assistantBrand: ModelBrand {
+        store.activeSession?.model.brand ?? .claude
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 // Avatar
-                AssistantAvatar(provider: assistantProvider)
+                AssistantAvatar(brand: assistantBrand)
 
                 VStack(alignment: .leading, spacing: 6) {
                     // Role label
@@ -1418,7 +1457,7 @@ struct PinnedMessagesStrip: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Text(msg.role == .user ? "You" : (store.activeSession?.model.assistantName ?? "Claude"))
+                Text(msg.role == .user ? "You" : (store.activeSession?.model.assistantName ?? "Assistant"))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(msg.role == .user ? Color.kilnTextSecondary : Color.kilnAccent)
                     .frame(width: 38, alignment: .leading)
@@ -1811,7 +1850,7 @@ struct ResumeInterruptedBanner: View {
                 Text("This session was interrupted")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
-                Text("\((store.activeSession?.model.assistantName ?? "Claude")) didn't finish the previous message. Resume to retry the last prompt, or dismiss to continue fresh.")
+                Text("\((store.activeSession?.model.assistantName ?? "Assistant")) didn't finish the previous message. Resume to retry the last prompt, or dismiss to continue fresh.")
                     .font(.system(size: 11))
                     .foregroundStyle(Color.kilnTextSecondary)
             }
@@ -1980,7 +2019,7 @@ struct ClaudeMark: View {
 
 struct UserClaudeAvatar: View {
     let isUser: Bool
-    let provider: ModelProvider
+    let brand: ModelBrand
     @ObservedObject private var avatars: AvatarStore = .shared
 
     var body: some View {
@@ -2000,7 +2039,7 @@ struct UserClaudeAvatar: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.kilnTextSecondary)
             } else {
-                AssistantAvatar(provider: provider)
+                AssistantAvatar(brand: brand)
             }
         }
         .overlay(Circle().stroke(Color.kilnBorder, lineWidth: isUser && avatars.avatar != nil ? 1 : 0))
@@ -2008,7 +2047,7 @@ struct UserClaudeAvatar: View {
 }
 
 struct AssistantAvatar: View {
-    let provider: ModelProvider
+    let brand: ModelBrand
 
     var body: some View {
         ZStack {
@@ -2016,15 +2055,19 @@ struct AssistantAvatar: View {
                 .fill(Color.kilnAccentMuted)
                 .frame(width: 26, height: 26)
 
-            switch provider {
+            switch brand {
             case .claude:
                 ClaudeMark()
                     .foregroundStyle(Color.kilnAccent)
                     .frame(width: 14, height: 14)
-            case .codex:
-                Image(systemName: "terminal")
-                    .font(.system(size: 12, weight: .semibold))
+            case .chatgpt:
+                OpenAIKnotMark()
                     .foregroundStyle(Color.kilnAccent)
+                    .frame(width: 14, height: 14)
+            case .codex:
+                CodexMark()
+                    .foregroundStyle(Color.kilnAccent)
+                    .frame(width: 14, height: 14)
             }
         }
     }

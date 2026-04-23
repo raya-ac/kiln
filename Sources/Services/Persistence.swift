@@ -102,6 +102,7 @@ struct SessionData: Codable {
     var isArchived: Bool = false
     var sessionInstructions: String = ""
     var wasInterrupted: Bool = false
+    var openAIFastMode: Bool = false
     var tags: [String] = []
     /// Per-session warden tunnel config — local port + optional stable sub.
     /// Both default-absent so old session files decode unchanged.
@@ -126,6 +127,7 @@ struct SessionData: Codable {
         isArchived = (try? c.decode(Bool.self, forKey: .isArchived)) ?? false
         sessionInstructions = (try? c.decode(String.self, forKey: .sessionInstructions)) ?? ""
         wasInterrupted = (try? c.decode(Bool.self, forKey: .wasInterrupted)) ?? false
+        openAIFastMode = (try? c.decode(Bool.self, forKey: .openAIFastMode)) ?? false
         tags = (try? c.decode([String].self, forKey: .tags)) ?? []
         tunnelPort = try? c.decode(Int.self, forKey: .tunnelPort)
         tunnelSub = try? c.decode(String.self, forKey: .tunnelSub)
@@ -147,6 +149,7 @@ struct SessionData: Codable {
         self.isArchived = session.isArchived
         self.sessionInstructions = session.sessionInstructions
         self.wasInterrupted = session.wasInterrupted
+        self.openAIFastMode = session.openAIFastMode
         self.tags = session.tags
         self.tunnelPort = session.tunnelPort
         self.tunnelSub = session.tunnelSub
@@ -171,6 +174,7 @@ struct SessionData: Codable {
             tunnelPort: tunnelPort,
             tunnelSub: tunnelSub,
             colorLabel: colorLabel,
+            openAIFastMode: openAIFastMode,
             createdAt: Date(timeIntervalSince1970: createdAt)
         )
         s.wasInterrupted = wasInterrupted

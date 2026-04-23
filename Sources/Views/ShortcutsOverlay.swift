@@ -55,7 +55,7 @@ struct ShortcutsOverlay: View {
             ("/fork", "Fork from last message"),
             ("/retry", "Retry last user message"),
             ("/model", "Cycle to next model"),
-            ("/title", "Ask Claude for a session title"),
+            ("/title", "Ask the assistant for a session title"),
             ("/instructions", "Edit per-session system prompt"),
             ("/interrupt", "Stop current generation"),
             ("/export", "Export chat as markdown"),

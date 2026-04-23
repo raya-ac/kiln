@@ -828,18 +828,24 @@ struct NewSessionSheet: View {
                     VStack(spacing: 6) {
                         ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(group.provider.label)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack(spacing: 5) {
+                                    ModelProviderIcon(provider: group.provider, size: 9)
+                                    Text(group.provider.label)
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(Color.kilnTextTertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 HStack(spacing: 2) {
                                     ForEach(group.models) { m in
                                         Button {
                                             model = m
                                         } label: {
-                                            VStack(spacing: 1) {
-                                                Text(m.label)
-                                                    .font(.system(size: 12, weight: .medium))
+                                            VStack(spacing: 2) {
+                                                HStack(spacing: 5) {
+                                                    ModelBrandIcon(brand: m.brand, size: 10)
+                                                    Text(m.label)
+                                                        .font(.system(size: 12, weight: .medium))
+                                                }
                                                 Text(m.tier)
                                                     .font(.system(size: 9, weight: .regular))
                                                     .foregroundStyle(model == m ? Color.kilnBg.opacity(0.7) : Color.kilnTextTertiary)

@@ -40,20 +40,26 @@ final class CodexService: ObservableObject {
         let resolvedDir = resolveWorkDir(workDir)
         let isResume = threadIds[sessionId] != nil
         let prompt = Self.buildPrompt(message: message, options: options)
+        let fastModeArgs = Self.fastModeArgs(for: model, options: options)
 
         var args: [String] = []
         if codexPath == "/usr/bin/env" {
             args.append("codex")
         }
-        args += Self.approvalArgs(for: options)
 
         if let threadId = threadIds[sessionId] {
-            args += ["exec", "resume", "--json", threadId, "-m", model.rawValue, "-"]
+            args += ["exec"]
+            args += fastModeArgs
+            args += Self.approvalArgs(for: options)
+            args += ["resume", "--json", threadId, "-m", model.rawValue, "-"]
             if options.permissions == .bypass {
                 args.append("--dangerously-bypass-approvals-and-sandbox")
             }
         } else {
-            args += ["exec", "--json", "--skip-git-repo-check", "--model", model.rawValue, "--cd", resolvedDir, "-"]
+            args += ["exec"]
+            args += fastModeArgs
+            args += Self.approvalArgs(for: options)
+            args += ["--json", "--skip-git-repo-check", "--model", model.rawValue, "--cd", resolvedDir, "-"]
             switch Self.sandboxMode(for: options) {
             case "--dangerously-bypass-approvals-and-sandbox":
                 args.append("--dangerously-bypass-approvals-and-sandbox")
@@ -207,6 +213,14 @@ final class CodexService: ObservableObject {
         default:
             return []
         }
+    }
+
+    nonisolated private static func fastModeArgs(for model: ClaudeModel, options: SendOptions) -> [String] {
+        guard options.openAIFastMode, model.supportsOpenAIFastMode else { return [] }
+        return [
+            "-c", #"service_tier="fast""#,
+            "-c", "features.fast_mode=true",
+        ]
     }
 
     nonisolated private static func sandboxMode(for options: SendOptions) -> String {

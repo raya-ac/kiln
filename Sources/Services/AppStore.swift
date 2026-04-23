@@ -822,6 +822,7 @@ final class AppStore: ObservableObject {
             isArchived: old.isArchived,
             sessionInstructions: old.sessionInstructions,
             tags: old.tags,
+            openAIFastMode: old.openAIFastMode,
             createdAt: old.createdAt
         )
         fresh.messages = old.messages
@@ -965,6 +966,15 @@ final class AppStore: ObservableObject {
     func setModel(_ model: ClaudeModel) {
         guard let idx = activeSessionIndex else { return }
         sessions[idx].model = model
+        if !model.supportsOpenAIFastMode {
+            sessions[idx].openAIFastMode = false
+        }
+        Persistence.saveSession(sessions[idx])
+    }
+
+    func setOpenAIFastMode(_ enabled: Bool) {
+        guard let idx = activeSessionIndex else { return }
+        sessions[idx].openAIFastMode = sessions[idx].model.supportsOpenAIFastMode ? enabled : false
         Persistence.saveSession(sessions[idx])
     }
 
@@ -1104,6 +1114,7 @@ final class AppStore: ObservableObject {
             tags: reconstructed.tags,
             tunnelPort: nil,
             tunnelSub: nil,
+            openAIFastMode: reconstructed.openAIFastMode,
             createdAt: Date()
         )
         imported.messages = reconstructed.messages
@@ -1147,7 +1158,8 @@ final class AppStore: ObservableObject {
             workDir: src.workDir,
             name: name,
             model: src.model,
-            group: src.group
+            group: src.group,
+            openAIFastMode: src.openAIFastMode
         )
         forked.messages = forkedMessages
         forked.forkedFrom = fromSessionId
@@ -1177,7 +1189,8 @@ final class AppStore: ObservableObject {
             tags: src.tags,
             tunnelPort: nil,
             tunnelSub: nil,
-            colorLabel: src.colorLabel
+            colorLabel: src.colorLabel,
+            openAIFastMode: src.openAIFastMode
         )
         fresh.messages = []
         sessions.insert(fresh, at: 0)
@@ -1225,7 +1238,8 @@ final class AppStore: ObservableObject {
             group: original.group,
             kind: original.kind,
             sessionInstructions: original.sessionInstructions,
-            tags: original.tags + ["compare"]
+            tags: original.tags + ["compare"],
+            openAIFastMode: altModel.supportsOpenAIFastMode ? original.openAIFastMode : false
         )
         twin.forkedFrom = original.id
         sessions.insert(twin, at: 0)
@@ -1488,6 +1502,7 @@ final class AppStore: ObservableObject {
         options.chatMode = sessions[idx].kind == .chat
         options.thinkingEnabled = thinkingEnabled
         options.effortLevel = thinkingEnabled ? effortLevel : nil
+        options.openAIFastMode = sessions[idx].openAIFastMode && sessions[idx].model.supportsOpenAIFastMode
 
         // Build system prompt from session override (if any) + settings + language
         var systemPrompt = ""
@@ -1593,7 +1608,8 @@ final class AppStore: ObservableObject {
             model: src.model,
             group: src.group,
             kind: src.kind,
-            colorLabel: src.colorLabel
+            colorLabel: src.colorLabel,
+            openAIFastMode: src.openAIFastMode
         )
         copy.messages = []
         sessions.insert(copy, at: 0)
@@ -1614,7 +1630,8 @@ final class AppStore: ObservableObject {
             kind: src.kind,
             sessionInstructions: src.sessionInstructions,
             tags: src.tags,
-            colorLabel: src.colorLabel
+            colorLabel: src.colorLabel,
+            openAIFastMode: src.openAIFastMode
         )
         copy.messages = src.messages
         sessions.insert(copy, at: 0)

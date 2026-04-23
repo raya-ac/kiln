@@ -102,9 +102,12 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(group.provider.label)
-                                                .font(.system(size: 10, weight: .semibold))
-                                                .foregroundStyle(Color.kilnTextTertiary)
+                                            HStack(spacing: 5) {
+                                                ModelProviderIcon(provider: group.provider, size: 9)
+                                                Text(group.provider.label)
+                                                    .font(.system(size: 10, weight: .semibold))
+                                            }
+                                            .foregroundStyle(Color.kilnTextTertiary)
                                             HStack(spacing: 2) {
                                                 ForEach(group.models) { model in
                                                     let selected = store.settings.defaultModel == model
@@ -112,13 +115,16 @@ struct SettingsView: View {
                                                         store.settings.defaultModel = model
                                                         store.saveSettings()
                                                     } label: {
-                                                        Text(model.label)
-                                                            .font(.system(size: 11, weight: .medium))
-                                                            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                                            .padding(.horizontal, 12)
-                                                            .padding(.vertical, 5)
-                                                            .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                                                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                                                        HStack(spacing: 6) {
+                                                            ModelBrandIcon(brand: model.brand, size: 9)
+                                                            Text(model.label)
+                                                                .font(.system(size: 11, weight: .medium))
+                                                        }
+                                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 5)
+                                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 5))
                                                     }
                                                     .buttonStyle(.plain)
                                                     .help(model.fullId)
@@ -650,7 +656,7 @@ struct SettingsView: View {
                     store.settings.autoScroll = v
                 }
                 Spacer()
-                Text("Scroll to bottom as Claude streams")
+                Text("Scroll to bottom while the assistant streams")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.kilnTextTertiary)
             }
@@ -903,7 +909,7 @@ struct SettingsView: View {
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.kilnBorder, lineWidth: 1))
-                Text("Runs when Claude finishes. Env: KILN_SESSION_NAME, KILN_WORKDIR, KILN_LAST_ASSISTANT_TEXT, …")
+                Text("Runs when the assistant finishes. Env: KILN_SESSION_NAME, KILN_WORKDIR, KILN_LAST_ASSISTANT_TEXT, …")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.kilnTextTertiary)
                 HStack {
@@ -927,7 +933,7 @@ struct SettingsView: View {
                     value: store.settings.notifyOnCompletion,
                     set: { store.settings.notifyOnCompletion = $0 }
                 ) {
-                    Text("Notify when Claude finishes")
+                    Text("Notify when the assistant finishes")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.kilnTextSecondary)
                 }

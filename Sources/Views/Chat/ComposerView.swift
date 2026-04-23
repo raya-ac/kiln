@@ -1540,7 +1540,7 @@ struct ModelPill: View {
             store.setModel(model)
         } label: {
             HStack(spacing: 4) {
-                ModelProviderIcon(provider: model.provider, size: 10)
+                ModelBrandIcon(brand: model.brand, size: 10)
                     .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextTertiary)
                 Text(model.label)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -1588,6 +1588,83 @@ struct ModelProviderIcon: View {
             Image(systemName: "terminal")
                 .font(.system(size: size, weight: .semibold))
         }
+    }
+}
+
+struct ModelBrandIcon: View {
+    let brand: ModelBrand
+    let size: CGFloat
+
+    var body: some View {
+        switch brand {
+        case .claude:
+            ClaudeMark()
+                .frame(width: size + 2, height: size + 2)
+        case .chatgpt:
+            OpenAIKnotMark()
+                .frame(width: size + 3, height: size + 3)
+        case .codex:
+            CodexMark()
+                .frame(width: size + 3, height: size + 3)
+        }
+    }
+}
+
+struct CodexMark: View {
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let stroke = max(side * 0.12, 1)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.14)
+                    .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+
+                Path { path in
+                    path.move(to: CGPoint(x: side * 0.36, y: side * 0.28))
+                    path.addLine(to: CGPoint(x: side * 0.18, y: side * 0.5))
+                    path.addLine(to: CGPoint(x: side * 0.36, y: side * 0.72))
+                }
+                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+
+                Path { path in
+                    path.move(to: CGPoint(x: side * 0.64, y: side * 0.28))
+                    path.addLine(to: CGPoint(x: side * 0.82, y: side * 0.5))
+                    path.addLine(to: CGPoint(x: side * 0.64, y: side * 0.72))
+                }
+                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+
+                Path { path in
+                    path.move(to: CGPoint(x: side * 0.44, y: side * 0.74))
+                    path.addLine(to: CGPoint(x: side * 0.56, y: side * 0.74))
+                }
+                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            }
+            .frame(width: side, height: side)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+struct OpenAIKnotMark: View {
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let stroke = max(side * 0.16, 1)
+            let yOffset = side * 0.2
+
+            ZStack {
+                ForEach(0..<6, id: \.self) { idx in
+                    Capsule()
+                        .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+                        .frame(width: side * 0.58, height: side * 0.3)
+                        .offset(y: -yOffset)
+                        .rotationEffect(.degrees(Double(idx) * 60))
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 

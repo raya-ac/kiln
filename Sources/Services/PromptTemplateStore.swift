@@ -64,7 +64,7 @@ final class PromptTemplateStore: ObservableObject {
         PromptTemplate(
             name: "review",
             body: "Review the recent changes for correctness, edge cases, and readability. Flag anything surprising.",
-            description: "Ask Claude to review recent changes"
+            description: "Ask the assistant to review recent changes"
         ),
         PromptTemplate(
             name: "explain",

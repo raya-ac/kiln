@@ -4,6 +4,31 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.9.3] — 2026-04-24
+
+### Added
+- **Real GPT-5.4 Fast mode for ChatGPT-backed sessions.** Kiln's `Fast`
+  button no longer swaps models or piggybacks on reasoning effort. For
+  GPT-5.4 sessions it now maps to Codex's own fast mode settings, persists
+  per session, and survives forks, clones, imports, and duplicates.
+
+### Changed
+- **Model branding now distinguishes Claude, ChatGPT, and Codex.** GPT
+  models no longer inherit the generic Codex terminal treatment in the
+  picker and chat chrome. Kiln now shows separate brand marks for Claude,
+  ChatGPT, and Codex anywhere the active model is surfaced.
+- **Assistant avatars now follow model brand instead of only provider.**
+  ChatGPT-backed sessions look like ChatGPT sessions in the transcript and
+  live response row instead of falling back to the same visual identity as
+  Codex tool sessions.
+- **Chat disclaimers now link to the right provider docs.** Claude sessions
+  point to Anthropic's disclaimer page, while ChatGPT/Codex-backed sessions
+  point to OpenAI's accuracy and limitations page.
+- **Residual Claude-only UI copy was cleaned up again.** Remaining helper
+  text in prompts, settings, shortcuts, and chat placeholders now uses
+  provider-neutral assistant wording where the app is not specifically
+  talking about Claude.
+
 ## [1.9.2] — 2026-04-22
 
 ### Changed
