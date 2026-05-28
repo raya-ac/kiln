@@ -755,6 +755,7 @@ enum ClaudeEvent: Sendable {
     case messageStart
     case textDelta(String)
     case thinkingDelta(String)
+    case trace(AgentTraceEntry)
     case toolStart(id: String, name: String, input: String)
     case toolInputDelta(String)
     case blockStop(index: Int)

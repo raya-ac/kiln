@@ -70,6 +70,7 @@ extension Color {
     // Semantic — same hues in both modes for recognizability.
     static let kilnError = Color(hex: 0xEF4444)
     static let kilnSuccess = Color(hex: 0x22C55E)
+    static let kilnWarning = Color(hex: 0xF59E0B)
 
     /// The user's current theme mode, read from UserDefaults. Sheet-backed
     /// views that don't carry `AppStore` in their environment use this to

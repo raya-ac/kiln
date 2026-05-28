@@ -19,8 +19,8 @@ struct StatusBar: View {
     var body: some View {
         HStack(spacing: 14) {
             if let s = session {
-                pill(icon: "cpu", text: s.model.shortLabel)
-                    .help(s.model.label)
+                brandPill(model: s.model)
+                    .help("\(s.model.providerDisplayName) · \(s.model.label) · \(s.model.fullId)")
 
                 pill(icon: "folder", text: (s.workDir as NSString).lastPathComponent)
                     .help(s.workDir)
@@ -87,6 +87,18 @@ struct StatusBar: View {
             Text(text)
                 .font(.system(size: 10))
                 .foregroundStyle(Color.kilnTextSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private func brandPill(model: ClaudeModel) -> some View {
+        HStack(spacing: 5) {
+            ModelBrandIcon(brand: model.brand, size: 10)
+                .foregroundStyle(model.tint)
+            Text(model.shortLabel)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(model.tint)
                 .lineLimit(1)
         }
     }

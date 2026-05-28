@@ -88,13 +88,13 @@ final class SessionTemplateStore: ObservableObject {
         SessionTemplate(
             name: "Quick question",
             icon: "bubble.left",
-            model: "claude-haiku-4-5-20251001",
+            model: ClaudeModel.gpt54Mini.rawValue,
             kind: "chat"
         ),
         SessionTemplate(
             name: "Code review",
             icon: "checkmark.shield",
-            model: "claude-sonnet-4-6",
+            model: ClaudeModel.gpt55.rawValue,
             kind: "code",
             mode: "plan",
             permissions: "ask",
@@ -103,7 +103,7 @@ final class SessionTemplateStore: ObservableObject {
         SessionTemplate(
             name: "Deep build",
             icon: "hammer",
-            model: "claude-opus-4-7",
+            model: ClaudeModel.gpt53Codex.rawValue,
             kind: "code",
             mode: "build",
             permissions: "bypass"

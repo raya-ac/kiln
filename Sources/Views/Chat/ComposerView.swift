@@ -161,7 +161,7 @@ struct ComposerView: View {
                         }
                         .onAppear { isFocused = true }
                         .onChange(of: store.composerPrefill) { _, new in
-                            // External prefill hook (e.g. "Ask Claude about
+                            // External prefill hook (e.g. "Ask Assistant about
                             // this file"). Append with a separator if the
                             // user already has text typed; otherwise just
                             // drop it in. Always focus and clear the signal.
@@ -1428,7 +1428,7 @@ struct ComposerToolbar: View {
                 ) {
                     store.thinkingEnabled.toggle()
                 }
-                .help("Extended thinking — lets Claude reason before responding")
+                .help("Extended thinking — lets the active assistant reason before responding")
 
                 // Effort level — only meaningful with thinking on
                 if store.thinkingEnabled {
@@ -1560,17 +1560,7 @@ struct ModelPill: View {
         .onHover { hovering = $0 }
     }
 
-    private var modelColor: Color {
-        switch model {
-        case .opus47: Color(hex: 0xD97706)   // deep amber
-        case .sonnet46: Color.kilnAccent
-        case .haiku45: Color(hex: 0x8B8B8E)  // muted gray
-        case .gpt54: Color(hex: 0x2563EB)    // blue
-        case .gpt54Mini: Color(hex: 0x0EA5E9) // sky
-        case .gpt52: Color(hex: 0x14B8A6)    // teal
-        case .gpt53CodexSpark: Color(hex: 0x7C3AED) // violet
-        }
-    }
+    private var modelColor: Color { model.tint }
 }
 
 // MARK: - Provider Icon
@@ -1599,13 +1589,13 @@ struct ModelBrandIcon: View {
         switch brand {
         case .claude:
             ClaudeMark()
-                .frame(width: size + 2, height: size + 2)
+                .frame(width: size, height: size)
         case .chatgpt:
             OpenAIKnotMark()
-                .frame(width: size + 3, height: size + 3)
+                .frame(width: size, height: size)
         case .codex:
             CodexMark()
-                .frame(width: size + 3, height: size + 3)
+                .frame(width: size, height: size)
         }
     }
 }
@@ -1614,7 +1604,7 @@ struct CodexMark: View {
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let stroke = max(side * 0.12, 1)
+            let stroke = max(side * 0.1, 1)
 
             ZStack {
                 RoundedRectangle(cornerRadius: side * 0.14)
@@ -1650,7 +1640,7 @@ struct OpenAIKnotMark: View {
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let stroke = max(side * 0.16, 1)
+            let stroke = max(side * 0.12, 1)
             let yOffset = side * 0.2
 
             ZStack {
@@ -1762,7 +1752,7 @@ struct ContextDisplay: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .buttonStyle(.plain)
-                .help("Ask Claude to compact this session's history")
+                .help("Compact this session's history into a briefing")
             }
 
         }

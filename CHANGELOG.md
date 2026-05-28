@@ -4,6 +4,88 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.9.5] — 2026-05-29
+
+### Added
+- **Codex is now a first-class provider in the app chrome.** GPT-5.5,
+  GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5.3 Codex Spark, and
+  GPT-5.2 now have provider-aware defaults, picker grouping, brand
+  treatment, onboarding checks, and provider-specific disclaimer links.
+- **Codex thinking and trace output now surface in-session.** Kiln maps
+  its thinking controls into Codex reasoning config, captures reasoning
+  summaries as thinking blocks, and shows Codex command/tool/lifecycle
+  activity in the chat timeline and Activity panel.
+- **Persistent agent diagnostics now survive app restarts and crashes.**
+  Runtime trace events are mirrored to
+  `~/Library/Logs/Kiln/agent-trace.jsonl`, and Settings can reveal that
+  log directly.
+- **Crash report discovery is built into Settings.** Kiln now locates the
+  latest `Kiln*.ips` or `Kiln*.crash` report under macOS DiagnosticReports
+  and provides a reveal action next to the agent trace log.
+
+### Changed
+- **Codex launch arguments are cleaner and more current.** JSON exec and
+  resume runs now disable ANSI color, pass approval policy at the correct
+  level, support Codex reasoning summary/effort config, and redact launch
+  trace metadata before it reaches the UI.
+- **Tool usage logging is broader.** Command executions, function/tool
+  calls, MCP activity, web search items, usage events, thread events, and
+  failures now all produce structured trace rows instead of disappearing
+  into raw subprocess output.
+- **Settings and model selection were tightened for the Codex-heavy
+  default.** Model pickers use denser adaptive rows with provider labels,
+  while the diagnostics rows stay compact enough for repeated operator use.
+- **Remote-control rendering understands trace blocks.** Exported or remote
+  chat views now preserve Codex log blocks instead of flattening the session
+  to plain text and tool cards only.
+
+### Fixed
+- **Fixed a chat scrolling crash path.** The transcript no longer relies on
+  SwiftUI lazy recycling for selectable Markdown rows, and message block IDs
+  no longer use Swift's randomized `hashValue`, which could destabilize row
+  identity while scrolling.
+- **Fixed a notification authorization crash path.** The macOS
+  `UNUserNotificationCenter` callback can arrive on a background queue;
+  Kiln no longer mutates main-actor-isolated notifier state from that
+  callback.
+- **Notification authorization failures are now logged instead of silent.**
+  If macOS rejects notification access, the failure lands in the persistent
+  agent trace log with the app launch timeline.
+- **Repeated stderr noise from Codex is condensed.** Kiln keeps the useful
+  diagnostic lines while grouping duplicated stderr output so the Activity
+  panel stays readable.
+- **Codex trace and persistence paths are covered by tests.** Smoke tests
+  now guard Codex model presence, approval args, reasoning mapping, colorless
+  JSON output, command trace parsing, and crash report lookup.
+
+## [1.9.4] — 2026-04-24
+
+### Added
+- **Automatic session compaction near the context limit.** When a session is
+  close to filling its available context window, Kiln now compacts the
+  conversation into a briefing before sending the next prompt, then
+  continues with the pending message automatically.
+
+### Changed
+- **The visible `Compact` action now uses Kiln's provider-neutral
+  compaction flow.** The button no longer relies on a backend-specific
+  `/compact` command path, so it behaves consistently on Claude and
+  Codex-backed sessions.
+- **Compaction no longer leaves internal prompt noise behind.** After a
+  session is summarized, Kiln removes the hidden summarization request from
+  the transcript and keeps only the briefing context the user actually
+  needs.
+- **Model selection UI is cleaner.** The chat header keeps the provider
+  branding, but native dropdown rows no longer try to render oversized
+  custom marks, and the settings / new-session model pickers now use a
+  tighter adaptive grid layout.
+
+### Fixed
+- **Swift build warnings were cleaned up.** Deprecated app-launch and
+  string-conversion calls were replaced, an unused editor local was removed,
+  and concurrent pipe-read helpers were updated so the build completes
+  without warnings.
+
 ## [1.9.3] — 2026-04-24
 
 ### Added

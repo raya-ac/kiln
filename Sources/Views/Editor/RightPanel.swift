@@ -782,7 +782,6 @@ struct FileTreeView: View {
             pendingClaudeEdit.remove(path)
             return
         }
-        let fm = FileManager.default
         // If the path didn't exist pre-edit (Claude created it from nothing)
         // the best revert is to remove it. We detect that by checking if the
         // snapshot is empty AND the file existed only because Claude wrote
@@ -1352,7 +1351,7 @@ struct FileRow: View {
                     }
                     Button {
                         store.composerPrefill = "About `\(entry.path)`:\n\n"
-                    } label: { Label("Ask Claude About This File", systemImage: "sparkles") }
+                    } label: { Label("Ask Assistant About This File", systemImage: "sparkles") }
                     Divider()
                 }
                 if entry.isDirectory {
@@ -2535,7 +2534,7 @@ struct ActivityPanelView: View {
                         .tint(Color.kilnAccent)
                 }
                 Spacer()
-                Text("\(store.activeToolCalls.count) \(store.settings.language.ui.callsSuffix)")
+                Text("\(store.activeToolCalls.count) \(store.settings.language.ui.callsSuffix) · \(store.traceEntries.count) logs")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.kilnTextTertiary)
             }
@@ -2545,7 +2544,7 @@ struct ActivityPanelView: View {
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
-            if store.activeToolCalls.isEmpty {
+            if store.activeToolCalls.isEmpty && store.traceEntries.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 20))
@@ -2564,6 +2563,9 @@ struct ActivityPanelView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
+                            if !store.traceEntries.isEmpty {
+                                AgentTraceRow(entries: store.traceEntries, live: store.isBusy)
+                            }
                             ForEach(store.activeToolCalls) { call in
                                 ActivityCard(call: call)
                                     .id(call.id)

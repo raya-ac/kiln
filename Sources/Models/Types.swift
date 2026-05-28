@@ -20,25 +20,27 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     case opus47 = "claude-opus-4-7"
     case sonnet46 = "claude-sonnet-4-6"
     case haiku45 = "claude-haiku-4-5-20251001"
+    case gpt55 = "gpt-5.5"
     case gpt54 = "gpt-5.4"
     case gpt54Mini = "gpt-5.4-mini"
-    case gpt52 = "gpt-5.2"
+    case gpt53Codex = "gpt-5.3-codex"
     case gpt53CodexSpark = "gpt-5.3-codex-spark"
+    case gpt52 = "gpt-5.2"
 
     var id: String { rawValue }
 
     var provider: ModelProvider {
         switch self {
         case .opus47, .sonnet46, .haiku45: .claude
-        case .gpt54, .gpt54Mini, .gpt52, .gpt53CodexSpark: .codex
+        case .gpt55, .gpt54, .gpt54Mini, .gpt53Codex, .gpt53CodexSpark, .gpt52: .codex
         }
     }
 
     var brand: ModelBrand {
         switch self {
         case .opus47, .sonnet46, .haiku45: .claude
-        case .gpt54, .gpt54Mini, .gpt52: .chatgpt
-        case .gpt53CodexSpark: .codex
+        case .gpt55, .gpt54, .gpt54Mini, .gpt52: .chatgpt
+        case .gpt53Codex, .gpt53CodexSpark: .codex
         }
     }
 
@@ -54,10 +56,12 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Opus 4.7"
         case .sonnet46: "Sonnet 4.6"
         case .haiku45: "Haiku 4.5"
+        case .gpt55: "GPT-5.5"
         case .gpt54: "GPT-5.4"
         case .gpt54Mini: "GPT-5.4 Mini"
-        case .gpt52: "GPT-5.2"
+        case .gpt53Codex: "Codex"
         case .gpt53CodexSpark: "Codex Spark"
+        case .gpt52: "GPT-5.2"
         }
     }
 
@@ -66,10 +70,12 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Opus"
         case .sonnet46: "Sonnet"
         case .haiku45: "Haiku"
+        case .gpt55: "5.5"
         case .gpt54: "5.4"
         case .gpt54Mini: "5.4 Mini"
-        case .gpt52: "5.2"
+        case .gpt53Codex: "Codex"
         case .gpt53CodexSpark: "Spark"
+        case .gpt52: "5.2"
         }
     }
 
@@ -78,10 +84,12 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: "Flagship"
         case .sonnet46: "Balanced"
         case .haiku45: "Fast"
+        case .gpt55: "Frontier"
         case .gpt54: "Frontier"
         case .gpt54Mini: "Efficient"
-        case .gpt52: "Balanced"
+        case .gpt53Codex: "Coding"
         case .gpt53CodexSpark: "Fast"
+        case .gpt52: "Balanced"
         }
     }
 
@@ -93,10 +101,12 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .opus47: 200_000
         case .sonnet46: 200_000
         case .haiku45: 200_000
+        case .gpt55: 272_000
         case .gpt54: 272_000
         case .gpt54Mini: 272_000
-        case .gpt52: 272_000
+        case .gpt53Codex: 272_000
         case .gpt53CodexSpark: 128_000
+        case .gpt52: 272_000
         }
     }
 
@@ -104,8 +114,26 @@ enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
     var extendedContextWindow: Int? {
         switch self {
         case .opus47, .sonnet46: 1_000_000
-        case .gpt54: 1_000_000
+        case .gpt55, .gpt54: 1_000_000
         default: nil
+        }
+    }
+
+    var providerDisplayName: String {
+        brand == .chatgpt ? "ChatGPT" : provider.label
+    }
+
+    var tint: Color {
+        switch self {
+        case .opus47: Color(hex: 0xD97706)
+        case .sonnet46: Color(hex: 0xF97316)
+        case .haiku45: Color(hex: 0x71717A)
+        case .gpt55: Color(hex: 0x2563EB)
+        case .gpt54: Color(hex: 0x0EA5E9)
+        case .gpt54Mini: Color(hex: 0x38BDF8)
+        case .gpt53Codex: Color(hex: 0x10B981)
+        case .gpt53CodexSpark: Color(hex: 0x7C3AED)
+        case .gpt52: Color(hex: 0x14B8A6)
         }
     }
 
@@ -301,6 +329,7 @@ enum MessageRole: String, Sendable, Codable {
 enum MessageBlock: Identifiable, Sendable {
     case text(String)
     case thinking(String)
+    case trace([AgentTraceEntry])
     case toolUse(ToolUseBlock)
     case toolResult(ToolResultBlock)
     /// Clickable follow-up prompts. Each tap spawns a new code session with
@@ -312,13 +341,23 @@ enum MessageBlock: Identifiable, Sendable {
 
     var id: String {
         switch self {
-        case .text(let t): "text-\(t.hashValue)"
-        case .thinking(let t): "think-\(t.hashValue)"
+        case .text(let t): "text-\(stableIdentifier(for: t))"
+        case .thinking(let t): "think-\(stableIdentifier(for: t))"
+        case .trace(let entries): "trace-\(entries.map(\.id).joined(separator: "-"))"
         case .toolUse(let b): b.id
         case .toolResult(let b): b.toolUseId
         case .suggestions(let s): "suggestions-\(s.map(\.id).joined())"
         case .attachment(let a): "attachment-\(a.id)"
         }
+    }
+
+    private func stableIdentifier(for value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 }
 
@@ -359,6 +398,7 @@ struct SessionRuntimeState: Sendable {
     var isBusy: Bool = false
     var streamingText: String = ""
     var thinkingText: String = ""
+    var traceEntries: [AgentTraceEntry] = []
     var activeToolCalls: [ToolUseBlock] = []
     var currentToolId: String? = nil
     var lastError: String? = nil
@@ -370,6 +410,45 @@ struct ToolResultBlock: Sendable {
     let toolUseId: String
     let content: String
     let isError: Bool
+}
+
+enum AgentTraceLevel: String, Codable, Sendable, Hashable {
+    case debug
+    case info
+    case success
+    case warning
+    case error
+}
+
+struct AgentTraceEntry: Identifiable, Codable, Sendable, Hashable {
+    let id: String
+    let timestamp: Date
+    let source: String
+    let level: AgentTraceLevel
+    let phase: String
+    let title: String
+    let detail: String
+    let metadata: [String: String]
+
+    init(
+        id: String = UUID().uuidString,
+        timestamp: Date = .now,
+        source: String,
+        level: AgentTraceLevel = .info,
+        phase: String,
+        title: String,
+        detail: String = "",
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.source = source
+        self.level = level
+        self.phase = phase
+        self.title = title
+        self.detail = detail
+        self.metadata = metadata
+    }
 }
 
 // MARK: - Search
@@ -423,7 +502,7 @@ struct Session: Identifiable, Sendable {
     /// as a small dot next to the session name in the sidebar.
     var colorLabel: String? = nil
 
-    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .sonnet46, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .gpt53Codex, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
         self.id = id
         self.workDir = workDir
         self.name = name
@@ -1385,7 +1464,7 @@ enum ThemeMode: String, CaseIterable, Codable, Sendable, Identifiable {
 }
 
 struct KilnSettings: Codable, Sendable, Equatable {
-    var defaultModel: ClaudeModel = .sonnet46
+    var defaultModel: ClaudeModel = .gpt53Codex
     var defaultWorkDir: String = NSHomeDirectory()
     var systemPrompt: String = KilnSettings.defaultSystemPrompt
     // Off by default — new users get a clean slate and can opt in from
@@ -1449,7 +1528,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     // Custom decoder to handle missing keys from older settings files
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        defaultModel = (try? c.decode(ClaudeModel.self, forKey: .defaultModel)) ?? .sonnet46
+        defaultModel = (try? c.decode(ClaudeModel.self, forKey: .defaultModel)) ?? .gpt53Codex
         defaultWorkDir = (try? c.decode(String.self, forKey: .defaultWorkDir)) ?? NSHomeDirectory()
         systemPrompt = (try? c.decode(String.self, forKey: .systemPrompt)) ?? KilnSettings.defaultSystemPrompt
         useEngram = (try? c.decode(Bool.self, forKey: .useEngram)) ?? true
@@ -1488,7 +1567,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
         userAvatarFilename = (try? c.decode(String.self, forKey: .userAvatarFilename)) ?? ""
     }
 
-    init(defaultModel: ClaudeModel = .sonnet46, defaultWorkDir: String = NSHomeDirectory(),
+    init(defaultModel: ClaudeModel = .gpt53Codex, defaultWorkDir: String = NSHomeDirectory(),
          systemPrompt: String = KilnSettings.defaultSystemPrompt, useEngram: Bool = false,
          useAutoMemory: Bool = false, defaultPermissions: PermissionMode = .bypass,
          defaultMode: SessionMode = .build, theme: String = "dark", language: AppLanguage = .en) {
@@ -1507,13 +1586,15 @@ struct KilnSettings: Codable, Sendable, Equatable {
     /// into `systemPrompt` on opt-in so Claude knows the tools exist.
     static let engramSystemPrompt = """
     You have access to engram, a cognitive memory system. Use it for ALL memory operations:
-    - Use `recall` before starting work to load relevant context
+    - Before responding to a new session or a topic shift, silently use `recall` or `recall_hints` to load relevant context
     - Use `remember` after learning something worth keeping
     - Use `remember_decision` for decisions with rationale
     - Use `remember_error` for error patterns
     - Use `recall_hints` for lightweight recognition triggers
 
     Engram is the canonical memory store. Prefer it over flat file memory systems.
+    Do not narrate memory loading, retries, or lock handling to the user unless they explicitly ask.
+    If recall hits a transient lock or transport error, retry once with a lighter query. If it still fails, continue normally without mentioning the failure unless the user asks about memory state.
     """
 
     static let empty = KilnSettings(systemPrompt: "", useEngram: false)

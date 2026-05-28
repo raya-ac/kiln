@@ -108,22 +108,29 @@ struct SettingsView: View {
                                                     .font(.system(size: 10, weight: .semibold))
                                             }
                                             .foregroundStyle(Color.kilnTextTertiary)
-                                            HStack(spacing: 2) {
+                                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 6)], spacing: 6) {
                                                 ForEach(group.models) { model in
                                                     let selected = store.settings.defaultModel == model
                                                     Button {
                                                         store.settings.defaultModel = model
                                                         store.saveSettings()
                                                     } label: {
-                                                        HStack(spacing: 6) {
-                                                            ModelBrandIcon(brand: model.brand, size: 9)
-                                                            Text(model.label)
-                                                                .font(.system(size: 11, weight: .medium))
+                                                        HStack(spacing: 7) {
+                                                            ModelBrandIcon(brand: model.brand, size: 8)
+                                                            VStack(alignment: .leading, spacing: 1) {
+                                                                Text(model.label)
+                                                                    .font(.system(size: 11, weight: .semibold))
+                                                                    .lineLimit(1)
+                                                                Text(model.tier)
+                                                                    .font(.system(size: 9, weight: .medium))
+                                                                    .foregroundStyle(selected ? Color.kilnBg.opacity(0.72) : Color.kilnTextTertiary)
+                                                            }
+                                                            Spacer(minLength: 0)
                                                         }
                                                         .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                                        .padding(.horizontal, 12)
-                                                        .padding(.vertical, 5)
-                                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
+                                                        .padding(.horizontal, 10)
+                                                        .padding(.vertical, 8)
+                                                        .background(selected ? model.tint : Color.kilnSurface)
                                                         .clipShape(RoundedRectangle(cornerRadius: 5))
                                                     }
                                                     .buttonStyle(.plain)
@@ -956,7 +963,73 @@ struct SettingsView: View {
             Text("Notifications only fire when Kiln is not the frontmost app.")
                 .font(.system(size: 10))
                 .foregroundStyle(Color.kilnTextTertiary)
+
+            SettingsRow(label: "Agent trace log") {
+                Text(AgentTraceLog.shared.fileURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button {
+                    let logURL = AgentTraceLog.shared.fileURL
+                    let revealURL = FileManager.default.fileExists(atPath: logURL.path)
+                        ? logURL
+                        : logURL.deletingLastPathComponent()
+                    NSWorkspace.shared.activateFileViewerSelecting([revealURL])
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+            }
+
+            crashReportsRow
         }
+    }
+
+    @ViewBuilder
+    private var crashReportsRow: some View {
+        let latest = CrashReportLocator.latestKilnReport()
+        SettingsRow(label: "Crash reports") {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(latest?.url.lastPathComponent ?? "No Kiln crash report found")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(latest.map { "\($0.displayPath) · \(diagnosticDate($0.modifiedAt))" }
+                    ?? CrashReportLocator.reportDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button {
+                if let latest {
+                    NSWorkspace.shared.activateFileViewerSelecting([latest.url])
+                } else {
+                    NSWorkspace.shared.activateFileViewerSelecting([CrashReportLocator.reportDirectory])
+                }
+            } label: {
+                Label(latest == nil ? "Folder" : "Reveal", systemImage: latest == nil ? "folder" : "doc.text.magnifyingglass")
+            }
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.plain)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color.kilnAccent)
+        }
+    }
+
+    private func diagnosticDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     // MARK: - Keyboard shortcuts reference

@@ -23,6 +23,7 @@ struct ChatView: View {
                 switch block {
                 case .text(let t): text = t
                 case .thinking(let t): text = t
+                case .trace(let entries): text = entries.map { "\($0.phase) \($0.title) \($0.detail)" }.joined(separator: " ")
                 default: continue
                 }
                 if text.lowercased().contains(q) { return msg.id }
@@ -47,9 +48,13 @@ struct ChatView: View {
             // Header bar
             HStack(spacing: 8) {
                 if let session = store.activeSession {
-                    Image(systemName: "bubble.left.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.kilnAccent)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(session.model.tint.opacity(0.18))
+                            .frame(width: 22, height: 22)
+                        ModelBrandIcon(brand: session.model.brand, size: 12)
+                            .foregroundStyle(session.model.tint)
+                    }
                     Text(session.name)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.kilnText)
@@ -130,15 +135,9 @@ struct ChatView: View {
                                         store.setModel(m)
                                     } label: {
                                         if m == session.model {
-                                            HStack(spacing: 6) {
-                                                ModelBrandIcon(brand: m.brand, size: 10)
-                                                Label(m.label, systemImage: "checkmark")
-                                            }
+                                            Label(m.label + " — " + m.fullId, systemImage: "checkmark")
                                         } else {
-                                            HStack(spacing: 6) {
-                                                ModelBrandIcon(brand: m.brand, size: 10)
-                                                Text(m.label + " — " + m.fullId)
-                                            }
+                                            Text(m.label + " — " + m.fullId)
                                         }
                                     }
                                 }
@@ -147,7 +146,7 @@ struct ChatView: View {
                     } label: {
                         HStack(spacing: 3) {
                             ModelBrandIcon(brand: session.model.brand, size: 10)
-                            Text(session.model.brand == .chatgpt ? "ChatGPT" : session.model.provider.label)
+                            Text(session.model.providerDisplayName)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(Color.kilnTextSecondary)
                             Text(session.model.shortLabel)
@@ -155,10 +154,10 @@ struct ChatView: View {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 7, weight: .bold))
                         }
-                        .foregroundStyle(Color.kilnAccent)
+                        .foregroundStyle(session.model.tint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Color.kilnAccentMuted)
+                        .background(session.model.tint.opacity(0.14))
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .menuStyle(.borderlessButton)
@@ -182,7 +181,7 @@ struct ChatView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
-                        .help(session.openAIFastMode ? "Fast mode is on for this GPT-5.4 session" : "Enable Codex fast mode for this GPT-5.4 session")
+                        .help(session.openAIFastMode ? "Fast mode is on for this \(session.model.label) session" : "Enable Codex fast mode for this \(session.model.label) session")
                     }
                 }
             }
@@ -233,7 +232,11 @@ struct ChatView: View {
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    // Keep the transcript mounted while scrolling. SwiftUI's
+                    // lazy recycling is brittle with selectable Markdown and
+                    // nested disclosure rows; the crash shows up while older
+                    // messages are rehydrated during scroll.
+                    VStack(alignment: .leading, spacing: 0) {
                         if let session = store.activeSession {
                             // Disclaimer at top of every chat
                             HStack(spacing: 6) {
@@ -402,6 +405,7 @@ struct MessageRow: View {
             switch block {
             case .text(let t): return t.count
             case .thinking(let t): return t.count
+            case .trace(let entries): return entries.reduce(0) { $0 + $1.title.count + $1.detail.count }
             case .toolUse(let b): return b.input.count + (b.result?.count ?? 0)
             case .toolResult(let r): return r.content.count
             default: return 0
@@ -495,6 +499,7 @@ struct MessageRow: View {
                                     switch block {
                                     case .text(let t): return t
                                     case .thinking(let t): return t
+                                    case .trace(let entries): return entries.map { "[\($0.level.rawValue)] \($0.phase): \($0.title)\n\($0.detail)" }.joined(separator: "\n")
                                     case .suggestions(let s): return s.map(\.label).joined(separator: " · ")
                                     default: return nil
                                     }
@@ -679,6 +684,9 @@ struct MessageRow: View {
                         case .thinking(let text):
                             ThinkingRow(text: text)
 
+                        case .trace(let entries):
+                            AgentTraceRow(entries: entries)
+
                         case .toolUse(let tool):
                             ToolCallCard(tool: tool)
 
@@ -827,6 +835,10 @@ struct LiveAssistantRow: View {
                         ThinkingRow(text: store.thinkingText)
                     }
 
+                    if !store.traceEntries.isEmpty {
+                        AgentTraceRow(entries: store.traceEntries, live: true)
+                    }
+
                     // Live tool calls (rendered as proper ToolCallCards)
                     ForEach(store.activeToolCalls) { tool in
                         ToolCallCard(tool: tool)
@@ -911,6 +923,159 @@ struct ThinkingRow: View {
                 expanded = !store.settings.thinkingCollapsedByDefault
                 didInit = true
             }
+        }
+    }
+}
+
+// MARK: - Agent Trace
+
+struct AgentTraceRow: View {
+    let entries: [AgentTraceEntry]
+    var live: Bool = false
+    @State private var expanded = false
+
+    private var visibleEntries: [AgentTraceEntry] {
+        expanded ? entries : Array(entries.suffix(5))
+    }
+
+    private var errorCount: Int {
+        entries.filter { $0.level == .error }.count
+    }
+
+    private var warningCount: Int {
+        entries.filter { $0.level == .warning }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .frame(width: 12)
+                    Image(systemName: live ? "waveform.path.ecg" : "list.bullet.rectangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(headerColor)
+                    Text("Codex log")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                    Text("\(entries.count)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                    if warningCount > 0 {
+                        TraceBadge(text: "\(warningCount) warn", color: Color.kilnWarning)
+                    }
+                    if errorCount > 0 {
+                        TraceBadge(text: "\(errorCount) err", color: Color.kilnError)
+                    }
+                    Spacer()
+                    if live {
+                        Text("live")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.kilnAccent)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if expanded || live {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(visibleEntries) { entry in
+                        AgentTraceEntryRow(entry: entry)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding(10)
+        .background(Color.kilnSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorderSubtle, lineWidth: 1))
+    }
+
+    private var headerColor: Color {
+        if errorCount > 0 { return Color.kilnError }
+        if warningCount > 0 { return Color.kilnWarning }
+        return live ? Color.kilnAccent : Color.kilnTextTertiary
+    }
+}
+
+private struct TraceBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+private struct AgentTraceEntryRow: View {
+    let entry: AgentTraceEntry
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.phase)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(color)
+                    Text(entry.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(entry.timestamp.formatted(.dateTime.hour().minute().second()))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+                if !entry.detail.isEmpty {
+                    Text(entry.detail)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                }
+                if !entry.metadata.isEmpty {
+                    Text(entry.metadata.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "  "))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextTertiary.opacity(0.8))
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(7)
+        .background(Color.kilnBg.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var icon: String {
+        switch entry.level {
+        case .debug: "ladybug"
+        case .info: "info.circle"
+        case .success: "checkmark.circle"
+        case .warning: "exclamationmark.triangle"
+        case .error: "xmark.octagon"
+        }
+    }
+
+    private var color: Color {
+        switch entry.level {
+        case .debug: Color.kilnTextTertiary
+        case .info: Color.kilnAccent
+        case .success: Color.kilnSuccess
+        case .warning: Color.kilnWarning
+        case .error: Color.kilnError
         }
     }
 }

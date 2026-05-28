@@ -835,25 +835,28 @@ struct NewSessionSheet: View {
                                 }
                                 .foregroundStyle(Color.kilnTextTertiary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                HStack(spacing: 2) {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 124), spacing: 6)], spacing: 6) {
                                     ForEach(group.models) { m in
                                         Button {
                                             model = m
                                         } label: {
-                                            VStack(spacing: 2) {
-                                                HStack(spacing: 5) {
-                                                    ModelBrandIcon(brand: m.brand, size: 10)
+                                            HStack(spacing: 7) {
+                                                ModelBrandIcon(brand: m.brand, size: 8)
+                                                VStack(alignment: .leading, spacing: 1) {
                                                     Text(m.label)
-                                                        .font(.system(size: 12, weight: .medium))
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                        .lineLimit(1)
+                                                    Text(m.tier)
+                                                        .font(.system(size: 9, weight: .medium))
+                                                        .foregroundStyle(model == m ? Color.kilnBg.opacity(0.72) : Color.kilnTextTertiary)
                                                 }
-                                                Text(m.tier)
-                                                    .font(.system(size: 9, weight: .regular))
-                                                    .foregroundStyle(model == m ? Color.kilnBg.opacity(0.7) : Color.kilnTextTertiary)
+                                                Spacer(minLength: 0)
                                             }
                                             .foregroundStyle(model == m ? Color.kilnBg : Color.kilnTextSecondary)
-                                            .frame(maxWidth: .infinity)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 10)
                                             .padding(.vertical, 8)
-                                            .background(model == m ? Color.kilnAccent : Color.kilnSurface)
+                                            .background(model == m ? m.tint : Color.kilnSurface)
                                             .clipShape(RoundedRectangle(cornerRadius: 6))
                                         }
                                         .buttonStyle(.plain)
@@ -1172,8 +1175,7 @@ struct MiniVideoView: View {
 // only if the app isn't the frontmost application. Saves the user from
 // babysitting long agentic runs.
 
-@MainActor
-final class CompletionNotifier {
+final class CompletionNotifier: @unchecked Sendable {
     static let shared = CompletionNotifier()
     private var authorized = false
     private var usable = false
@@ -1188,11 +1190,22 @@ final class CompletionNotifier {
     func requestAuthorization() {
         guard isUsable else { return }
         usable = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
-            Task { @MainActor in self?.authorized = granted }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+            if let error {
+                AgentTraceLog.shared.appendLocal(
+                    level: .warning,
+                    phase: "notifications",
+                    title: "Notification authorization failed",
+                    detail: error.localizedDescription
+                )
+            }
+            DispatchQueue.main.async {
+                self?.authorized = granted
+            }
         }
     }
 
+    @MainActor
     func notifyIfUnfocused(sessionName: String, assistantName: String = "Assistant", playSound: Bool = true) {
         guard usable, authorized else { return }
         if NSApp.isActive { return }

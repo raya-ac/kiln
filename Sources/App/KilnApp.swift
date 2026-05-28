@@ -7,6 +7,18 @@ struct KilnApp: App {
     @StateObject private var store = AppStore()
     @StateObject private var updater = UpdaterService()
 
+    init() {
+        AgentTraceLog.shared.appendLocal(
+            level: .info,
+            phase: "app",
+            title: "Kiln launched",
+            metadata: [
+                "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+            ]
+        )
+    }
+
     var body: some Scene {
         WindowGroup("Kiln Code") {
             ContentView()

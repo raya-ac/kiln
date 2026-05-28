@@ -1,7 +1,7 @@
 import Foundation
 
-/// Claude Code slash commands exposed in the composer via `/` autocomplete.
-/// Includes built-ins shipped by Claude Code plus any user-defined agents
+/// Agent slash commands exposed in the composer via `/` autocomplete.
+/// Includes built-ins shipped by the active CLI plus any user-defined agents
 /// discovered in `~/.claude/agents/`.
 struct SlashCommand: Identifiable, Hashable, Sendable {
     let id: String        // e.g. "compact"
@@ -13,12 +13,12 @@ struct SlashCommand: Identifiable, Hashable, Sendable {
 }
 
 enum SlashCommands {
-    /// Every slash command is handled client-side. Claude Code's own
+    /// Every slash command is handled client-side. Agent CLI native
     /// slash commands only work in interactive mode; Kiln uses `--print`
     /// where they'd be treated as plain text, so we intercept and perform
-    /// the operation locally instead of sending the slash command to Claude.
+    /// the operation locally instead of sending the slash command through.
     static let builtins: [SlashCommand] = [
-        .init(id: "compact", label: "/compact", description: "Ask Claude to summarize this session, then reset to the summary", kind: .kiln),
+        .init(id: "compact", label: "/compact", description: "Ask the assistant to summarize this session, then reset to the summary", kind: .kiln),
         .init(id: "clear", label: "/clear", description: "Clear all messages in this session", kind: .kiln),
         .init(id: "fork", label: "/fork", description: "Fork this session from the last message", kind: .kiln),
         .init(id: "export", label: "/export", description: "Export this chat as markdown", kind: .kiln),
@@ -27,7 +27,7 @@ enum SlashCommands {
         .init(id: "compare", label: "/compare", description: "Re-fire last message in a twin session with a different model", kind: .kiln),
         .init(id: "interrupt", label: "/interrupt", description: "Stop the current generation", kind: .kiln),
         .init(id: "instructions", label: "/instructions", description: "Edit per-session system prompt", kind: .kiln),
-        .init(id: "title", label: "/title", description: "Ask Claude for a short title, rename the session", kind: .kiln),
+        .init(id: "title", label: "/title", description: "Ask the assistant for a short title, rename the session", kind: .kiln),
         .init(id: "settings", label: "/settings", description: "Open app settings", kind: .kiln),
         .init(id: "search", label: "/search", description: "Search all messages across sessions", kind: .kiln),
         .init(id: "memory", label: "/memory", description: "Open the engram dashboard in your browser", kind: .kiln),
@@ -72,7 +72,7 @@ enum SlashCommands {
         .init(id: "env",       label: "/env",       description: "Show this session's model, workdir and kind", kind: .kiln),
         .init(id: "undo",      label: "/undo",      description: "Alias for /rewind 1 — drop the last exchange", kind: .kiln),
         .init(id: "resend",    label: "/resend",    description: "Alias for /retry — re-fire the last user message", kind: .kiln),
-        .init(id: "summary",   label: "/summary",   description: "Ask Claude for a short session title (same as /title)", kind: .kiln),
+        .init(id: "summary",   label: "/summary",   description: "Ask the assistant for a short session title (same as /title)", kind: .kiln),
         .init(id: "todo",      label: "/todo",      description: "Append a line to TODO.md in the session workdir — /todo thing", kind: .kiln),
         .init(id: "notes",     label: "/notes",     description: "Open ~/kiln-notes.md in your editor", kind: .kiln),
         .init(id: "help",      label: "/help",      description: "Show what you can type — hint toast listing popular commands", kind: .kiln),

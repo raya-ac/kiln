@@ -675,6 +675,19 @@ final class RemoteControlServer: ObservableObject {
         switch b {
         case .text(let s): return ["type": "text", "text": s]
         case .thinking(let s): return ["type": "thinking", "text": s]
+        case .trace(let entries):
+            return ["type": "trace", "entries": entries.map { entry in
+                [
+                    "id": entry.id,
+                    "timestamp": entry.timestamp.timeIntervalSince1970,
+                    "source": entry.source,
+                    "level": entry.level.rawValue,
+                    "phase": entry.phase,
+                    "title": entry.title,
+                    "detail": entry.detail,
+                    "metadata": entry.metadata,
+                ] as [String: Any]
+            }]
         case .toolUse(let t): return ["type": "toolUse", "tool": toolUseJSON(t)]
         case .toolResult(let r): return ["type": "toolResult", "toolUseId": r.toolUseId, "content": r.content, "isError": r.isError]
         case .suggestions(let s):
@@ -798,7 +811,7 @@ final class RemoteControlServer: ObservableObject {
                     if getnameinfo(iface.ifa_addr, socklen_t(iface.ifa_addr.pointee.sa_len),
                                    &host, socklen_t(host.count),
                                    nil, 0, NI_NUMERICHOST) == 0 {
-                        let ip = String(cString: host)
+                        let ip = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
                         if !ip.hasPrefix("127.") && !ip.hasPrefix("169.254") {
                             return ip
                         }
@@ -997,6 +1010,10 @@ final class RemoteControlServer: ObservableObject {
 
       .block-thinking { margin: 6px 0; padding: 8px 12px; background: rgba(168, 85, 247, 0.08); border-left: 2px solid var(--purple); border-radius: 4px; font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; }
       .block-thinking-label { font-size: 10px; color: var(--purple); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+      .trace-block { margin: 6px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+      .trace-head { padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
+      .trace-entry { padding: 6px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 10px; color: var(--text-tertiary); white-space: pre-wrap; }
+      .trace-entry .lvl { color: var(--accent); font-weight: 700; }
 
       .tool-block { margin: 6px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
       .tool-head { padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; }
@@ -1364,6 +1381,12 @@ final class RemoteControlServer: ObservableObject {
         return `<div class="block-thinking">
           <div class="block-thinking-label">✨ thinking</div>
           ${escHTML(block.text || '')}
+        </div>`;
+      } else if (block.type === 'trace') {
+        const entries = (block.entries || []).slice(-12);
+        return `<div class="trace-block">
+          <div class="trace-head">Codex log · ${(block.entries || []).length}</div>
+          ${entries.map(e => `<div class="trace-entry"><span class="lvl">[${escHTML(e.level || 'info')}]</span> ${escHTML(e.phase || '')}: ${escHTML(e.title || '')}${e.detail ? `\n${escHTML(e.detail)}` : ''}</div>`).join('')}
         </div>`;
       } else if (block.type === 'toolUse') {
         const t = block.tool;

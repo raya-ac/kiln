@@ -217,6 +217,7 @@ struct BlockData: Codable {
     let toolInput: String?
     let toolResult: String?
     let isError: Bool?
+    let traceEntries: [AgentTraceEntry]?
     let suggestions: [SuggestionPrompt]?
     let attachment: ComposerAttachment?
     /// Tool-call timing — optional so older session files still decode.
@@ -235,12 +236,21 @@ struct BlockData: Codable {
             self.type = "text"
             self.text = t
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
+            self.traceEntries = nil
             self.suggestions = nil; self.attachment = nil
             self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .thinking(let t):
             self.type = "thinking"
             self.text = t
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
+            self.traceEntries = nil
+            self.suggestions = nil; self.attachment = nil
+            self.toolStartedAt = nil; self.toolCompletedAt = nil
+        case .trace(let entries):
+            self.type = "trace"
+            self.text = nil
+            self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
+            self.traceEntries = entries
             self.suggestions = nil; self.attachment = nil
             self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .toolUse(let tool):
@@ -248,6 +258,7 @@ struct BlockData: Codable {
             self.text = nil
             self.toolName = tool.name; self.toolInput = tool.input
             self.toolResult = tool.result; self.isError = tool.isError
+            self.traceEntries = nil
             self.suggestions = nil; self.attachment = nil
             self.toolStartedAt = tool.startedAt?.timeIntervalSince1970
             self.toolCompletedAt = tool.completedAt?.timeIntervalSince1970
@@ -256,18 +267,21 @@ struct BlockData: Codable {
             self.text = r.content
             self.toolName = nil; self.toolInput = nil
             self.toolResult = nil; self.isError = r.isError
+            self.traceEntries = nil
             self.suggestions = nil; self.attachment = nil
             self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .suggestions(let s):
             self.type = "suggestions"
             self.text = nil
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
+            self.traceEntries = nil
             self.suggestions = s; self.attachment = nil
             self.toolStartedAt = nil; self.toolCompletedAt = nil
         case .attachment(let a):
             self.type = "attachment"
             self.text = nil
             self.toolName = nil; self.toolInput = nil; self.toolResult = nil; self.isError = nil
+            self.traceEntries = nil
             self.suggestions = nil; self.attachment = a
             self.toolStartedAt = nil; self.toolCompletedAt = nil
         }
@@ -279,6 +293,8 @@ struct BlockData: Codable {
             return .text(text ?? "")
         case "thinking":
             return .thinking(text ?? "")
+        case "trace":
+            return .trace(traceEntries ?? [])
         case "tool_use":
             return .toolUse(ToolUseBlock(
                 id: toolId ?? UUID().uuidString,

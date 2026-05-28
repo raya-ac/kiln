@@ -257,6 +257,7 @@ final class AppStore: ObservableObject {
     /// return the active session's runtime.
     var streamingText: String { activeRuntime.streamingText }
     var thinkingText: String { activeRuntime.thinkingText }
+    var traceEntries: [AgentTraceEntry] { activeRuntime.traceEntries }
     var isBusy: Bool { activeRuntime.isBusy }
     var activeToolCalls: [ToolUseBlock] { activeRuntime.activeToolCalls }
     var lastError: String? { activeRuntime.lastError }
@@ -328,7 +329,7 @@ final class AppStore: ObservableObject {
     private var pendingSendTask: Task<Void, Never>?
 
     /// One-shot signal to prefill the composer input. Set from the
-    /// file-tree "Ask Claude about this file" action (or anywhere else
+    /// file-tree "Ask Assistant about this file" action (or anywhere else
     /// that wants to seed a prompt). ComposerView observes this, inserts
     /// the text at the current caret, focuses the field, and clears the
     /// signal so re-sending the same string fires again.
@@ -393,15 +394,8 @@ final class AppStore: ObservableObject {
     init() {
         Persistence.ensureDirectories()
         settings = Persistence.loadSettings()
-        // Bypass is the only sensible default for a local dev tool — .ask
-        // and .deny stall tool use (no web, no reads). If a prior version
-        // persisted something more restrictive, reset it.
-        if settings.defaultPermissions != .bypass {
-            settings.defaultPermissions = .bypass
-            Persistence.saveSettings(settings)
-        }
         sessionMode = settings.defaultMode
-        permissionMode = .bypass
+        permissionMode = settings.defaultPermissions
 
         let stored = Persistence.loadSessions()
         sessions = stored.map { $0.toSession() }
@@ -921,6 +915,8 @@ final class AppStore: ObservableObject {
                     switch block {
                     case .text(let t): haystack = t
                     case .thinking(let t): haystack = t
+                    case .trace(let entries):
+                        haystack = entries.map { "\($0.phase) \($0.title) \($0.detail)" }.joined(separator: " ")
                     case .toolUse(let b):
                         haystack = "\(b.name) \(b.input) \(b.result ?? "")"
                     case .toolResult(let b):
@@ -1061,6 +1057,14 @@ final class AppStore: ObservableObject {
                     md += "\(t)\n\n"
                 case .thinking(let t):
                     md += "<details><summary>Thinking</summary>\n\n\(t)\n\n</details>\n\n"
+                case .trace(let entries):
+                    md += "<details><summary>Agent log (\(entries.count))</summary>\n\n"
+                    for entry in entries {
+                        md += "- [\(entry.level.rawValue)] \(entry.phase): \(entry.title)"
+                        if !entry.detail.isEmpty { md += " — \(entry.detail.prefix(240))" }
+                        md += "\n"
+                    }
+                    md += "\n</details>\n\n"
                 case .toolUse(let tool):
                     md += "> **\(tool.name)**\n> ```json\n> \(tool.input)\n> ```\n"
                     if let result = tool.result {
@@ -1264,11 +1268,17 @@ final class AppStore: ObservableObject {
         setModel(next)
     }
 
-    /// Real compaction: ask Claude for a concise summary of the conversation
-    /// so far, wipe the prior messages, keep the summary as context.
-    func compactSession() async {
-        guard let idx = activeSessionIndex else { return }
-        let sessionId = sessions[idx].id
+    /// Real compaction: summarize the current session into a concise
+    /// briefing, reset history to that briefing, then optionally continue
+    /// with a pending user message.
+    func compactSession(
+        sessionId targetSessionId: String? = nil,
+        continueWith followUpText: String? = nil,
+        attachments followUpAttachments: [ComposerAttachment] = []
+    ) async {
+        let sessionId = targetSessionId ?? activeSessionId
+        guard let sessionId,
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
 
         // Snapshot the transcript so we can fold it into the summary prompt
         // for Claude even after we clear the history locally.
@@ -1277,6 +1287,7 @@ final class AppStore: ObservableObject {
                 switch block {
                 case .text(let t): return t
                 case .thinking: return nil
+                case .trace: return nil
                 case .toolUse(let t): return "[tool: \(t.name)]"
                 case .toolResult: return nil
                 case .suggestions: return nil
@@ -1300,11 +1311,28 @@ final class AppStore: ObservableObject {
         TRANSCRIPT:
         \(transcript)
         """
-        _ = sessionId
-        await sendMessage(prompt)
+        await sendMessage(prompt, allowAutoCompact: false)
+
+        // Hide the internal compaction prompt from the chat transcript — the
+        // summary itself is the durable thing the user needs.
+        if let refreshedIdx = sessions.firstIndex(where: { $0.id == sessionId }),
+           let promptIdx = sessions[refreshedIdx].messages.firstIndex(where: { msg in
+               guard msg.role == .user,
+                     msg.blocks.count == 1,
+                     case .text(let body) = msg.blocks[0]
+               else { return false }
+               return body == prompt
+           }) {
+            sessions[refreshedIdx].messages.remove(at: promptIdx)
+            Persistence.saveSession(sessions[refreshedIdx])
+        }
+
+        if let followUpText, !followUpText.isEmpty || !followUpAttachments.isEmpty {
+            await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false)
+        }
     }
 
-    /// Ask Claude for a short session title using the current transcript,
+    /// Ask the active provider for a short session title using the current transcript,
     /// then rename the session. Used by `/title` and for auto-titling.
     func generateSessionTitle() async {
         guard let sid = activeSessionId else { return }
@@ -1425,11 +1453,10 @@ final class AppStore: ObservableObject {
     }
 
     /// Compact the active session's conversation history. Sends `/compact`
-    /// which Claude Code interprets natively — it summarizes prior messages
-    /// into a condensed form, then continues from there.
+    /// through Kiln's provider-neutral local summarization flow.
     func compact() async {
         guard activeSessionId != nil else { return }
-        await sendMessage("/compact")
+        await compactSession()
     }
 
     /// Clear the active session's conversation history via `/clear`. Claude
@@ -1462,7 +1489,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func sendMessage(_ text: String, attachments: [ComposerAttachment] = []) async {
+    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true) async {
         guard let idx = activeSessionIndex else { return }
         let sessionId = sessions[idx].id
         let model = sessions[idx].model
@@ -1474,6 +1501,15 @@ final class AppStore: ObservableObject {
             sessionName: sessions[idx].name,
             model: model.rawValue
         ))
+
+        if allowAutoCompact, shouldAutoCompact(sessionId: sessionId) {
+            await compactSession(
+                sessionId: sessionId,
+                continueWith: expandedText,
+                attachments: attachments
+            )
+            return
+        }
 
         // Build the DISPLAY message: attachment cards first, then text.
         // Keeps the chat visually clean — no "Attached files: /path…" soup.
@@ -1566,6 +1602,20 @@ final class AppStore: ObservableObject {
                 self.handleClaudeEvent(event, sessionId: sessionId)
             }
         }
+    }
+
+    private func shouldAutoCompact(sessionId: String) -> Bool {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else { return false }
+        let baseWindow: Int = {
+            if extendedContext, let extended = session.model.extendedContextWindow {
+                return extended
+            }
+            return session.model.contextWindow
+        }()
+        guard baseWindow > 0 else { return false }
+        let rt = runtime(sessionId)
+        let usage = Double(rt.inputTokens + rt.outputTokens) / Double(baseWindow)
+        return session.messages.count >= 8 && usage >= 0.9
     }
 
     // MARK: - Per-session tunnels
@@ -1780,6 +1830,17 @@ final class AppStore: ObservableObject {
             case .thinkingDelta(let text):
                 state.thinkingText += text
 
+            case .trace(let entry):
+                state.traceEntries.append(entry)
+                if state.traceEntries.count > 300 {
+                    state.traceEntries.removeFirst(state.traceEntries.count - 300)
+                }
+                AgentTraceLog.shared.append(
+                    entry,
+                    sessionId: sessionId,
+                    sessionName: sessions.first(where: { $0.id == sessionId })?.name
+                )
+
             case .toolStart(let id, let name, let input):
                 if let idx = state.activeToolCalls.firstIndex(where: { $0.id == id }) {
                     if !input.isEmpty && input.count > state.activeToolCalls[idx].input.count {
@@ -1827,7 +1888,7 @@ final class AppStore: ObservableObject {
                 // reflects real usage velocity.
                 RateLimitTracker.shared.recordUsage(inputTokens: input, outputTokens: output)
 
-            case .cost, .error, .sessionId, .done:
+        case .cost, .error, .sessionId, .done:
                 break // handled below (outside the mutate closure)
             }
         }
@@ -1922,6 +1983,15 @@ final class AppStore: ObservableObject {
             blocks.append(.text(runtime.streamingText))
         }
 
+        if !runtime.thinkingText.isEmpty {
+            blocks.insert(.thinking(runtime.thinkingText), at: 0)
+        }
+
+        if !runtime.traceEntries.isEmpty {
+            let insertIndex = runtime.thinkingText.isEmpty ? 0 : 1
+            blocks.insert(.trace(runtime.traceEntries), at: insertIndex)
+        }
+
         for tool in runtime.activeToolCalls {
             blocks.append(.toolUse(tool))
         }
@@ -1963,6 +2033,7 @@ final class AppStore: ObservableObject {
         mutateRuntime(sessionId) { state in
             state.streamingText = ""
             state.thinkingText = ""
+            state.traceEntries = []
             state.activeToolCalls = []
             state.currentToolId = nil
         }

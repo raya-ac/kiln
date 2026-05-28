@@ -37,24 +37,27 @@ enum SlashHelpers {
         // Drain both pipes concurrently. readDataToEndOfFile returns when
         // the write end closes (process exits), so we use a DispatchGroup
         // to wait for both reads rather than relying on waitUntilExit.
-        var outData = Data()
-        var errData = Data()
+        final class DataBox: @unchecked Sendable {
+            var data = Data()
+        }
+        let outData = DataBox()
+        let errData = DataBox()
         let group = DispatchGroup()
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            outData.data = outPipe.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            errData.data = errPipe.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
         p.waitUntilExit()
         group.wait()
 
-        let out = String(data: outData, encoding: .utf8) ?? ""
-        let err = String(data: errData, encoding: .utf8) ?? ""
+        let out = String(data: outData.data, encoding: .utf8) ?? ""
+        let err = String(data: errData.data, encoding: .utf8) ?? ""
         return (p.terminationStatus, out, err)
     }
 
@@ -220,6 +223,7 @@ enum SlashHelpers {
                 switch block {
                 case .text(let t): chars += t.count
                 case .thinking(let t): chars += t.count
+                case .trace(let entries): chars += entries.reduce(0) { $0 + $1.title.count + $1.detail.count }
                 case .toolUse(let b): chars += b.input.count
                 case .toolResult(let b): chars += b.content.count
                 default: break
