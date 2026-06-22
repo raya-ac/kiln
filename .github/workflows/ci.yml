@@ -13,7 +13,7 @@ jobs:
     name: swift build
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Select latest Xcode (26+)
         run: |
