@@ -97,8 +97,8 @@ open .build/release/Kiln
 That gets you the raw binary. To produce a real `Kiln.app` bundle (the kind Finder recognises, with auto-updates wired up):
 
 ```bash
-./scripts/make-app-bundle.sh 1.13.0 arm64      # Apple Silicon
-./scripts/make-app-bundle.sh 1.13.0 x86_64     # Intel
+./scripts/make-app-bundle.sh 1.14.0 arm64      # Apple Silicon
+./scripts/make-app-bundle.sh 1.14.0 x86_64     # Intel
 open dist/arm64/Kiln.app
 ```
 
@@ -106,7 +106,7 @@ Either works fine for trying it out.
 
 ## Releases & auto-updates
 
-Push a tag like `v1.13.0` and GitHub Actions will:
+Push a tag like `v1.14.0` and GitHub Actions will:
 
 1. Build separate Apple Silicon and Intel `.app` bundles.
 2. Code-sign and notarise them (if you've added the Apple secrets).
@@ -166,7 +166,7 @@ Common commands are wrapped in a `Makefile`:
 ```bash
 make           # lists everything
 make run       # debug build + open the binary
-make bundle VERSION=1.13.0 ARCH=arm64
+make bundle VERSION=1.14.0 ARCH=arm64
 make lint      # swift-format --lint
 make format    # swift-format --in-place
 make logo      # re-render the brand mark

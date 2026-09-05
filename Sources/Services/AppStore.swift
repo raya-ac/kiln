@@ -264,12 +264,47 @@ final class AppStore: ObservableObject {
     }
 
     // Composer options
-    @Published var sessionMode: SessionMode = .build
-    @Published var permissionMode: PermissionMode = .bypass
-    @Published var extendedContext: Bool = false
-    @Published var maxTurns: Int? = nil
-    @Published var thinkingEnabled: Bool = false
-    @Published var effortLevel: EffortLevel = .medium
+    private var composerPreferences: ComposerPreferences {
+        activeSession?.composerPreferences ?? .defaults(from: settings)
+    }
+
+    private func updateComposerPreferences(_ update: (inout ComposerPreferences) -> Void) {
+        guard let idx = activeSessionIndex else { return }
+        var preferences = sessions[idx].composerPreferences ?? .defaults(from: settings)
+        update(&preferences)
+        let previous = sessions[idx].composerPreferences
+        sessions[idx].composerPreferences = preferences
+        do { try Persistence.saveSessionChecked(sessions[idx]) }
+        catch {
+            sessions[idx].composerPreferences = previous
+            ToastCenter.shared.show("Could not save chat controls: " + error.localizedDescription, kind: .error)
+        }
+    }
+
+    var sessionMode: SessionMode {
+        get { composerPreferences.mode }
+        set { updateComposerPreferences { $0.mode = newValue } }
+    }
+    var permissionMode: PermissionMode {
+        get { composerPreferences.permissions }
+        set { updateComposerPreferences { $0.permissions = newValue } }
+    }
+    var extendedContext: Bool {
+        get { composerPreferences.extendedContext }
+        set { updateComposerPreferences { $0.extendedContext = newValue } }
+    }
+    var maxTurns: Int? {
+        get { composerPreferences.maxTurns }
+        set { updateComposerPreferences { $0.maxTurns = newValue } }
+    }
+    var thinkingEnabled: Bool {
+        get { composerPreferences.thinkingEnabled }
+        set { updateComposerPreferences { $0.thinkingEnabled = newValue } }
+    }
+    var effortLevel: EffortLevel {
+        get { composerPreferences.effort }
+        set { updateComposerPreferences { $0.effort = newValue } }
+    }
 
     // Usage tracking — active session's values (back-compat). Per-session
     // counts live in `runtime(id).inputTokens` etc.
@@ -433,8 +468,6 @@ final class AppStore: ObservableObject {
         draftSubscription = drafts.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         Persistence.ensureDirectories()
         settings = Persistence.loadSettings()
-        sessionMode = settings.defaultMode
-        permissionMode = settings.defaultPermissions
 
         let stored = Persistence.loadSessions()
         sessions = stored.map { $0.toSession() }
@@ -673,7 +706,8 @@ final class AppStore: ObservableObject {
             model: resolvedModel,
             kind: kind,
             readOnly: readOnly,
-            sessionInstructions: sessionInstructions
+            sessionInstructions: sessionInstructions,
+            composerPreferences: .defaults(from: settings)
         )
         _ = session  // keep compiler from complaining about the let rebind
         sessions.insert(session, at: 0)
@@ -685,7 +719,7 @@ final class AppStore: ObservableObject {
         if let sm = ws?.sessionMode, let m = SessionMode(rawValue: sm) { sessionMode = m }
         if let pm = ws?.permissionMode, let p = PermissionMode(rawValue: pm) { permissionMode = p }
 
-        Persistence.saveSession(session)
+        if let saved = sessions.first(where: { $0.id == session.id }) { Persistence.saveSession(saved) }
     }
 
     func deleteSession(_ id: String) {
@@ -823,6 +857,7 @@ final class AppStore: ObservableObject {
             sessionInstructions: old.sessionInstructions,
             tags: old.tags,
             openAIFastMode: old.openAIFastMode,
+            composerPreferences: old.composerPreferences,
             createdAt: old.createdAt
         )
         fresh.messages = old.messages
@@ -1140,6 +1175,7 @@ final class AppStore: ObservableObject {
             tunnelPort: nil,
             tunnelSub: nil,
             openAIFastMode: reconstructed.openAIFastMode,
+            composerPreferences: reconstructed.composerPreferences,
             createdAt: Date()
         )
         imported.messages = reconstructed.messages
@@ -1184,7 +1220,8 @@ final class AppStore: ObservableObject {
             name: name,
             model: src.model,
             group: src.group,
-            openAIFastMode: src.openAIFastMode
+            openAIFastMode: src.openAIFastMode,
+            composerPreferences: src.composerPreferences
         )
         forked.messages = forkedMessages
         forked.forkedFrom = fromSessionId
@@ -1215,7 +1252,8 @@ final class AppStore: ObservableObject {
             tunnelPort: nil,
             tunnelSub: nil,
             colorLabel: src.colorLabel,
-            openAIFastMode: src.openAIFastMode
+            openAIFastMode: src.openAIFastMode,
+            composerPreferences: src.composerPreferences
         )
         fresh.messages = []
         sessions.insert(fresh, at: 0)
@@ -1264,7 +1302,8 @@ final class AppStore: ObservableObject {
             kind: original.kind,
             sessionInstructions: original.sessionInstructions,
             tags: original.tags + ["compare"],
-            openAIFastMode: altModel.supportsOpenAIFastMode ? original.openAIFastMode : false
+            openAIFastMode: altModel.supportsOpenAIFastMode ? original.openAIFastMode : false,
+            composerPreferences: original.composerPreferences
         )
         twin.forkedFrom = original.id
         sessions.insert(twin, at: 0)
@@ -1314,10 +1353,16 @@ final class AppStore: ObservableObject {
             ToastCenter.shared.show("Could not archive the conversation. Compaction was cancelled.", kind: .error)
             return
         }
-        sessions[idx].messages = [ChatMessage(role: .assistant, blocks: [.text(summary)], model: session.model)]
+        var compacted = sessions[idx]
+        compacted.messages = [ChatMessage(role: .assistant, blocks: [.text(summary)], model: session.model)]
+        do { try Persistence.saveSessionChecked(compacted) }
+        catch {
+            ToastCenter.shared.show("Could not save compacted chat. History was retained.", kind: .error)
+            return
+        }
+        sessions[idx] = compacted
         agent(for: session.model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
-        Persistence.saveSession(sessions[idx])
         if let followUpText {
             await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
         }
@@ -1465,15 +1510,15 @@ final class AppStore: ObservableObject {
     }
 
     private func makeSendOptions(for session: Session) -> SendOptions {
-        // Build options from current state
+        let preferences = session.composerPreferences ?? .defaults(from: settings)
         var options = SendOptions()
-        options.mode = sessionMode
-        options.permissions = permissionMode
-        options.extendedContext = extendedContext
-        options.maxTurns = maxTurns
+        options.mode = preferences.mode
+        options.permissions = preferences.permissions
+        options.extendedContext = preferences.extendedContext
+        options.maxTurns = preferences.maxTurns
         options.chatMode = session.kind == .chat
-        options.thinkingEnabled = thinkingEnabled
-        options.effortLevel = thinkingEnabled ? effortLevel : nil
+        options.thinkingEnabled = preferences.thinkingEnabled
+        options.effortLevel = preferences.thinkingEnabled ? preferences.effort : nil
         options.openAIFastMode = session.openAIFastMode && session.model.supportsOpenAIFastMode
 
         // Build system prompt from session override (if any) + settings + language
@@ -1548,8 +1593,15 @@ final class AppStore: ObservableObject {
             let context = TranscriptContext.text(from: Array(sessions[idx].messages.dropLast()), characterLimit: 80_000)
             if !context.isEmpty { expanded = "Previous conversation (context):\n\(context)\n\nCurrent request:\n" + expanded }
         }
+        let previouslyInterrupted = sessions[idx].wasInterrupted
         sessions[idx].wasInterrupted = true
-        Persistence.saveSession(sessions[idx])
+        do { try Persistence.saveSessionChecked(sessions[idx]) }
+        catch {
+            sessions[idx].messages.removeAll { $0.id == userMessage.id }
+            sessions[idx].wasInterrupted = previouslyInterrupted
+            ToastCenter.shared.show("Message not sent. Could not save chat: " + error.localizedDescription, kind: .error)
+            return
+        }
         if let queuedRequestID { drafts.completePending(sessionId, requestID: queuedRequestID) }
 
         // Initialize THIS session's runtime — leaves any other concurrently
@@ -1574,7 +1626,7 @@ final class AppStore: ObservableObject {
     private func shouldAutoCompact(sessionId: String) -> Bool {
         guard let session = sessions.first(where: { $0.id == sessionId }) else { return false }
         let baseWindow: Int = {
-            if extendedContext, let extended = session.model.extendedContextWindow {
+            if session.composerPreferences?.extendedContext == true, let extended = session.model.extendedContextWindow {
                 return extended
             }
             return session.model.contextWindow
@@ -1629,7 +1681,8 @@ final class AppStore: ObservableObject {
             group: src.group,
             kind: src.kind,
             colorLabel: src.colorLabel,
-            openAIFastMode: src.openAIFastMode
+            openAIFastMode: src.openAIFastMode,
+            composerPreferences: src.composerPreferences
         )
         copy.messages = []
         sessions.insert(copy, at: 0)
@@ -1651,7 +1704,8 @@ final class AppStore: ObservableObject {
             sessionInstructions: src.sessionInstructions,
             tags: src.tags,
             colorLabel: src.colorLabel,
-            openAIFastMode: src.openAIFastMode
+            openAIFastMode: src.openAIFastMode,
+            composerPreferences: src.composerPreferences
         )
         copy.messages = src.messages
         sessions.insert(copy, at: 0)

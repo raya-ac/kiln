@@ -280,6 +280,7 @@ struct Session: Identifiable, Sendable {
     /// the next launch, we know the previous run was interrupted (app crash,
     /// `codex` crash, force-quit) and can offer a retry.
     var wasInterrupted: Bool = false
+    var composerPreferences: ComposerPreferences?
     /// Codex fast mode for ChatGPT-backed GPT-5.4 sessions. This maps to
     /// Codex's own fast service tier rather than changing models.
     var openAIFastMode: Bool = false
@@ -296,7 +297,7 @@ struct Session: Identifiable, Sendable {
     /// as a small dot next to the session name in the sidebar.
     var colorLabel: String? = nil
 
-    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: AgentModel = .defaultModel, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: AgentModel = .defaultModel, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, composerPreferences: ComposerPreferences? = nil, createdAt: Date = .now) {
         self.id = id
         self.workDir = workDir
         self.name = name
@@ -315,6 +316,7 @@ struct Session: Identifiable, Sendable {
         self.tunnelSub = tunnelSub
         self.colorLabel = colorLabel
         self.openAIFastMode = openAIFastMode
+        self.composerPreferences = composerPreferences
     }
 }
 

@@ -9,6 +9,7 @@ struct SettingsView: View {
     // window re-focus. `refreshTick` is bumped on each nested-object
     // publish (see `.onReceive` in body), forcing a re-render.
     @State private var refreshTick: Int = 0
+    @State private var showArchives = false
     @State private var tab: SettingsTab = .settings
     // Local editing buffer for the Port field so typing "9000" doesn't
     // mutate the live server port through the intermediate values 9, 90, 900.
@@ -90,6 +91,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .sheet(isPresented: $showArchives) { CompactionArchivesView() }
         .frame(width: 820, height: 640)
         .background(Color.kilnBg)
         .onAppear {
@@ -589,11 +591,7 @@ struct SettingsView: View {
                     Text("At 90% context").font(.system(size: 11)).foregroundStyle(Color.kilnTextSecondary)
                 }
                 Spacer()
-                Button {
-                    let directory = Persistence.compactionArchiveDirectory
-                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    NSWorkspace.shared.open(directory)
-                } label: { Image(systemName: "folder") }
+                Button { showArchives = true } label: { Image(systemName: "archivebox") }
                 .buttonStyle(.borderless).help("Open conversation archives saved before compaction")
                 .accessibilityLabel("Open compaction archives")
             }

@@ -4,6 +4,18 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.14.0] — 2026-09-05
+
+### Added
+- Per-chat mode, permissions, reasoning effort, extended context, and turn limits, retained across switching and restarts.
+- Searchable compaction archive browser in Chat & Composer settings, with dates, folders, and message counts.
+- Restore an archive as a separate chat without replacing the current transcript or restarting old tunnels.
+
+### Fixed
+- Keep queued request recovery until the chat transcript is successfully saved. A failed write cancels the send and restores the draft.
+- Retain the original conversation when saving a compacted transcript fails.
+- Background sends use the target conversation's controls, not whichever chat is currently selected.
+
 ## [1.13.0] — 2026-09-05
 
 ### Added

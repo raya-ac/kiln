@@ -56,10 +56,18 @@ enum Persistence {
     }
 
     static func saveSession(_ session: Session) {
-        let data = SessionData(from: session)
-        guard let json = try? JSONEncoder().encode(data) else { return }
-        let path = (sessionsDir as NSString).appendingPathComponent("\(session.id).json")
-        try? json.write(to: URL(fileURLWithPath: path), options: .atomic)
+        try? saveSessionChecked(session)
+    }
+
+    static func saveSessionChecked(_ session: Session, directory: URL = URL(fileURLWithPath: sessionsDir)) throws {
+        guard !session.id.isEmpty, !session.id.contains("/"), session.id != ".", session.id != ".." else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent(session.id + ".json")
+        let json = try JSONEncoder().encode(SessionData(from: session))
+        try json.write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
     static func deleteSession(_ id: String) {
@@ -114,6 +122,7 @@ struct SessionData: Codable {
     var sessionInstructions: String = ""
     var wasInterrupted: Bool = false
     var openAIFastMode: Bool = false
+    var composerPreferences: ComposerPreferences?
     var tags: [String] = []
     /// Per-session warden tunnel config — local port + optional stable sub.
     /// Both default-absent so old session files decode unchanged.
@@ -139,6 +148,7 @@ struct SessionData: Codable {
         sessionInstructions = (try? c.decode(String.self, forKey: .sessionInstructions)) ?? ""
         wasInterrupted = (try? c.decode(Bool.self, forKey: .wasInterrupted)) ?? false
         openAIFastMode = (try? c.decode(Bool.self, forKey: .openAIFastMode)) ?? false
+        composerPreferences = try c.decodeIfPresent(ComposerPreferences.self, forKey: .composerPreferences)
         tags = (try? c.decode([String].self, forKey: .tags)) ?? []
         tunnelPort = try? c.decode(Int.self, forKey: .tunnelPort)
         tunnelSub = try? c.decode(String.self, forKey: .tunnelSub)
@@ -160,6 +170,7 @@ struct SessionData: Codable {
         self.isArchived = session.isArchived
         self.sessionInstructions = session.sessionInstructions
         self.wasInterrupted = session.wasInterrupted
+        self.composerPreferences = session.composerPreferences
         self.openAIFastMode = session.openAIFastMode
         self.tags = session.tags
         self.tunnelPort = session.tunnelPort
@@ -186,6 +197,7 @@ struct SessionData: Codable {
             tunnelSub: tunnelSub,
             colorLabel: colorLabel,
             openAIFastMode: openAIFastMode,
+            composerPreferences: composerPreferences,
             createdAt: Date(timeIntervalSince1970: createdAt)
         )
         s.wasInterrupted = wasInterrupted
