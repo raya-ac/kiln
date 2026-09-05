@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Kiln</title>
+<!--VENDOR-->
+<style>/*STYLES*/</style>
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-button" id="mobileSessions" title="Sessions" aria-label="Sessions"><i data-lucide="panel-left"></i></button>
+  <span class="logo">Kiln</span>
+  <span id="activeSessionName" hidden></span><span id="busyBadge" class="badge">Connecting</span>
+  <span class="spacer"></span>
+  <button class="icon-button" id="mobileTools" title="Workspace tools" aria-label="Workspace tools"><i data-lucide="panel-right"></i></button>
+</header>
+<div class="layout">
+  <button id="panelScrim" class="panel-scrim" aria-label="Close panels"></button>
+  <aside class="sidebar" aria-label="Sessions">
+    <div class="sidebar-brand"><span class="brand-mark"><i data-lucide="flame"></i></span><span class="logo">Kiln</span><span class="spacer"></span>
+      <button class="icon-button new-session-btn" id="newSessionBtn" title="New session" aria-label="New session"><i data-lucide="plus"></i></button>
+    </div>
+    <div class="sidebar-tabs" role="tablist" aria-label="Session type">
+      <button class="sidebar-tab active" role="tab" aria-selected="true" data-kind="code"><i data-lucide="code"></i>Code</button>
+      <button class="sidebar-tab" role="tab" aria-selected="false" data-kind="chat"><i data-lucide="messages-square"></i>Chat</button>
+    </div>
+    <div class="sb-search"><i data-lucide="search"></i><input id="sessionSearch" aria-label="Search sessions" placeholder="Search sessions..." spellcheck="false" autocomplete="off"></div>
+    <div class="sb-archive" id="archiveBar"></div>
+    <div class="session-list" id="sessionList"></div>
+    <footer class="sidebar-footer"><button id="settingsBtn"><i data-lucide="settings-2"></i>Settings</button><span id="connectionState" role="status">Connecting</span></footer>
+  </aside>
+  <main class="main" id="main">
+    <header class="chat-header">
+      <div class="header-title"><h1 id="chatHdrName">Select a session</h1><span id="chatHdrBusy" hidden>Working<span class="live-dot"></span></span>
+        <button class="icon-button" id="retryBtn" title="Retry last request" aria-label="Retry last request"><i data-lucide="rotate-ccw"></i></button>
+        <button class="icon-button" id="exportBtn" title="Export conversation" aria-label="Export conversation"><i data-lucide="download"></i></button>
+        <button class="icon-button desktop-panel-toggle" id="toggleTools" title="Toggle workspace tools" aria-label="Toggle workspace tools"><i data-lucide="panel-right"></i></button>
+      </div>
+      <div class="header-context"><span id="chatHdrIcon"><i data-lucide="folder"></i></span><span id="chatWorkDir"></span>
+        <button id="chatHdrModel" class="model-select" title="Choose model"></button>
+      </div>
+    </header>
+    <div class="transcript-toolbar"><span id="messageCount"></span><span id="contextInfo"></span><span class="spacer"></span>
+      <button class="icon-button" id="findBtn" title="Find in conversation" aria-label="Find in conversation"><i data-lucide="search"></i></button>
+      <button class="icon-button" id="followBtn" title="Follow output" aria-label="Follow output" aria-pressed="true"><i data-lucide="arrow-down-to-line"></i></button>
+    </div>
+    <div id="findBar" hidden><input id="findInput" type="search" placeholder="Find in conversation" aria-label="Find in conversation"><span id="findCount"></span><button class="icon-button" id="findNext" title="Next match" aria-label="Next match"><i data-lucide="arrow-down"></i></button><button class="icon-button" id="findClose" title="Close search" aria-label="Close search"><i data-lucide="x"></i></button></div>
+    <div id="modelWarning" class="notice" hidden></div>
+    <div class="messages" id="messages" aria-label="Conversation"></div>
+    <section class="composer" aria-label="Message composer">
+      <div id="sendError" class="notice error" role="alert" hidden></div>
+      <div class="attach-chips" id="attachChips"></div>
+      <div class="composer-row">
+        <textarea class="composer-input" id="composerInput" aria-label="Message" rows="3" placeholder="Message assistant..."></textarea>
+        <div class="composer-actions">
+          <button class="icon-button" id="attachBtn" title="Attach files or images" aria-label="Attach files or images"><i data-lucide="paperclip"></i></button>
+          <button class="icon-button" id="expandComposer" title="Expand editor" aria-label="Expand editor" aria-pressed="false"><i data-lucide="maximize-2"></i></button>
+          <button class="icon-button" id="clearDraft" title="Clear draft" aria-label="Clear draft"><i data-lucide="eraser"></i></button>
+          <input type="file" id="fileInput" multiple hidden>
+          <span class="spacer"></span><span id="draftState" role="status"></span>
+          <button class="composer-send" id="sendBtn" title="Send" aria-label="Send" disabled><i data-lucide="arrow-up"></i></button>
+          <button class="composer-stop" id="stopBtn" title="Stop" aria-label="Stop" hidden><i data-lucide="square"></i></button>
+        </div>
+      </div>
+      <div class="composer-bar" id="composerBar"></div>
+    </section>
+    <div class="drop-overlay" id="dropOverlay"><i data-lucide="paperclip"></i></div>
+  </main>
+  <aside class="right-panel" aria-label="Workspace tools">
+    <div class="right-tabs" role="tablist" aria-label="Workspace tools">
+      <button class="right-tab active" role="tab" aria-selected="true" data-tab="activity"><i data-lucide="activity"></i>Activity</button>
+      <button class="right-tab" role="tab" aria-selected="false" data-tab="stats"><i data-lucide="chart-no-axes-column"></i>Usage</button>
+      <button class="right-tab" role="tab" aria-selected="false" data-tab="remote"><i data-lucide="radio"></i>Remote</button>
+    </div>
+    <div class="right-body" id="rightBody"></div>
+  </aside>
+</div>
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalContent" role="dialog" aria-modal="true" aria-label="Kiln settings and actions" tabindex="-1"></div></div>
+<div class="ctx-menu" id="ctxMenu" role="menu"></div>
+<script>/*APPLICATION*/</script>
+</body>
+</html>

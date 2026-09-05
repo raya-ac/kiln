@@ -14,7 +14,7 @@ struct ContentView: View {
     @EnvironmentObject var store: AppStore
 
     @AppStorage("panelOrder") private var panelOrderRaw: String = "sessions,chat,tools"
-    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 220
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
     @AppStorage("rightPanelWidth") private var rightPanelWidth: Double = 420
     /// Width of the chat panel when it's demoted from the center flex slot
     /// into a sidebar position (i.e. the user dragged `.tools` into the
@@ -28,7 +28,7 @@ struct ContentView: View {
     @AppStorage("focusModePreSidebar") private var focusModePreSidebar: Bool = false
     @AppStorage("focusModePreRight") private var focusModePreRight: Bool = false
 
-    private let sidebarMin: Double = 180
+    private let sidebarMin: Double = 230
     private let sidebarMax: Double = 420
     private let rightMin: Double = 300
     /// Absolute max; the GeometryReader clamp can lower this further based
@@ -97,7 +97,7 @@ struct ContentView: View {
     /// Persisted width when this slot is docked as a sidebar.
     private func sideWidth(for slot: PanelSlot) -> Double {
         switch slot {
-        case .sessions: return sidebarWidth
+        case .sessions: return max(sidebarMin, sidebarWidth)
         case .chat:     return chatSideWidth
         case .tools:    return rightPanelWidth
         }
@@ -173,6 +173,14 @@ struct ContentView: View {
         let rawRight: Double = isCollapsed(rightSlot) ? railWidth : sideWidth(for: rightSlot)
         let leftFloor: Double = isCollapsed(leftSlot) ? railWidth : sideMin(for: leftSlot)
         let rightFloor: Double = isCollapsed(rightSlot) ? railWidth : sideMin(for: rightSlot)
+
+        // Compact windows still reserve the conversation's minimum width.
+        // Compress the side panels proportionally without changing saved sizes.
+        if available < leftFloor + rightFloor + fMin {
+            let budget = max(0, available - fMin)
+            let ratio = budget / max(1, leftFloor + rightFloor)
+            return [leftFloor * ratio, min(fMin, available), rightFloor * ratio]
+        }
 
         let left = min(rawLeft, max(leftFloor, available - fMin - rightFloor))
         let right = min(rawRight, max(rightFloor, available - left - fMin))

@@ -30,14 +30,14 @@ extension NSColor {
 
 extension Color {
     // Backgrounds
-    static let kilnBg = kilnDyn(0xFAFAF9, 0x0A0A0B)
-    static let kilnSurface = kilnDyn(0xFFFFFF, 0x141415)
-    static let kilnSurfaceElevated = kilnDyn(0xF4F4F5, 0x1C1C1E)
-    static let kilnSurfaceHover = kilnDyn(0xE4E4E7, 0x242426)
+    static let kilnBg = kilnDyn(0xFFFFFF, 0x171719)
+    static let kilnSurface = kilnDyn(0xF5F5F7, 0x121214)
+    static let kilnSurfaceElevated = kilnDyn(0xF0F0F3, 0x222225)
+    static let kilnSurfaceHover = kilnDyn(0xE7E7EB, 0x2C2C30)
 
     // Borders
-    static let kilnBorder = kilnDyn(0xD4D4D8, 0x2A2A2C)
-    static let kilnBorderSubtle = kilnDyn(0xE4E4E7, 0x1E1E20)
+    static let kilnBorder = kilnDyn(0xD9D9DF, 0x343438)
+    static let kilnBorderSubtle = kilnDyn(0xE8E8ED, 0x26262A)
 
     // Text
     static let kilnText = kilnDyn(0x09090B, 0xE4E4E7)

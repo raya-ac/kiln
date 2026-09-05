@@ -9,6 +9,7 @@ struct ComposerTextInput: NSViewRepresentable {
     var fontSize: CGFloat = 13
     var spellCheck = true
     var expanded = false
+    var minimumLines: CGFloat = 1
     var onSubmit: (() -> Void)? = nil
     var onCommandReturn: () -> Void = {}
     var onKey: (KeyEquivalent) -> KeyPress.Result = { _ in .ignored }
@@ -73,7 +74,7 @@ struct ComposerTextInput: NSViewRepresentable {
         container.containerSize = NSSize(width: max(1, width - 2), height: .greatestFiniteMagnitude)
         manager.ensureLayout(for: container)
         let line = ceil(manager.defaultLineHeight(for: .systemFont(ofSize: fontSize)))
-        let height = expanded ? (proposal.height ?? 420) : min(line * 8, max(line, ceil(manager.usedRect(for: container).height)))
+        let height = expanded ? (proposal.height ?? 420) : min(line * 8, max(line * minimumLines, ceil(manager.usedRect(for: container).height)))
         return CGSize(width: width, height: height)
     }
 

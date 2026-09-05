@@ -81,10 +81,10 @@ struct AgentTraceRow: View {
                 .padding(.top, 8)
             }
         }
-        .padding(10)
-        .background(Color.kilnSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorderSubtle, lineWidth: 1))
+        .padding(.vertical, 8)
+        .padding(.horizontal, expanded ? 10 : 0)
+        .background(expanded ? Color.kilnSurface : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private var headerColor: Color {

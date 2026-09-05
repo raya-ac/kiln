@@ -36,8 +36,6 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar row
-            ComposerToolbar()
 
             // Undo-send banner (only when a send is pending)
             if let pending = store.pendingSend, pending.delaySeconds > 0 {
@@ -97,59 +95,12 @@ struct ComposerView: View {
                 .frame(height: 66)
             }
 
-            // Input row
-            HStack(alignment: .bottom, spacing: 10) {
-                // Attach button
-                Button {
-                    pickFiles()
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(Color.kilnSurface)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("Attach files or images")
-
-                // Snippets button
-                Button {
-                    showSnippets = true
-                } label: {
-                    Image(systemName: "text.alignleft")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(Color.kilnSurface)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("Snippets (⌘/)")
-                .keyboardShortcut("/", modifiers: .command)
-
-                // Expand to full editor — for long prompts
-                Button {
-                    showExpandedEditor = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(Color.kilnSurface)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.kilnBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("Expand editor")
-
-                VStack(spacing: 0) {
+            ComposerSurface(focused: isFocused, dropTarget: dropHovering) {
                     ComposerTextInput(text: inputBinding, isFocused: $isFocused,
                         placeholder: placeholderText,
-                        fontSize: 13 * store.settings.fontScale.factor,
+                        fontSize: 14 * store.settings.fontScale.factor,
                         spellCheck: store.settings.spellCheck,
+                        minimumLines: 3,
                         onSubmit: submitAction,
                         onCommandReturn: { if store.settings.sendKey == .cmdEnter { send() } },
                         onKey: handleInputKey,
@@ -165,88 +116,53 @@ struct ComposerView: View {
                             slashSelectedIndex = 0
                             atSelectedIndex = 0
                         }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.kilnSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(borderColor, lineWidth: dropHovering ? 2 : 1)
-                )
-
-                if store.isSessionBusy(store.activeSessionId) {
-                    Button {
-                        store.interrupt()
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundStyle(Color.kilnError)
-                    }
-                    .buttonStyle(KilnPressStyle())
-                    .help("Stop generation (⌘.)")
-                } else {
-                    Button {
-                        send()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundStyle(
-                                canSend ? Color.kilnAccent : Color.kilnTextTertiary
-                            )
-                    }
-                    .buttonStyle(KilnPressStyle())
-                    .disabled(!canSend)
-                    .help(store.settings.sendKey == .cmdEnter ? "Send (⌘⏎)" : "Send (⏎)")
-                    .modifier(CmdEnterSendModifier(enabled: store.settings.sendKey == .cmdEnter))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-
-            // Keyboard hint strip — clickable. Mode controlled by settings.
-            if shouldShowHintStrip {
-                HStack(spacing: 8) {
-                    let sendLabel = store.settings.sendKey == .cmdEnter ? "⌘⏎" : "⏎"
-                    hintButton(sendLabel, "send") { send() }
-                        .disabled(!canSend)
-                    hintButton(store.settings.sendKey == .cmdEnter ? "⏎" : "⇧⏎", "newline") {
-                        input += "\n"
-                    }
-                    hintButton("⌘/", "snippets") { showSnippets = true }
-                    hintButton("⌘K", "commands") { store.showCommandPalette = true }
-                    hintButton("⌘⇧F", "search") { store.showGlobalSearch = true }
-                    if store.isSessionBusy(store.activeSessionId) {
-                        hintButton("⌘.", "stop") { store.interrupt() }
-                    }
-                    Spacer()
-                    if !input.isEmpty || !store.composerAttachments.isEmpty {
-                        Button {
-                            input = ""
-                            store.clearAttachments()
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 9))
-                                Text("clear")
-                                    .font(.system(size: 9))
-                            }
-                            .foregroundStyle(Color.kilnTextTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Clear the draft")
-
+            } controls: {
+                HStack(spacing: 4) {
+                    WorkspaceIconButton(icon: "paperclip", label: "Attach files or images") { pickFiles() }
+                    WorkspaceIconButton(icon: "text.alignleft", label: "Snippets") { showSnippets = true }
+                        .keyboardShortcut("/", modifiers: .command)
+                    WorkspaceIconButton(icon: "arrow.up.left.and.arrow.down.right", label: "Expand editor") { showExpandedEditor = true }
+                    Menu {
+                        Button("Commands") { store.showCommandPalette = true }
+                        Button("Keyboard shortcuts") { store.showShortcutsOverlay = true }
+                        Divider()
+                        Button("Clear draft", role: .destructive) { input = ""; store.clearAttachments() }
+                            .disabled(input.isEmpty && store.composerAttachments.isEmpty)
+                    } label: { Image(systemName: "ellipsis").frame(width: 30, height: 30) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .help("Composer actions").accessibilityLabel("Composer actions")
+                    Spacer(minLength: 4)
+                    if shouldShowHintStrip && !input.isEmpty {
                         Text(composerCountLabel)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(Color.kilnTextTertiary)
-                            .help("Characters, words, and a rough token estimate for the draft")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.kilnTextTertiary).lineLimit(1)
+                    }
+                    if store.isSessionBusy(store.activeSessionId) {
+                        WorkspaceIconButton(icon: "stop.fill", label: "Stop generation") { store.interrupt() }
+                    } else {
+                        Button(action: send) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(canSend ? Color.kilnBg : Color.kilnTextTertiary)
+                                .frame(width: 32, height: 32)
+                                .background(canSend ? Color.kilnAccent : Color.kilnSurfaceHover)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                        .buttonStyle(KilnPressStyle()).disabled(!canSend)
+                        .help(store.settings.sendKey == .cmdEnter ? "Send (⌘⏎)" : "Send (⏎)")
+                        .accessibilityLabel("Send message")
+                        .modifier(CmdEnterSendModifier(enabled: store.settings.sendKey == .cmdEnter))
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
             }
+            .padding(.horizontal, 24).padding(.top, 10)
+            ComposerToolbar()
+                .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
+
         }
+        .frame(maxWidth: 920)
+        .frame(maxWidth: .infinity)
         .background(Color.kilnBg)
         .onDisappear { store.drafts.flush() }
         .onChange(of: store.composerFocusRequest) { isFocused = true }
@@ -1439,7 +1355,9 @@ struct ComposerToolbar: View {
             }
             .controlSize(.small)
             .font(.system(size: 11, weight: .medium))
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.kilnTextSecondary)
+            .tint(Color.kilnTextSecondary)
             .disabled(store.isSessionBusy(store.activeSessionId))
             .padding(.horizontal, 16)
             .padding(.vertical, 6)

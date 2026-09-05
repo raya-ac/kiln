@@ -4,6 +4,24 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.15.0] — 2026-09-05
+
+### Changed
+- Redesign the native and remote workspaces around the same charcoal surfaces, quieter navigation, separate folder/model header, and larger composer with controls underneath.
+- Simplify session metadata and move message actions into a named menu. Keep reasoning and run logs collapsible without framing every reply.
+- Use responsive web drawers, searchable grouped model selection, official GPT logos, and explicit mode, permission, reasoning, and Fast controls.
+- Extract the remote page from the server into separate bundled HTML, CSS, and JavaScript resources.
+
+### Added
+- Web conversation search, copy-message actions, expanded composer, per-chat local draft recovery, and a native-linked auto-compact setting.
+- Browser checks for desktop, phone, light mode, controls, draft recovery, and Markdown safety.
+
+### Fixed
+- Keep remote drafts when sending fails and preserve open tool details through polling.
+- Forward remote attachments as native file/image inputs and persist uploads with unique private filenames.
+- Bundle browser icons, Markdown parsing, and sanitization locally instead of executing a CDN dependency.
+- Keep native columns within compact window bounds and prevent stale web controls from modifying a different conversation.
+
 ## [1.14.0] — 2026-09-05
 
 ### Added

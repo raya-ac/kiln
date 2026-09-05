@@ -220,6 +220,9 @@ final class RemoteControlServer: ObservableObject {
                 "systemPrompt": store.settings.systemPrompt,
                 "themeMode": store.settings.themeMode.rawValue,
                 "accentHex": store.settings.accentHex,
+                "autoCompactEnabled": store.settings.autoCompactEnabled,
+                "sendKey": store.settings.sendKey.rawValue,
+                "userDisplayName": store.settings.userDisplayName,
             ])
 
         case ("GET", "/api/export"):
@@ -305,26 +308,34 @@ final class RemoteControlServer: ObservableObject {
                   let text = body["text"] as? String
             else { return .json(["error": "missing text"], status: 400) }
             if let sid = body["sessionId"] as? String, sid != store.activeSessionId {
+                guard store.sessions.contains(where: { $0.id == sid }) else { return .json(["error": "Session not found"], status: 404) }
                 store.activeSessionId = sid
             }
             guard store.activeSession != nil else {
                 return .json(["error": "no active session"], status: 400)
             }
-            // Attachments arrive as file paths (array of strings).
-            let attachments = (body["attachments"] as? [String]) ?? []
-            let prefix: String
-            if attachments.isEmpty {
-                prefix = ""
-            } else {
-                let lines = attachments.map { "- \($0)" }.joined(separator: "\n")
-                prefix = "Attached files:\n\(lines)\n\n"
+            let paths = (body["attachments"] as? [String]) ?? []
+            let attachments: [ComposerAttachment]
+            do { attachments = try paths.map { try AttachmentImporter.file(URL(fileURLWithPath: $0)) } }
+            catch { return .json(["error": "An attachment is unavailable."], status: 400) }
+            let draft = store.drafts.draft(for: store.activeSessionId)
+            if !draft.isEmpty && draft != ComposerDraft(text: text, attachments: attachments) {
+                return .json(["error": "There is an unsent draft in the native client. Send or clear it first."], status: 409)
             }
-            let full = prefix + text
-            guard !full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .json(["error": "empty"], status: 400)
+            guard store.queueSend(text, attachments: attachments) else {
+                return .json(["error": "Message could not be queued. Your draft has been kept."], status: 409)
             }
-            Task { await store.sendMessage(full) }
             return .json(["status": "queued"])
+
+        case ("POST", "/api/models/refresh"):
+            await store.refreshModelCatalog()
+            return .json(Self.fullState(store: store))
+
+        case ("POST", "/api/settings/chat"):
+            guard let body = req.jsonBody else { return .json(["error": "Invalid settings"], status: 400) }
+            if let enabled = body["autoCompactEnabled"] as? Bool { store.settings.autoCompactEnabled = enabled }
+            store.saveSettings()
+            return .json(["autoCompactEnabled": store.settings.autoCompactEnabled])
 
         case ("POST", "/api/interrupt"):
             store.interrupt()
@@ -428,6 +439,10 @@ final class RemoteControlServer: ObservableObject {
                   let name = body["model"] as? String,
                   let m = AgentModel(rawValue: name)
             else { return .json(["error": "invalid model"], status: 400) }
+            if let sid = body["sessionId"] as? String, sid != store.activeSessionId {
+                return .json(["error": "Conversation changed. Refresh and try again."], status: 409)
+            }
+            guard !store.isBusy else { return .json(["error": "Wait for the current response."], status: 409) }
             store.setModel(m)
             return .json(["status": "ok"])
 
@@ -437,12 +452,14 @@ final class RemoteControlServer: ObservableObject {
                   let b64 = body["base64"] as? String,
                   let data = Data(base64Encoded: b64)
             else { return .json(["error": "bad payload"], status: 400) }
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kiln-remote-uploads", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            guard data.count <= 32 * 1024 * 1024 else { return .json(["error": "File exceeds 32 MB"], status: 413) }
+            let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".kiln/attachments")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let safe = name.replacingOccurrences(of: "/", with: "_")
-            let file = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(safe)")
+            let file = dir.appendingPathComponent("\(UUID().uuidString)-\(safe)")
             do {
-                try data.write(to: file)
+                try data.write(to: file, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
                 return .json(["status": "ok", "path": file.path, "name": safe])
             } catch {
                 return .json(["error": "write failed: \(error.localizedDescription)"], status: 500)
@@ -450,6 +467,11 @@ final class RemoteControlServer: ObservableObject {
 
         case ("POST", "/api/toolbar"):
             let body = req.jsonBody ?? [:]
+            if let sid = body["sessionId"] as? String, sid != store.activeSessionId {
+                return .json(["error": "Conversation changed. Refresh and try again."], status: 409)
+            }
+            guard !store.isBusy else { return .json(["error": "Wait for the current response."], status: 409) }
+            if let fast = body["openAIFastMode"] as? Bool { store.setOpenAIFastMode(fast) }
             if let v = body["sessionMode"] as? String, let m = SessionMode(rawValue: v) {
                 store.sessionMode = m
             }
@@ -559,8 +581,11 @@ final class RemoteControlServer: ObservableObject {
                 "language": store.settings.language.rawValue,
                 "themeMode": store.settings.themeMode.rawValue,
                 "accentHex": store.settings.accentHex,
+                "autoCompactEnabled": store.settings.autoCompactEnabled,
+                "sendKey": store.settings.sendKey.rawValue,
+                "userDisplayName": store.settings.userDisplayName,
             ],
-            "models": AgentModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0, "efforts": $0.reasoningEfforts] },
+            "models": AgentModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0, "efforts": $0.reasoningEfforts, "provider": $0.provider.rawValue, "older": AgentModel.olderModels.contains($0), "supportsFast": $0.supportsOpenAIFastMode, "brand": $0.brand == .chatgpt ? "openai" : "terminal"] as [String: Any] },
         ]
     }
 
@@ -573,6 +598,7 @@ final class RemoteControlServer: ObservableObject {
             "thinkingEnabled": store.thinkingEnabled,
             "extendedContext": store.extendedContext,
             "maxTurns": store.maxTurns as Any,
+            "openAIFastMode": store.activeSession?.openAIFastMode ?? false,
         ]
     }
 
@@ -591,6 +617,8 @@ final class RemoteControlServer: ObservableObject {
             "tags": s.tags,
             "group": s.group as Any,
             "forkedFrom": s.forkedFrom as Any,
+            "readOnly": s.readOnly,
+            "openAIFastMode": s.openAIFastMode,
         ]
     }
 
@@ -599,6 +627,8 @@ final class RemoteControlServer: ObservableObject {
             "id": m.id,
             "role": m.role.rawValue,
             "timestamp": m.timestamp.timeIntervalSince1970,
+            "model": m.model?.rawValue as Any,
+            "assistantName": m.assistantName,
             "blocks": m.blocks.map(blockJSON),
         ]
     }
@@ -757,1139 +787,8 @@ final class RemoteControlServer: ObservableObject {
 
     // MARK: - Embedded Web UI
 
-    static let indexHTML = #"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Kiln · Remote</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-      :root {
-        --bg: #0e0e10;
-        --surface: #18181b;
-        --surface-hover: #1f1f23;
-        --surface-elevated: #27272a;
-        --border: #27272a;
-        --border-subtle: #1f1f23;
-        --text: #e4e4e7;
-        --text-secondary: #a1a1aa;
-        --text-tertiary: #71717a;
-        --muted: #52525b;
-        --accent: #f97316;
-        --accent-muted: rgba(249, 115, 22, 0.15);
-        --user-bg: #1e293b;
-        --purple: #a855f7;
-        --blue: #3b82f6;
-        --cyan: #06b6d4;
-        --amber: #D97706;
-        --red: #ef4444;
-        --green: #22c55e;
-      }
-      /* Light mode. Follows the OS by default; force either mode by setting
-         data-theme="light" | "dark" on <html>. The JS below flips it when
-         the user's native-app theme setting comes in over /api/settings. */
-      html[data-theme="light"], html[data-theme="system"]:not([data-theme-override]) {
-        color-scheme: light;
-      }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #fafaf9;
-          --surface: #ffffff;
-          --surface-hover: #f4f4f5;
-          --surface-elevated: #f4f4f5;
-          --border: #e4e4e7;
-          --border-subtle: #f4f4f5;
-          --text: #09090b;
-          --text-secondary: #52525b;
-          --text-tertiary: #71717a;
-          --muted: #a1a1aa;
-          --accent: #ea580c;
-          --accent-muted: rgba(234, 88, 12, 0.14);
-          --user-bg: #e0f2fe;
-        }
-      }
-      html[data-theme="light"] {
-        --bg: #fafaf9;
-        --surface: #ffffff;
-        --surface-hover: #f4f4f5;
-        --surface-elevated: #f4f4f5;
-        --border: #e4e4e7;
-        --border-subtle: #f4f4f5;
-        --text: #09090b;
-        --text-secondary: #52525b;
-        --text-tertiary: #71717a;
-        --muted: #a1a1aa;
-        --accent: #ea580c;
-        --accent-muted: rgba(234, 88, 12, 0.14);
-        --user-bg: #e0f2fe;
-      }
-      html[data-theme="dark"] {
-        --bg: #0e0e10;
-        --surface: #18181b;
-        --surface-hover: #1f1f23;
-        --surface-elevated: #27272a;
-        --border: #27272a;
-        --border-subtle: #1f1f23;
-        --text: #e4e4e7;
-        --text-secondary: #a1a1aa;
-        --text-tertiary: #71717a;
-        --muted: #52525b;
-        --accent: #f97316;
-        --accent-muted: rgba(249, 115, 22, 0.15);
-        --user-bg: #1e293b;
-      }
-      * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, sans-serif; font-size: 13px; }
-      body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-      button { font-family: inherit; cursor: pointer; }
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: var(--surface-elevated); }
+    static var indexHTML: String { RemoteWebAssets.page }
 
-      /* Top bar */
-      .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; min-height: 44px; }
-      .topbar .logo { font-weight: 700; font-size: 14px; color: var(--accent); letter-spacing: 0.3px; }
-      .topbar .session-name { font-size: 13px; font-weight: 600; color: var(--text); }
-      .topbar .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface-elevated); color: var(--text-tertiary); font-weight: 500; }
-      .topbar .badge.running { background: var(--accent-muted); color: var(--accent); }
-      .topbar .spacer { flex: 1; }
-      .topbar button { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 500; }
-      .topbar button:hover { background: var(--surface-hover); color: var(--text); }
-      .topbar .mobile-toggle { display: none; }
-      @media (max-width: 900px) { .topbar .mobile-toggle { display: inline-flex; } }
-
-      /* Layout */
-      .layout { flex: 1; display: grid; grid-template-columns: 260px 1fr 280px; min-height: 0; overflow: hidden; }
-      @media (max-width: 900px) {
-        .layout { grid-template-columns: 1fr; }
-        .sidebar, .right-panel { display: none; }
-        .layout.show-sidebar .sidebar { display: flex; position: absolute; top: 44px; left: 0; bottom: 0; width: 280px; z-index: 10; background: var(--bg); border-right: 1px solid var(--border); }
-        .layout.show-right .right-panel { display: flex; position: absolute; top: 44px; right: 0; bottom: 0; width: 280px; z-index: 10; background: var(--bg); border-left: 1px solid var(--border); }
-      }
-
-      /* Sidebar */
-      .sidebar { display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); overflow: hidden; }
-      .sidebar-tabs { display: flex; padding: 8px; gap: 4px; border-bottom: 1px solid var(--border); }
-      .sidebar-tab { flex: 1; padding: 6px 10px; border-radius: 6px; background: transparent; color: var(--text-tertiary); border: 1px solid transparent; font-size: 11px; font-weight: 600; }
-      .sidebar-tab.active { background: var(--accent); color: var(--bg); }
-      .new-session-btn { margin: 8px; padding: 8px 12px; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; font-weight: 600; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-      .new-session-btn:hover { opacity: 0.9; }
-      .session-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
-      .session-group { margin-top: 12px; }
-      .session-group-label { font-size: 9px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 1px; padding: 4px 8px; text-transform: uppercase; }
-      .session-item { padding: 8px 10px; margin-bottom: 2px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; border: 1px solid transparent; position: relative; }
-      .session-item:hover { background: var(--surface-hover); }
-      .session-item.active { background: var(--accent-muted); border-color: var(--accent); }
-      .session-item .si-icon { font-size: 11px; color: var(--text-tertiary); }
-      .session-item.active .si-icon { color: var(--accent); }
-      .session-item .si-body { flex: 1; min-width: 0; }
-      .session-item .si-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .session-item .si-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
-      .session-item .si-delete { opacity: 0; background: transparent; border: none; color: var(--text-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-      .session-item:hover .si-delete { opacity: 1; }
-      .session-item .si-delete:hover { background: var(--red); color: white; }
-      .session-item .si-pin { color: var(--accent); font-size: 10px; }
-      .session-item.archived { opacity: 0.55; }
-      .session-item.archived .si-name { text-decoration: line-through; text-decoration-color: var(--muted); }
-      .si-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
-      .si-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--surface-elevated); color: var(--text-tertiary); font-weight: 600; }
-      .si-rename { flex: 1; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 3px 6px; color: var(--text); font-size: 12px; font-family: inherit; min-width: 0; }
-      .si-rename:focus { outline: none; }
-
-      /* Sidebar search + archive toggle */
-      .sb-search { display: flex; align-items: center; gap: 6px; margin: 0 8px 6px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 6px; }
-      .sb-search input { flex: 1; background: transparent; border: none; color: var(--text); font-size: 11px; font-family: inherit; outline: none; min-width: 0; }
-      .sb-search .sb-glass { font-size: 10px; color: var(--text-tertiary); }
-      .sb-archive { display: flex; align-items: center; padding: 0 8px 6px; }
-      .sb-archive button { background: var(--surface-elevated); border: none; border-radius: 5px; padding: 4px 8px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 4px; }
-      .sb-archive button.on { background: var(--accent-muted); color: var(--accent); }
-
-      /* Context menu */
-      .ctx-menu { position: fixed; z-index: 100; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 200px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: none; font-size: 12px; }
-      .ctx-menu.show { display: block; }
-      .ctx-item { padding: 6px 10px; border-radius: 5px; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
-      .ctx-item:hover { background: var(--surface-hover); }
-      .ctx-item.destructive { color: var(--red); }
-      .ctx-item.destructive:hover { background: rgba(239,68,68,0.12); }
-      .ctx-item .ctx-icon { width: 14px; text-align: center; opacity: 0.7; font-size: 11px; }
-      .ctx-sep { height: 1px; background: var(--border-subtle); margin: 4px 2px; }
-      .ctx-sub { position: relative; }
-      .ctx-sub > .ctx-item::after { content: '▸'; margin-left: auto; opacity: 0.5; font-size: 9px; }
-      .ctx-sub-menu { position: absolute; left: 100%; top: -4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 160px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: none; }
-      .ctx-sub:hover > .ctx-sub-menu { display: block; }
-
-      /* Main */
-      .main { display: flex; flex-direction: column; background: var(--bg); min-width: 0; overflow: hidden; }
-      .chat-header { padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; }
-      .chat-header .ch-model { margin-left: auto; font-family: ui-monospace, monospace; font-size: 10px; color: var(--accent); background: var(--accent-muted); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
-      .messages { flex: 1; overflow-y: auto; padding: 12px 16px; }
-      .msg-wrap { max-width: 800px; margin: 0 auto 16px; }
-      .msg-wrap.user { display: flex; justify-content: flex-end; }
-      .msg-wrap.assistant { display: flex; justify-content: flex-start; }
-      .msg { padding: 10px 14px; border-radius: 12px; max-width: 100%; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
-      .msg.user { background: var(--user-bg); color: var(--text); max-width: 80%; }
-      .msg.assistant { background: transparent; color: var(--text); flex: 1; }
-      .msg p { margin: 0 0 8px; }
-      .msg p:last-child { margin-bottom: 0; }
-      .msg pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 12px; font-family: ui-monospace, monospace; }
-      .msg code { background: var(--surface); padding: 1px 5px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 12px; }
-      .msg pre code { background: transparent; padding: 0; }
-      .msg ul, .msg ol { margin: 0 0 8px; padding-left: 22px; }
-      .msg a { color: var(--accent); }
-
-      .block-thinking { margin: 6px 0; padding: 8px 12px; background: rgba(168, 85, 247, 0.08); border-left: 2px solid var(--purple); border-radius: 4px; font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; }
-      .block-thinking-label { font-size: 10px; color: var(--purple); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-      .trace-block { margin: 6px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-      .trace-head { padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
-      .trace-entry { padding: 6px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 10px; color: var(--text-tertiary); white-space: pre-wrap; }
-      .trace-entry .lvl { color: var(--accent); font-weight: 700; }
-
-      .tool-block { margin: 6px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-      .tool-head { padding: 6px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; }
-      .tool-head .tname { font-family: ui-monospace, monospace; font-weight: 600; color: var(--accent); }
-      .tool-head .tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
-      .tool-head .tdot.done { background: var(--green); }
-      .tool-head .tdot.error { background: var(--red); }
-      .tool-body { padding: 8px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
-      .tool-result { padding: 6px 10px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-tertiary); white-space: pre-wrap; max-height: 140px; overflow-y: auto; background: rgba(255,255,255,0.02); }
-      .tool-result.error { color: var(--red); }
-
-      .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 4px; animation: pulse 1.2s ease-in-out infinite; }
-      @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.3 } }
-
-      .err-row { max-width: 800px; margin: 10px auto; padding: 10px 14px; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--red); border-radius: 6px; font-size: 13px; color: var(--red); }
-
-      /* Composer */
-      .composer { border-top: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
-      .composer-bar { display: flex; gap: 4px; padding: 6px 12px; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
-      .composer-bar::-webkit-scrollbar { height: 0; }
-      .pill { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 4px 9px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; cursor: pointer; }
-      .pill:hover { background: var(--surface-hover); }
-      .pill.active { color: var(--accent); border-color: rgba(249, 115, 22, 0.3); }
-      .pill.active.plan { color: var(--cyan); border-color: rgba(6, 182, 212, 0.3); }
-      .pill.active.think { color: var(--purple); border-color: rgba(168, 85, 247, 0.3); }
-      .pill.active.deny { color: var(--red); border-color: rgba(239, 68, 68, 0.3); }
-      .pill.active.ask { color: var(--blue); border-color: rgba(59, 130, 246, 0.3); }
-      .pill.active.max { color: var(--amber); border-color: rgba(217, 119, 6, 0.3); }
-      .pill-divider { width: 1px; background: var(--border); margin: 4px 2px; }
-      .pill.model { font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700; }
-      .pill.model.selected { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-      .context-info { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 10px; font-family: ui-monospace, monospace; color: var(--text-tertiary); padding-right: 4px; white-space: nowrap; }
-
-      .attach-chips { display: flex; gap: 6px; padding: 6px 12px; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
-      .attach-chips:empty { display: none; }
-      .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 11px; }
-      .chip .chip-name { color: var(--text); font-weight: 500; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .chip .chip-x { background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; padding: 0 2px; }
-
-      .composer-row { display: flex; gap: 8px; padding: 10px 12px; align-items: flex-end; }
-      .composer-attach { background: var(--surface); border: 1px solid var(--border); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 16px; flex-shrink: 0; }
-      .composer-attach:hover { background: var(--surface-hover); color: var(--text); }
-      .composer-input { flex: 1; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 14px; font-family: inherit; resize: none; min-height: 40px; max-height: 200px; }
-      .composer-input:focus { outline: none; border-color: rgba(249, 115, 22, 0.5); }
-      .composer-send { background: var(--accent); color: var(--bg); border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .composer-send:disabled { background: var(--surface-elevated); color: var(--text-tertiary); cursor: not-allowed; }
-      .composer-stop { background: var(--red); color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 16px; flex-shrink: 0; }
-
-      /* Right panel */
-      .right-panel { display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); overflow: hidden; }
-      .right-tabs { display: flex; padding: 8px; gap: 4px; border-bottom: 1px solid var(--border); }
-      .right-tab { flex: 1; padding: 6px; background: transparent; color: var(--text-tertiary); border: 1px solid transparent; border-radius: 6px; font-size: 10px; font-weight: 600; }
-      .right-tab.active { background: var(--surface-elevated); color: var(--text); }
-      .right-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
-      .activity-item { padding: 8px 10px; margin-bottom: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
-      .activity-item .ai-name { font-family: ui-monospace, monospace; font-weight: 600; color: var(--accent); font-size: 11px; }
-      .activity-item .ai-input { margin-top: 4px; color: var(--text-tertiary); font-family: ui-monospace, monospace; font-size: 10px; white-space: pre-wrap; max-height: 80px; overflow-y: auto; }
-      .stats-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border-subtle); }
-      .stats-row .sl { color: var(--text-tertiary); }
-      .stats-row .sv { color: var(--text); font-weight: 600; font-family: ui-monospace, monospace; }
-      .empty { color: var(--text-tertiary); text-align: center; padding: 30px 12px; font-size: 12px; }
-
-      /* Modal */
-      .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 50; }
-      .modal-bg.show { display: flex; }
-      .modal { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: min(460px, 92vw); max-height: 86vh; overflow-y: auto; }
-      .modal h2 { margin: 0 0 16px; font-size: 15px; font-weight: 600; }
-      .modal label { display: block; font-size: 11px; color: var(--text-tertiary); margin: 10px 0 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-      .modal input, .modal select { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
-      .modal .row { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
-      .modal .btn { padding: 7px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
-      .modal .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-      .modal .info-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 11px; font-family: ui-monospace, monospace; color: var(--text-secondary); margin-top: 6px; word-break: break-all; }
-      .modal .info-box .lbl { color: var(--text-tertiary); margin-right: 6px; }
-
-      .drop-overlay { position: absolute; inset: 0; background: rgba(249, 115, 22, 0.08); display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 20; font-weight: 600; color: var(--accent); }
-      .drop-overlay.show { display: flex; }
-    </style>
-    </head>
-    <body>
-      <div class="topbar">
-        <button class="mobile-toggle" onclick="document.querySelector('.layout').classList.toggle('show-sidebar')">☰</button>
-        <div class="logo">Kiln Code</div>
-        <span id="activeSessionName" class="session-name">No session</span>
-        <span id="busyBadge" class="badge">idle</span>
-        <span class="spacer"></span>
-        <button id="retryBtn" title="Retry last (⇧⌘R)">↻ Retry</button>
-        <button id="exportBtn" title="Export chat">⤓ Export</button>
-        <button id="settingsBtn" title="Settings">⚙</button>
-        <button class="mobile-toggle" onclick="document.querySelector('.layout').classList.toggle('show-right')">▸</button>
-      </div>
-
-      <div class="layout">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-          <div class="sidebar-tabs">
-            <button class="sidebar-tab active" data-kind="code">⌨ Code</button>
-            <button class="sidebar-tab" data-kind="chat">💬 Chat</button>
-          </div>
-          <button class="new-session-btn" id="newSessionBtn">+ New Session</button>
-          <div class="sb-search">
-            <span class="sb-glass">🔍</span>
-            <input id="sessionSearch" placeholder="Search sessions, tags, paths…" spellcheck="false" autocomplete="off">
-          </div>
-          <div class="sb-archive" id="archiveBar"></div>
-          <div class="session-list" id="sessionList"></div>
-        </aside>
-
-        <!-- Main chat -->
-        <main class="main" id="main">
-          <div class="chat-header">
-            <span id="chatHdrIcon">💬</span>
-            <span id="chatHdrName">Select a session</span>
-            <span id="chatHdrBusy" style="display:none; color:var(--accent); font-size:11px;">working<span class="live-dot"></span></span>
-            <span id="chatHdrModel" class="ch-model" style="display:none;"></span>
-          </div>
-          <div class="messages" id="messages"></div>
-
-          <div class="composer">
-            <div class="composer-bar" id="composerBar"></div>
-            <div class="attach-chips" id="attachChips"></div>
-            <div class="composer-row">
-              <button class="composer-attach" id="attachBtn" title="Attach files or images">📎</button>
-              <input type="file" id="fileInput" multiple style="display:none">
-              <textarea class="composer-input" id="composerInput" rows="1" placeholder="Message assistant…"></textarea>
-              <button class="composer-send" id="sendBtn" title="Send">➤</button>
-              <button class="composer-stop" id="stopBtn" title="Stop" style="display:none;">■</button>
-            </div>
-          </div>
-          <div class="drop-overlay" id="dropOverlay">Drop to attach</div>
-        </main>
-
-        <!-- Right panel -->
-        <aside class="right-panel">
-          <div class="right-tabs">
-            <button class="right-tab active" data-tab="activity">Activity</button>
-            <button class="right-tab" data-tab="stats">Stats</button>
-            <button class="right-tab" data-tab="remote">Remote</button>
-          </div>
-          <div class="right-body" id="rightBody"></div>
-        </aside>
-      </div>
-
-      <!-- Settings / new session modal -->
-      <div class="modal-bg" id="modalBg">
-        <div class="modal" id="modalContent"></div>
-      </div>
-
-      <!-- Session context menu (right-click / long-press on a session item) -->
-      <div class="ctx-menu" id="ctxMenu"></div>
-
-    <script>
-    const token = new URLSearchParams(location.search).get('t') || '';
-    const qt = token ? ('?t=' + encodeURIComponent(token)) : '';
-    const authHeaders = token ? { 'Authorization': 'Bearer ' + token } : {};
-
-    async function api(path, opts = {}) {
-      const sep = path.includes('?') ? '&' : '?';
-      const fullPath = token ? path + sep + 't=' + encodeURIComponent(token) : path;
-      const res = await fetch(fullPath, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', ...authHeaders, ...(opts.headers || {}) },
-      });
-      if (!res.ok && res.status === 401) { alert('Unauthorized — check your token.'); throw new Error('401'); }
-      const ct = res.headers.get('content-type') || '';
-      if (ct.includes('json')) return res.json();
-      return res.text();
-    }
-
-    // --- App state ---
-    const state = {
-      sessions: [],
-      activeId: null,
-      activeSession: null,
-      messages: [],
-      live: { isBusy: false, streamingText: '', thinkingText: '', activeToolCalls: [], lastError: null },
-      toolbar: { sessionMode: 'build', permissionMode: 'bypass', effortLevel: 'medium', thinkingEnabled: false, extendedContext: false, maxTurns: null },
-      usage: { inputTokens: 0, outputTokens: 0, totalCost: 0 },
-      settings: { defaultWorkDir: '~' },
-      models: [],
-      sidebarKind: 'code',
-      rightTab: 'activity',
-      attachments: [],  // { path, name }
-      remote: null,
-      search: '',
-      showArchived: false,
-      renamingId: null,
-    };
-
-    // --- Render ---
-    function escHTML(s) {
-      return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
-    }
-
-    function matchesSearch(s, q) {
-      if (!q) return true;
-      const needle = q.toLowerCase();
-      const tagQuery = needle.startsWith('#') ? needle.slice(1) : needle;
-      return (
-        s.name.toLowerCase().includes(needle) ||
-        (s.workDir || '').toLowerCase().includes(needle) ||
-        (s.group || '').toLowerCase().includes(needle) ||
-        (s.tags || []).some(t => t.includes(tagQuery))
-      );
-    }
-
-    function renderArchiveBar() {
-      const bar = document.getElementById('archiveBar');
-      const archivedCount = state.sessions.filter(s => s.kind === state.sidebarKind && s.isArchived).length;
-      if (!archivedCount && !state.showArchived) { bar.innerHTML = ''; return; }
-      const cls = state.showArchived ? 'on' : '';
-      const label = state.showArchived ? '← Back to active' : `📦 Archive (${archivedCount})`;
-      bar.innerHTML = `<button class="${cls}" id="archiveToggle">${label}</button>`;
-      document.getElementById('archiveToggle').onclick = () => {
-        state.showArchived = !state.showArchived;
-        renderSessions();
-        renderArchiveBar();
-      };
-    }
-
-    function renderSessions() {
-      const box = document.getElementById('sessionList');
-      box.innerHTML = '';
-      const filtered = state.sessions.filter(s =>
-        s.kind === state.sidebarKind &&
-        (state.showArchived ? s.isArchived : !s.isArchived) &&
-        matchesSearch(s, state.search)
-      );
-      if (!filtered.length) {
-        box.innerHTML = '<div class="empty">No ' + (state.showArchived ? 'archived' : state.sidebarKind) + ' sessions' + (state.search ? ' matching "' + escHTML(state.search) + '"' : '') + '.</div>';
-        return;
-      }
-      // Pinned float to top, in a synthetic "Pinned" group. Everything else
-      // keeps its real group. When searching, flatten so hits don't hide
-      // behind collapsed groups.
-      const groups = {};
-      if (state.search) {
-        groups['—'] = filtered.slice();
-      } else {
-        const pinned = filtered.filter(s => s.isPinned);
-        if (pinned.length) groups['📌 Pinned'] = pinned;
-        for (const s of filtered) {
-          if (s.isPinned) continue;
-          const g = s.group || '—';
-          (groups[g] = groups[g] || []).push(s);
-        }
-      }
-      for (const [gname, list] of Object.entries(groups)) {
-        const ge = document.createElement('div');
-        ge.className = 'session-group';
-        if (gname !== '—') {
-          const lbl = document.createElement('div');
-          lbl.className = 'session-group-label';
-          lbl.textContent = gname;
-          ge.appendChild(lbl);
-        }
-        for (const s of list) {
-          const it = document.createElement('div');
-          const cls = ['session-item'];
-          if (s.id === state.activeId) cls.push('active');
-          if (s.isArchived) cls.push('archived');
-          it.className = cls.join(' ');
-          it.dataset.id = s.id;
-
-          const icon = s.forkedFrom ? '⑂' : (s.kind === 'chat' ? '💬' : '⌨');
-          const pin = s.isPinned ? '<span class="si-pin" title="Pinned">📌</span>' : '';
-          const tags = (s.tags || []).length
-            ? `<div class="si-tags">${s.tags.map(t => `<span class="si-tag">#${escHTML(t)}</span>`).join('')}</div>`
-            : '';
-
-          // Inline rename mode
-          if (state.renamingId === s.id) {
-            it.innerHTML = `
-              <span class="si-icon">${icon}</span>
-              <input class="si-rename" value="${escHTML(s.name)}" autofocus>
-            `;
-            const input = it.querySelector('.si-rename');
-            const commit = async () => {
-              const newName = input.value.trim();
-              state.renamingId = null;
-              if (newName && newName !== s.name) {
-                await api('/api/session/rename', { method: 'POST', body: JSON.stringify({ sessionId: s.id, name: newName }) });
-              }
-              await refreshAll();
-            };
-            input.addEventListener('keydown', (e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commit(); }
-              else if (e.key === 'Escape') { state.renamingId = null; renderSessions(); }
-            });
-            input.addEventListener('blur', commit);
-            setTimeout(() => { input.focus(); input.select(); }, 0);
-          } else {
-            it.innerHTML = `
-              <span class="si-icon">${icon}</span>
-              <div class="si-body">
-                <div class="si-name">${pin}${escHTML(s.name)}</div>
-                <div class="si-meta">${s.messageCount} msg · ${escHTML(s.model)}</div>
-                ${tags}
-              </div>
-              <button class="si-delete" data-id="${s.id}" title="Delete">×</button>
-            `;
-            it.addEventListener('click', async (e) => {
-              if (e.target.classList.contains('si-delete')) return;
-              state.activeId = s.id;
-              await api('/api/select', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
-              await refreshAll();
-              if (window.innerWidth <= 900) document.querySelector('.layout').classList.remove('show-sidebar');
-            });
-            it.addEventListener('dblclick', (e) => {
-              if (e.target.classList.contains('si-delete')) return;
-              state.renamingId = s.id;
-              renderSessions();
-            });
-            it.addEventListener('contextmenu', (e) => {
-              e.preventDefault();
-              openSessionMenu(e.clientX, e.clientY, s);
-            });
-            // Long-press for touch devices — same menu as right-click.
-            let lpTimer = null;
-            it.addEventListener('touchstart', (e) => {
-              lpTimer = setTimeout(() => {
-                const t = e.touches[0];
-                openSessionMenu(t.clientX, t.clientY, s);
-              }, 500);
-            }, { passive: true });
-            it.addEventListener('touchend', () => { if (lpTimer) clearTimeout(lpTimer); });
-            it.addEventListener('touchmove', () => { if (lpTimer) clearTimeout(lpTimer); });
-            it.querySelector('.si-delete').addEventListener('click', async (e) => {
-              e.stopPropagation();
-              if (!confirm('Delete session "' + s.name + '"?')) return;
-              await api('/api/session/delete', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
-              await refreshAll();
-            });
-          }
-          ge.appendChild(it);
-        }
-        box.appendChild(ge);
-      }
-    }
-
-    function renderChatHeader() {
-      const s = state.activeSession;
-      if (!s) {
-        document.getElementById('chatHdrName').textContent = 'Select a session';
-        document.getElementById('chatHdrIcon').textContent = '💬';
-        document.getElementById('chatHdrModel').style.display = 'none';
-        return;
-      }
-      document.getElementById('chatHdrName').textContent = s.name;
-      document.getElementById('chatHdrIcon').textContent = s.kind === 'chat' ? '💬' : '⌨';
-      const model = state.models.find(m => m.id === s.model);
-      document.getElementById('chatHdrModel').textContent = model ? model.label : s.model;
-      document.getElementById('chatHdrModel').style.display = 'inline-block';
-      document.getElementById('chatHdrBusy').style.display = state.live.isBusy ? 'inline' : 'none';
-      document.getElementById('activeSessionName').textContent = s.name;
-      document.getElementById('busyBadge').textContent = state.live.isBusy ? 'working…' : 'idle';
-      document.getElementById('busyBadge').className = 'badge' + (state.live.isBusy ? ' running' : '');
-    }
-
-    function renderBlock(block) {
-      if (block.type === 'text') {
-        return `<div class="block-text">${marked.parse(block.text || '')}</div>`;
-      } else if (block.type === 'thinking') {
-        return `<div class="block-thinking">
-          <div class="block-thinking-label">✨ thinking</div>
-          ${escHTML(block.text || '')}
-        </div>`;
-      } else if (block.type === 'trace') {
-        const entries = (block.entries || []).slice(-12);
-        return `<div class="trace-block">
-          <div class="trace-head">Run log · ${(block.entries || []).length}</div>
-          ${entries.map(e => `<div class="trace-entry"><span class="lvl">[${escHTML(e.level || 'info')}]</span> ${escHTML(e.phase || '')}: ${escHTML(e.title || '')}${e.detail ? `\n${escHTML(e.detail)}` : ''}</div>`).join('')}
-        </div>`;
-      } else if (block.type === 'toolUse') {
-        const t = block.tool;
-        const cls = t.isError ? 'error' : (t.isDone ? 'done' : '');
-        return `<div class="tool-block">
-          <div class="tool-head">
-            <span class="tdot ${cls}"></span>
-            <span class="tname">${escHTML(t.name)}</span>
-          </div>
-          ${t.input ? `<div class="tool-body">${escHTML(t.input)}</div>` : ''}
-          ${t.result ? `<div class="tool-result ${t.isError ? 'error' : ''}">${escHTML(t.result)}</div>` : ''}
-        </div>`;
-      } else if (block.type === 'toolResult') {
-        return `<div class="tool-result ${block.isError ? 'error' : ''}">${escHTML(block.content || '')}</div>`;
-      }
-      return '';
-    }
-
-    function renderMessages() {
-      const box = document.getElementById('messages');
-      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 50;
-      let html = '';
-      for (const m of state.messages) {
-        const blockHTML = (m.blocks || []).map(renderBlock).join('');
-        html += `<div class="msg-wrap ${m.role}">
-          <div class="msg ${m.role}">${blockHTML}</div>
-        </div>`;
-      }
-      // Live assistant row (streaming)
-      const live = state.live;
-      if (live.isBusy || live.streamingText || live.thinkingText || (live.activeToolCalls && live.activeToolCalls.length)) {
-        let liveBlocks = '';
-        if (live.thinkingText) liveBlocks += renderBlock({ type: 'thinking', text: live.thinkingText });
-        for (const t of (live.activeToolCalls || [])) {
-          liveBlocks += renderBlock({ type: 'toolUse', tool: t });
-        }
-        if (live.streamingText) liveBlocks += renderBlock({ type: 'text', text: live.streamingText });
-        if (!liveBlocks) liveBlocks = '<div style="color:var(--text-tertiary); font-size:12px;">thinking<span class="live-dot"></span></div>';
-        html += `<div class="msg-wrap assistant"><div class="msg assistant">${liveBlocks}</div></div>`;
-      }
-      if (live.lastError) {
-        html += `<div class="err-row">⚠ ${escHTML(live.lastError)}</div>`;
-      }
-      box.innerHTML = html;
-      if (atBottom) box.scrollTop = box.scrollHeight;
-    }
-
-    function renderToolbar() {
-      const s = state.activeSession;
-      if (!s) { document.getElementById('composerBar').innerHTML = ''; return; }
-      const tb = state.toolbar;
-      const isChat = s.kind === 'chat';
-      const pills = [];
-      if (!isChat) {
-        pills.push(`<button class="pill active ${tb.sessionMode === 'plan' ? 'plan' : ''}" data-action="mode">${tb.sessionMode === 'plan' ? '📋 plan' : '🔨 build'}</button>`);
-        const permLabel = { bypass: '🔓 bypass', ask: 'guarded', deny: 'read-only' }[tb.permissionMode] || tb.permissionMode;
-        const permCls = tb.permissionMode === 'ask' ? 'ask' : (tb.permissionMode === 'deny' ? 'deny' : '');
-        pills.push(`<button class="pill active ${permCls}" data-action="perm">${permLabel}</button>`);
-      }
-      pills.push(`<button class="pill ${tb.thinkingEnabled ? 'active think' : ''}" data-action="think">🧠 ${tb.thinkingEnabled ? 'think' : 'no think'}</button>`);
-      if (tb.thinkingEnabled) {
-        const effCls = tb.effortLevel === 'max' ? 'max' : '';
-        pills.push(`<button class="pill active ${effCls}" data-action="effort">⚡ ${tb.effortLevel}</button>`);
-      }
-      if (!isChat) pills.push('<span class="pill-divider"></span>');
-      // Models
-      for (const m of state.models) {
-        const sel = s.model === m.id;
-        pills.push(`<button class="pill model ${sel ? 'selected' : ''}" data-model="${escHTML(m.id)}">${escHTML(m.label)}</button>`);
-      }
-      const ctxWindow = state.models.find(m => m.id === s.model)?.contextWindow || 272000;
-      const totalTokens = (state.usage.inputTokens || 0) + (state.usage.outputTokens || 0);
-      const pct = Math.min(100, (totalTokens / ctxWindow * 100));
-      const ctxText = totalTokens > 0 ? `${formatTokens(totalTokens)}/${formatTokens(ctxWindow)} · $${(state.usage.totalCost || 0).toFixed(2)}` : '';
-      const bar = document.getElementById('composerBar');
-      bar.innerHTML = pills.join('') + (ctxText ? `<span class="context-info">${ctxText}</span>` : '');
-      bar.querySelectorAll('[data-model]').forEach(b => b.onclick = () => api('/api/model', { method: 'POST', body: JSON.stringify({ model: b.dataset.model }) }).then(refreshAll));
-      bar.querySelectorAll('[data-action]').forEach(b => b.onclick = () => handleToolbarClick(b.dataset.action));
-    }
-
-    function formatTokens(n) {
-      if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
-      if (n >= 1_000) return Math.round(n/1_000) + 'K';
-      return String(n);
-    }
-
-    async function handleToolbarClick(action) {
-      const tb = { ...state.toolbar };
-      if (action === 'mode') tb.sessionMode = tb.sessionMode === 'build' ? 'plan' : 'build';
-      else if (action === 'perm') tb.permissionMode = { bypass: 'ask', ask: 'deny', deny: 'bypass' }[tb.permissionMode];
-      else if (action === 'turns') {
-        const cycle = [null, 5, 10, 25, 50];
-        const idx = cycle.indexOf(tb.maxTurns);
-        tb.maxTurns = cycle[(idx + 1) % cycle.length];
-      }
-      else if (action === 'think') tb.thinkingEnabled = !tb.thinkingEnabled;
-      else if (action === 'effort') {
-        const cycle = ['low', 'medium', 'high', 'max'];
-        tb.effortLevel = cycle[(cycle.indexOf(tb.effortLevel) + 1) % cycle.length];
-      }
-      const resp = await api('/api/toolbar', { method: 'POST', body: JSON.stringify(tb) });
-      state.toolbar = resp;
-      renderToolbar();
-    }
-
-    function renderAttachments() {
-      const box = document.getElementById('attachChips');
-      if (!state.attachments.length) { box.innerHTML = ''; return; }
-      box.innerHTML = state.attachments.map((a, i) => `
-        <div class="chip">
-          <span>📎</span>
-          <span class="chip-name" title="${escHTML(a.path)}">${escHTML(a.name)}</span>
-          <button class="chip-x" data-i="${i}">×</button>
-        </div>
-      `).join('');
-      box.querySelectorAll('.chip-x').forEach(b => b.onclick = () => {
-        state.attachments.splice(parseInt(b.dataset.i), 1);
-        renderAttachments();
-      });
-    }
-
-    function renderRightPanel() {
-      const box = document.getElementById('rightBody');
-      if (state.rightTab === 'activity') {
-        const calls = state.live.activeToolCalls || [];
-        if (!calls.length && !state.live.isBusy) { box.innerHTML = '<div class="empty">No activity yet.</div>'; return; }
-        box.innerHTML = calls.map(t => `
-          <div class="activity-item">
-            <div class="ai-name">${escHTML(t.name)}</div>
-            ${t.input ? `<div class="ai-input">${escHTML(t.input.slice(0, 500))}</div>` : ''}
-          </div>
-        `).join('') || '<div class="empty">Working…</div>';
-      } else if (state.rightTab === 'stats') {
-        box.innerHTML = `
-          <div class="stats-row"><span class="sl">Input tokens</span><span class="sv">${formatTokens(state.usage.inputTokens || 0)}</span></div>
-          <div class="stats-row"><span class="sl">Output tokens</span><span class="sv">${formatTokens(state.usage.outputTokens || 0)}</span></div>
-          <div class="stats-row"><span class="sl">Total cost</span><span class="sv">$${(state.usage.totalCost || 0).toFixed(4)}</span></div>
-          <div class="stats-row"><span class="sl">Sessions</span><span class="sv">${state.sessions.length}</span></div>
-          <div class="stats-row"><span class="sl">Messages</span><span class="sv">${state.messages.length}</span></div>
-        `;
-      } else if (state.rightTab === 'remote') {
-        const r = state.remote || {};
-        const urls = r.urls || {};
-        const ts = r.tailscale || {};
-        const tsBadge = { active: '🟢 active', installed: '🟡 installed (not logged in)', absent: '⚫ not installed', error: '🔴 error' }[ts.status] || ts.status;
-        box.innerHTML = `
-          <div style="font-size:10px; color:var(--text-tertiary); font-weight:700; letter-spacing:1px; margin-bottom:8px;">URLS</div>
-          ${urls.local ? `<div class="stats-row"><span class="sl">local</span><span class="sv" style="font-size:10px;">${urls.local}</span></div>` : ''}
-          ${urls.lan ? `<div class="stats-row"><span class="sl">lan</span><span class="sv" style="font-size:10px;">${urls.lan}</span></div>` : ''}
-          ${urls.tailscale ? `<div class="stats-row"><span class="sl">tailscale</span><span class="sv" style="font-size:10px;">${urls.tailscale}</span></div>` : ''}
-          <div style="font-size:10px; color:var(--text-tertiary); font-weight:700; letter-spacing:1px; margin:16px 0 8px;">TAILSCALE</div>
-          <div class="stats-row"><span class="sl">status</span><span class="sv" style="font-size:10px;">${tsBadge}</span></div>
-          ${ts.ip ? `<div class="stats-row"><span class="sl">ip</span><span class="sv" style="font-size:10px;">${ts.ip}</span></div>` : ''}
-          <div style="font-size:10px; color:var(--text-tertiary); font-weight:700; letter-spacing:1px; margin:16px 0 8px;">ACCESS</div>
-          <div class="stats-row"><span class="sl">level</span><span class="sv" style="font-size:10px;">${r.accessLevel || '—'}</span></div>
-          <div class="stats-row"><span class="sl">port</span><span class="sv">${r.port || '—'}</span></div>
-        `;
-      }
-    }
-
-    function render() {
-      renderSessions();
-      renderArchiveBar();
-      renderChatHeader();
-      renderMessages();
-      renderToolbar();
-      renderAttachments();
-      renderRightPanel();
-    }
-
-    // --- Session context menu ---
-    function closeCtxMenu() {
-      const m = document.getElementById('ctxMenu');
-      m.classList.remove('show');
-      m.innerHTML = '';
-    }
-    document.addEventListener('click', (e) => {
-      const m = document.getElementById('ctxMenu');
-      if (m.classList.contains('show') && !m.contains(e.target)) closeCtxMenu();
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeCtxMenu();
-    });
-
-    function openSessionMenu(x, y, s) {
-      const m = document.getElementById('ctxMenu');
-      const pinLabel = s.isPinned ? 'Unpin' : 'Pin';
-      const pinIcon = s.isPinned ? '📌' : '📍';
-      const archLabel = s.isArchived ? 'Unarchive' : 'Archive';
-      const archIcon = s.isArchived ? '📤' : '📦';
-      const existingTags = (s.tags || []).map(t =>
-        `<div class="ctx-item" data-act="untag" data-tag="${escHTML(t)}"><span class="ctx-icon">✕</span>Remove #${escHTML(t)}</div>`
-      ).join('');
-      m.innerHTML = `
-        <div class="ctx-item" data-act="rename"><span class="ctx-icon">✎</span>Rename</div>
-        <div class="ctx-item" data-act="pin"><span class="ctx-icon">${pinIcon}</span>${pinLabel}</div>
-        <div class="ctx-item" data-act="duplicate"><span class="ctx-icon">⎘</span>Duplicate (empty)</div>
-        <div class="ctx-sep"></div>
-        <div class="ctx-item" data-act="group"><span class="ctx-icon">📁</span>Set group…</div>
-        <div class="ctx-sub">
-          <div class="ctx-item"><span class="ctx-icon">🏷</span>Tags</div>
-          <div class="ctx-sub-menu">
-            <div class="ctx-item" data-act="tag-add"><span class="ctx-icon">+</span>Add tag…</div>
-            ${existingTags ? '<div class="ctx-sep"></div>' + existingTags : ''}
-          </div>
-        </div>
-        <div class="ctx-sep"></div>
-        <div class="ctx-item" data-act="copy-continuation"><span class="ctx-icon">📋</span>Copy as continuation</div>
-        <div class="ctx-item" data-act="copy-path"><span class="ctx-icon">⌘</span>Copy path</div>
-        <div class="ctx-item" data-act="copy-id"><span class="ctx-icon">#</span>Copy session ID</div>
-        <div class="ctx-item" data-act="export"><span class="ctx-icon">⤓</span>Export markdown</div>
-        <div class="ctx-item" data-act="export-json"><span class="ctx-icon">{ }</span>Export JSON</div>
-        <div class="ctx-item" data-act="new-here"><span class="ctx-icon">+</span>New session here</div>
-        <div class="ctx-sep"></div>
-        <div class="ctx-item" data-act="clear"><span class="ctx-icon">🧹</span>Clear messages</div>
-        <div class="ctx-item" data-act="archive"><span class="ctx-icon">${archIcon}</span>${archLabel}</div>
-        <div class="ctx-sep"></div>
-        <div class="ctx-item destructive" data-act="delete"><span class="ctx-icon">🗑</span>Delete</div>
-      `;
-      // Position (keep inside viewport)
-      m.style.left = '0px'; m.style.top = '0px';
-      m.classList.add('show');
-      const rect = m.getBoundingClientRect();
-      const px = Math.min(x, window.innerWidth - rect.width - 8);
-      const py = Math.min(y, window.innerHeight - rect.height - 8);
-      m.style.left = px + 'px';
-      m.style.top = py + 'px';
-
-      m.querySelectorAll('[data-act]').forEach(el => {
-        el.addEventListener('click', async (ev) => {
-          ev.stopPropagation();
-          const act = el.dataset.act;
-          closeCtxMenu();
-          await handleSessionAction(act, s, el.dataset);
-        });
-      });
-    }
-
-    async function handleSessionAction(act, s, data) {
-      const id = s.id;
-      try {
-        switch (act) {
-          case 'rename':
-            state.renamingId = id;
-            renderSessions();
-            return;
-          case 'pin':
-            await api('/api/session/pin', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
-            break;
-          case 'duplicate':
-            await api('/api/session/duplicate', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
-            break;
-          case 'archive':
-            await api('/api/session/archive', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
-            break;
-          case 'clear':
-            if (!confirm('Clear all messages in "' + s.name + '"? This cannot be undone.')) return;
-            await api('/api/session/clear', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
-            break;
-          case 'delete':
-            if (!confirm('Delete session "' + s.name + '"?')) return;
-            await api('/api/session/delete', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
-            break;
-          case 'group': {
-            const g = prompt('Group name (empty to remove from group):', s.group || '');
-            if (g === null) return;
-            await api('/api/session/group', { method: 'POST', body: JSON.stringify({ sessionId: id, group: g }) });
-            break;
-          }
-          case 'tag-add': {
-            const t = prompt('Add tag (no # prefix):', '');
-            if (!t) return;
-            await api('/api/session/tag', { method: 'POST', body: JSON.stringify({ sessionId: id, tag: t, op: 'add' }) });
-            break;
-          }
-          case 'untag':
-            await api('/api/session/tag', { method: 'POST', body: JSON.stringify({ sessionId: id, tag: data.tag, op: 'remove' }) });
-            break;
-          case 'copy-continuation': {
-            const r = await api('/api/session/continuation?session=' + encodeURIComponent(id));
-            await copyToClipboard(r.text || '');
-            flash('Continuation prompt copied');
-            return;
-          }
-          case 'copy-path':
-            await copyToClipboard(s.workDir || '');
-            flash('Path copied');
-            return;
-          case 'copy-id':
-            await copyToClipboard(s.id);
-            flash('Session ID copied');
-            return;
-          case 'export':
-            window.location.href = '/api/export?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
-            return;
-          case 'export-json':
-            window.location.href = '/api/export-json?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
-            return;
-          case 'new-here':
-            await api('/api/session/new-here', { sessionId: id });
-            flash('New session created');
-            break;
-        }
-        await refreshAll();
-      } catch (e) {
-        alert('Action failed: ' + e.message);
-      }
-    }
-
-    async function copyToClipboard(text) {
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        // Fallback for iOS Safari without clipboard permission.
-        const ta = document.createElement('textarea');
-        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand('copy'); } catch {}
-        document.body.removeChild(ta);
-      }
-    }
-
-    let flashTimer = null;
-    function flash(msg) {
-      let el = document.getElementById('flashToast');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'flashToast';
-        el.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-elevated); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 16px; font-size:12px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.4); opacity:0; transition:opacity 0.2s;';
-        document.body.appendChild(el);
-      }
-      el.textContent = msg;
-      el.style.opacity = '1';
-      if (flashTimer) clearTimeout(flashTimer);
-      flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
-    }
-
-    // --- Theme / accent sync with the native app ---
-    function applyServerAppearance(s) {
-      if (!s) return;
-      if (s.themeMode) {
-        document.documentElement.setAttribute('data-theme', s.themeMode);
-      }
-      if (s.accentHex) {
-        // Accent value arrives without "#" from the settings payload; accept
-        // either form. The accent-muted variant derives with a fixed alpha.
-        const hex = s.accentHex.startsWith('#') ? s.accentHex : '#' + s.accentHex;
-        document.documentElement.style.setProperty('--accent', hex);
-        document.documentElement.style.setProperty('--accent-muted', hex + '26'); // ~15%
-      }
-    }
-
-    // --- Data loading ---
-    async function refreshAll() {
-      const data = await api('/api/state');
-      state.sessions = data.sessions || [];
-      state.activeId = data.activeSessionId;
-      state.activeSession = state.sessions.find(s => s.id === state.activeId) || null;
-      state.messages = data.messages || [];
-      state.live = data.live || state.live;
-      state.toolbar = data.toolbar || state.toolbar;
-      state.usage = data.usage || state.usage;
-      state.settings = { ...state.settings, ...(data.settings || {}) };
-      state.models = data.models || [];
-      applyServerAppearance(state.settings);
-      try { state.remote = await api('/api/remote'); } catch {}
-      render();
-    }
-
-    // Lightweight poll — only touches /api/status + messages
-    async function pollLive() {
-      try {
-        const st = await api('/api/status');
-        state.live = {
-          isBusy: st.isBusy,
-          streamingText: st.streamingText || '',
-          thinkingText: st.thinkingText || '',
-          activeToolCalls: st.activeToolCalls || [],
-          lastError: st.lastError || null,
-        };
-        state.usage.inputTokens = st.inputTokens;
-        state.usage.outputTokens = st.outputTokens;
-        state.usage.totalCost = st.totalCost;
-        const sid = state.activeId;
-        if (sid) {
-          const m = await api('/api/messages?session=' + encodeURIComponent(sid));
-          const prevCount = state.messages.length;
-          state.messages = m.messages || [];
-          state.live = m.live || state.live;
-          // If count changed or live changed, re-render main view
-        }
-        renderChatHeader();
-        renderMessages();
-        renderRightPanel();
-      } catch (e) {}
-    }
-
-    // --- Composer ---
-    async function sendMessage() {
-      const ta = document.getElementById('composerInput');
-      const text = ta.value.trim();
-      if ((!text && !state.attachments.length) || state.live.isBusy) return;
-      if (!state.activeId) { alert('No active session.'); return; }
-      const attPaths = state.attachments.map(a => a.path);
-      ta.value = '';
-      state.attachments = [];
-      renderAttachments();
-      await api('/api/send', { method: 'POST', body: JSON.stringify({ text, sessionId: state.activeId, attachments: attPaths }) });
-      setTimeout(pollLive, 200);
-    }
-
-    async function handleFiles(files) {
-      for (const f of files) {
-        // Browser-side files need to be uploaded. For now, we support path-based attach only via drag from native/native upload paths aren't available in browsers.
-        // We read the file and send as base64 to /api/attach/upload which writes to tmp.
-        const b64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(f); });
-        const resp = await api('/api/attach/upload', { method: 'POST', body: JSON.stringify({ name: f.name, base64: b64 }) });
-        if (resp && resp.path) {
-          state.attachments.push({ path: resp.path, name: f.name });
-        }
-      }
-      renderAttachments();
-    }
-
-    // --- Event wiring ---
-    document.getElementById('composerInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-    });
-    document.getElementById('sendBtn').onclick = sendMessage;
-    document.getElementById('stopBtn').onclick = () => api('/api/interrupt', { method: 'POST' });
-    document.getElementById('attachBtn').onclick = () => document.getElementById('fileInput').click();
-    document.getElementById('fileInput').addEventListener('change', (e) => handleFiles(e.target.files));
-    document.getElementById('retryBtn').onclick = () => api('/api/retry', { method: 'POST' });
-    document.getElementById('exportBtn').onclick = () => {
-      if (!state.activeId) return;
-      window.location.href = '/api/export?session=' + encodeURIComponent(state.activeId) + (token ? '&t=' + encodeURIComponent(token) : '');
-    };
-
-    document.querySelectorAll('.sidebar-tab').forEach(b => b.onclick = () => {
-      state.sidebarKind = b.dataset.kind;
-      document.querySelectorAll('.sidebar-tab').forEach(x => x.classList.toggle('active', x === b));
-      renderSessions();
-      renderArchiveBar();
-    });
-    document.getElementById('sessionSearch').addEventListener('input', (e) => {
-      state.search = e.target.value;
-      renderSessions();
-    });
-    document.querySelectorAll('.right-tab').forEach(b => b.onclick = () => {
-      state.rightTab = b.dataset.tab;
-      document.querySelectorAll('.right-tab').forEach(x => x.classList.toggle('active', x === b));
-      renderRightPanel();
-    });
-
-    // Drag-drop
-    const main = document.getElementById('main');
-    const overlay = document.getElementById('dropOverlay');
-    main.addEventListener('dragover', (e) => { e.preventDefault(); overlay.classList.add('show'); });
-    main.addEventListener('dragleave', (e) => { if (e.target === main) overlay.classList.remove('show'); });
-    main.addEventListener('drop', (e) => {
-      e.preventDefault();
-      overlay.classList.remove('show');
-      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
-    });
-    // Paste images
-    document.getElementById('composerInput').addEventListener('paste', (e) => {
-      const items = e.clipboardData?.items || [];
-      for (const it of items) {
-        if (it.kind === 'file') {
-          const f = it.getAsFile();
-          if (f) handleFiles([f]);
-        }
-      }
-    });
-
-    // New Session modal
-    document.getElementById('newSessionBtn').onclick = () => {
-      const m = document.getElementById('modalContent');
-      const modelsOpts = state.models.map(x => `<option value="${x.id}">${x.label} · ${x.full}</option>`).join('');
-      m.innerHTML = `
-        <h2>New Session</h2>
-        <label>Kind</label>
-        <select id="nsKind"><option value="code">⌨ Code</option><option value="chat">💬 Chat</option></select>
-        <label>Working Directory</label>
-        <input id="nsWorkDir" value="${escHTML(state.settings.defaultWorkDir || '~')}">
-        <label>Model</label>
-        <select id="nsModel">${modelsOpts}</select>
-        <div class="row">
-          <button class="btn" onclick="closeModal()">Cancel</button>
-          <button class="btn primary" id="nsCreate">Create</button>
-        </div>
-      `;
-      document.getElementById('nsKind').value = state.sidebarKind;
-      document.getElementById('nsCreate').onclick = async () => {
-        await api('/api/session', { method: 'POST', body: JSON.stringify({
-          kind: document.getElementById('nsKind').value,
-          workDir: document.getElementById('nsWorkDir').value,
-          model: document.getElementById('nsModel').value,
-        })});
-        closeModal();
-        await refreshAll();
-      };
-      document.getElementById('modalBg').classList.add('show');
-    };
-
-    // Settings modal (read-only view for now)
-    document.getElementById('settingsBtn').onclick = async () => {
-      const settings = await api('/api/settings');
-      const r = state.remote || {};
-      const m = document.getElementById('modalContent');
-      const tq = token ? ('?t=' + encodeURIComponent(token)) : '';
-      m.innerHTML = `
-        <h2>Settings · Remote</h2>
-        <div class="info-box"><span class="lbl">language</span>${escHTML(settings.language)}</div>
-        <div class="info-box"><span class="lbl">default workdir</span>${escHTML(settings.defaultWorkDir)}</div>
-        <div class="info-box"><span class="lbl">default model</span>${escHTML(settings.defaultModel)}</div>
-        <h2 style="margin-top:20px; font-size:13px;">Remote access</h2>
-        <div class="info-box"><span class="lbl">access level</span>${escHTML(r.accessLevel || '—')}</div>
-        <div class="info-box"><span class="lbl">port</span>${r.port || '—'}</div>
-        ${(r.urls && r.urls.tailscale) ? `<div class="info-box"><span class="lbl">tailscale</span>${escHTML(r.urls.tailscale)}</div>` : ''}
-        ${(r.urls && r.urls.lan) ? `<div class="info-box"><span class="lbl">lan</span>${escHTML(r.urls.lan)}</div>` : ''}
-        <h2 style="margin-top:20px; font-size:13px;">Backup</h2>
-        <div class="row" style="gap:6px; flex-wrap:wrap;">
-          <a class="btn" href="/api/settings/export${tq}" download>Export settings</a>
-          <button class="btn" onclick="pickFileAndUpload('/api/settings/import','Settings imported')">Import settings…</button>
-          <button class="btn" onclick="pickFileAndUpload('/api/session/import','Session imported', true)">Import session…</button>
-        </div>
-        <div class="row" style="margin-top:14px;"><button class="btn primary" onclick="closeModal()">Close</button></div>
-      `;
-      document.getElementById('modalBg').classList.add('show');
-    };
-
-    /// Prompt for a JSON file and POST its raw contents to `url`. If
-    /// `refreshAfter` is true, re-pulls state so the new session shows up.
-    window.pickFileAndUpload = function(url, okMsg, refreshAfter) {
-      const inp = document.createElement('input');
-      inp.type = 'file';
-      inp.accept = 'application/json,.json';
-      inp.onchange = async () => {
-        const f = inp.files && inp.files[0];
-        if (!f) return;
-        try {
-          const text = await f.text();
-          const tq = token ? ('?t=' + encodeURIComponent(token)) : '';
-          const res = await fetch(url + tq, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: text,
-          });
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok || j.error) throw new Error(j.error || ('HTTP ' + res.status));
-          flash(okMsg || 'Imported');
-          closeModal();
-          if (refreshAfter) await refreshAll();
-        } catch (e) {
-          alert('Import failed: ' + e.message);
-        }
-      };
-      inp.click();
-    };
-    function closeModal() { document.getElementById('modalBg').classList.remove('show'); }
-    document.getElementById('modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
-    window.closeModal = closeModal;
-
-    // Init
-    refreshAll();
-    setInterval(pollLive, 1200);
-    setInterval(refreshAll, 10000); // re-sync session list less often
-    </script>
-    </body>
-    </html>
-    """#
 }
 
 // MARK: - HTTP request/response

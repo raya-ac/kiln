@@ -28,6 +28,7 @@ let package = Package(
             exclude: ["App/Resources/AppIcon.icns"],
             resources: [
                 .copy("App/Resources/brands"),
+                .copy("App/Resources/remote"),
                 // Monaco editor host page + runtime. `vs/` is fetched by
                 // scripts/fetch-monaco.sh (or `make monaco`) and is not
                 // checked in — only .gitkeep lives under monaco/ by default.

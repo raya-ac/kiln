@@ -83,6 +83,22 @@ Conversations created by removed backends are retained and migrate to the defaul
 model. Session edits, clear, rewind, and retry reset backend context. Compaction
 only replaces a conversation after successful summarization.
 
+## Web workspace
+
+The remote page uses the same visual layout and core chat controls as the native
+client: model selection, reasoning, Normal/Fast, permissions, conversation search,
+collapsible tools, and the larger composer. Auto-compact at 90% changes the same
+setting on the host. The phone layout puts sessions and activity in drawers.
+
+Drafts stay in that browser across reloads and aren't discarded on a rejected
+send. Remote uploads currently have a 4 MB browser limit. The file editor, Git
+panel, terminal, and full archive-management UI remain native-only; the browser's
+inspector contains Activity, Usage, and Remote Access.
+
+The page's HTML, CSS, JavaScript, icons, and Markdown sanitizer are bundled with
+Kiln. There are no runtime CDN scripts. Reload your existing authenticated remote
+link after updating the host app.
+
 ## Running it
 
 Clone and build:
@@ -97,8 +113,8 @@ open .build/release/Kiln
 That gets you the raw binary. To produce a real `Kiln.app` bundle (the kind Finder recognises, with auto-updates wired up):
 
 ```bash
-./scripts/make-app-bundle.sh 1.14.0 arm64      # Apple Silicon
-./scripts/make-app-bundle.sh 1.14.0 x86_64     # Intel
+./scripts/make-app-bundle.sh 1.15.0 arm64      # Apple Silicon
+./scripts/make-app-bundle.sh 1.15.0 x86_64     # Intel
 open dist/arm64/Kiln.app
 ```
 
@@ -106,7 +122,7 @@ Either works fine for trying it out.
 
 ## Releases & auto-updates
 
-Push a tag like `v1.14.0` and GitHub Actions will:
+Push a tag like `v1.15.0` and GitHub Actions will:
 
 1. Build separate Apple Silicon and Intel `.app` bundles.
 2. Code-sign and notarise them (if you've added the Apple secrets).
@@ -166,7 +182,7 @@ Common commands are wrapped in a `Makefile`:
 ```bash
 make           # lists everything
 make run       # debug build + open the binary
-make bundle VERSION=1.14.0 ARCH=arm64
+make bundle VERSION=1.15.0 ARCH=arm64
 make lint      # swift-format --lint
 make format    # swift-format --in-place
 make logo      # re-render the brand mark
@@ -174,6 +190,11 @@ make ci-local  # run everything CI runs, locally
 ```
 
 ## Contributing
+
+`swift test` covers the native components and bundled web resources. The remote
+interaction checks use a loopback fixture server, not your live conversations:
+`node scripts/test-remote-ui.cjs` (requires Playwright and Chrome, or set
+`KILN_BROWSER_CHANNEL` to an installed Playwright browser channel).
 
 It's a personal project but PRs are welcome. Build with `swift build`, run with `open .build/debug/Kiln` (or the release variant), and the CI workflow will catch the obvious stuff. See [CONTRIBUTING.md](CONTRIBUTING.md) for the shape of a good patch and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we behave in issues and PRs.
 

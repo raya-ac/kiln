@@ -18,11 +18,14 @@ struct RightPanel: View {
                             HStack(spacing: 4) {
                                 Image(systemName: tab.icon)
                                     .font(.system(size: 10))
-                                Text(tab.localizedLabel(store.settings.language.ui))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .fixedSize()
+                                if selectedTab == tab {
+                                    Text(tab.localizedLabel(store.settings.language.ui))
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                }
                             }
-                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 8)
                             .contentShape(Rectangle())
                             .foregroundStyle(selectedTab == tab ? Color.kilnAccent : Color.kilnTextTertiary)
@@ -34,11 +37,12 @@ struct RightPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help("\(tab.label) panel")
+                    .accessibilityLabel(tab.label)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)
-            .padding(.top, 4)
+            .padding(.top, 8)
             .background(Color.kilnSurface)
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)

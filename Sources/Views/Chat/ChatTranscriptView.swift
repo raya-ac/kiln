@@ -21,6 +21,7 @@ struct ChatTranscriptView: View {
                         ProgressView().controlSize(.mini)
                         Text("Compacting").font(.system(size: 11))
                     }
+                    ContextDisplay()
                     Spacer()
                     Button { store.showInSessionFind.toggle() } label: {
                         Image(systemName: "magnifyingglass")
@@ -34,11 +35,12 @@ struct ChatTranscriptView: View {
                         Image(systemName: "arrow.down")
                     }.help("Jump to latest")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.kilnTextSecondary)
                 .controlSize(.small)
                 .padding(.horizontal, 20)
                 .frame(height: 34)
-                .background(Color.kilnSurface)
+                .background(Color.kilnBg)
 
                 if let warning = store.activeModelWarning {
                     HStack(alignment: .top, spacing: 8) {
@@ -50,7 +52,7 @@ struct ChatTranscriptView: View {
                         }.help("Check CLI updates").accessibilityLabel("Check CLI updates")
                     }
                     .font(.system(size: 11)).foregroundStyle(Color.kilnWarning)
-                    .padding(.horizontal, 20).padding(.vertical, 8)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
                 }
 
                 ScrollView {
@@ -104,6 +106,8 @@ struct ChatTranscriptView: View {
                         }
                         Color.clear.frame(height: 1).id("transcript-bottom")
                     }
+                    .frame(maxWidth: 920)
+                    .frame(maxWidth: .infinity)
                     .background(TranscriptScrollObserver { nearBottom in followsOutput = nearBottom })
                     .padding(.vertical, 8)
                 }

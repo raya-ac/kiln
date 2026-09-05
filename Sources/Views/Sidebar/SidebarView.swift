@@ -186,8 +186,8 @@ struct SidebarView: View {
                         .font(.system(size: 11, weight: .heavy))
                         .foregroundStyle(Color.kilnBg)
                 }
-                Text("Kiln Code")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                Text("Kiln")
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
                 Spacer()
                 Menu {
@@ -233,7 +233,7 @@ struct SidebarView: View {
                 .help("New session (click for templates)")
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 18)
 
             // Code / Chat tabs
             HStack(spacing: 4) {
@@ -252,12 +252,12 @@ struct SidebarView: View {
                             Image(systemName: kind.icon)
                                 .font(.system(size: 10))
                             Text(label)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                         }
-                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
+                        .foregroundStyle(selected ? Color.kilnText : Color.kilnTextSecondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(selected ? Color.kilnAccent : Color.kilnSurfaceElevated)
+                        .padding(.vertical, 8)
+                        .background(selected ? Color.kilnSurfaceElevated : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
@@ -334,7 +334,7 @@ struct SidebarView: View {
             .padding(.bottom, 6)
 
             // Search bar
-            if sessionsForTab.count > 3 {
+            if !sessionsForTab.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10))
@@ -577,14 +577,14 @@ struct SessionRow: View {
                 // Icon
                 ZStack {
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(isActive ? Color.kilnAccentMuted : Color.kilnSurfaceElevated)
-                        .frame(width: 28, height: 28)
+                        .fill(Color.clear)
+                        .frame(width: 22, height: 28)
                     Image(systemName: session.isPinned ? "pin.fill" : (session.forkedFrom != nil ? "arrow.triangle.branch" : "bubble.left.fill"))
                         .font(.system(size: 11))
                         .foregroundStyle(isActive ? Color.kilnAccent : Color.kilnTextTertiary)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 4) {
                         if let color = session.colorLabel,
                            let swatch = SessionColor.color(for: color) {
@@ -651,33 +651,10 @@ struct SessionRow: View {
 
                 Spacer(minLength: 0)
 
-                // Drag handle on hover
-                if hovering && !isRenaming {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                        .frame(width: 16)
-                        .help("Drag to reorder or move to a group")
-                }
 
-                // Delete on hover
-                if hovering && !isRenaming {
-                    Button {
-                        showDeleteConfirm = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color.kilnTextTertiary)
-                            .frame(width: 22, height: 22)
-                            .background(Color.kilnSurfaceHover)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete session")
-                }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.vertical, 11)
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -938,14 +915,7 @@ struct SessionRow: View {
             parts.append("\(session.messages.count) \(store.settings.language.ui.msgs)")
         }
 
-        parts.append(relativeTime(session.createdAt))
-
-        // Session age — distinct from "last active" so long-lived workhorse
-        // sessions read differently from sessions spun up today.
-        let ageDays = Int(Date().timeIntervalSince(session.createdAt) / 86400)
-        if ageDays >= 7 {
-            parts.append("\(ageDays)d old")
-        }
+        parts.append(relativeTime(session.messages.last?.timestamp ?? session.createdAt))
 
         // U+00B7 (·) as the separator — same as before but baked into one string.
         return Text(Image(systemName: "folder"))
