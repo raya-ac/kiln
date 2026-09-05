@@ -7,6 +7,7 @@ YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 ## [1.10.0] — 2026-09-05
 
 ### Added
+- Replies retain the model that produced them and use its name in the transcript, search, pins, and exports.
 - Official monochrome OpenAI model icons throughout the model picker and chat UI.
 - Searchable model picker with current Codex models, an Older models group,
   and OpenCode models loaded from the installed CLI.

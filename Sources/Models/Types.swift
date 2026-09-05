@@ -118,12 +118,15 @@ struct ChatMessage: Identifiable, Sendable {
     var blocks: [MessageBlock]
     let timestamp: Date
     var isPinned: Bool = false
+    let model: AgentModel?
+    var assistantName: String { model?.label ?? "Assistant" }
 
-    init(id: String = UUID().uuidString, role: MessageRole, blocks: [MessageBlock], timestamp: Date = .now, isPinned: Bool = false) {
+    init(id: String = UUID().uuidString, role: MessageRole, blocks: [MessageBlock], timestamp: Date = .now, isPinned: Bool = false, model: AgentModel? = nil) {
         self.id = id
         self.role = role
         self.blocks = blocks
         self.timestamp = timestamp
+        self.model = model
         self.isPinned = isPinned
     }
 

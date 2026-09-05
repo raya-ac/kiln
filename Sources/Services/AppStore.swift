@@ -1010,7 +1010,7 @@ final class AppStore: ObservableObject {
         md += "**Date:** \(session.createdAt.formatted())\n\n---\n\n"
 
         for msg in session.messages {
-            let role = msg.role == .user ? "**You**" : "**\(session.model.assistantName)**"
+            let role = msg.role == .user ? "**You**" : "**\(msg.assistantName)**"
             md += "\(role)\n\n"
             for block in msg.blocks {
                 switch block {
@@ -1249,7 +1249,7 @@ final class AppStore: ObservableObject {
             ToastCenter.shared.show("Compaction failed or the conversation changed. History was retained.")
             return
         }
-        sessions[idx].messages = [ChatMessage(role: .assistant, blocks: [.text(summary)])]
+        sessions[idx].messages = [ChatMessage(role: .assistant, blocks: [.text(summary)], model: session.model)]
         agent(for: session.model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
         Persistence.saveSession(sessions[idx])
@@ -1315,7 +1315,7 @@ final class AppStore: ObservableObject {
     /// Sessions that were interrupted before the app last closed. Used by
     /// the launch recovery banner.
     var interruptedSessions: [Session] {
-        sessions.filter { $0.wasInterrupted }
+        sessions.filter { $0.wasInterrupted && !isSessionBusy($0.id) }
     }
 
     /// Whether to suppress the launch-recovery banner for this app run
@@ -1862,7 +1862,7 @@ final class AppStore: ObservableObject {
         }
 
         if !blocks.isEmpty {
-            let msg = ChatMessage(role: .assistant, blocks: blocks)
+            let msg = ChatMessage(role: .assistant, blocks: blocks, model: sessions[idx].model)
             sessions[idx].messages.append(msg)
         }
 

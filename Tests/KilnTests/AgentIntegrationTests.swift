@@ -2,6 +2,18 @@ import XCTest
 @testable import Kiln
 
 final class AgentIntegrationTests: XCTestCase {
+    func testRepliesRetainTheirModelAcrossPersistence() throws {
+        let message = ChatMessage(role: .assistant, blocks: [.text("answer")], model: .gpt55)
+        let stored = MessageData(from: message)
+        let decoded = try JSONDecoder().decode(MessageData.self, from: JSONEncoder().encode(stored)).toChatMessage()
+        XCTAssertEqual(decoded.model, .gpt55)
+        XCTAssertEqual(decoded.assistantName, AgentModel.gpt55.label)
+        let oldJSON = Data(#"{"id":"old","role":"assistant","blocks":[{"type":"text","text":"history"}],"timestamp":0}"#.utf8)
+        let historical = try JSONDecoder().decode(MessageData.self, from: oldJSON).toChatMessage()
+        XCTAssertNil(historical.model)
+        XCTAssertEqual(historical.assistantName, "Assistant")
+    }
+
     func testLegacyModelMigrationAndOpenCodeRoundTrip() throws {
         XCTAssertEqual(try JSONDecoder().decode(AgentModel.self, from: Data(#""claude-sonnet-4-6""#.utf8)), .defaultModel)
         XCTAssertNil(AgentModel(rawValue: "opencode:anthropic/claude-sonnet"))

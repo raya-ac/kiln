@@ -64,7 +64,7 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
         let slug = cliModel.split(separator: "/").last.map(String.init) ?? cliModel
         return provider == .codex || cliModel.hasPrefix("openai/") || slug.hasPrefix("gpt-") ? .chatgpt : .codex
     }
-    var assistantName: String { provider.label }
+    var assistantName: String { label }
     var providerDisplayName: String { provider.label }
     private var descriptor: ModelDescriptor? {
         (provider == .opencode ? OpenCodeModels.shared.descriptors : ModelCatalog.shared.models).first { $0.model == self }

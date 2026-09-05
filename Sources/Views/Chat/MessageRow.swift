@@ -65,7 +65,7 @@ struct MessageRow: View {
     }
 
     private var assistantName: String {
-        store.activeSession?.model.assistantName ?? "Assistant"
+        message.assistantName
     }
 
     var body: some View {
@@ -75,7 +75,7 @@ struct MessageRow: View {
                 if store.settings.showAvatars {
                     UserAssistantAvatar(
                         isUser: isUser,
-                        brand: store.activeSession?.model.brand ?? .codex
+                        brand: message.model?.brand ?? .codex
                     )
                 }
 

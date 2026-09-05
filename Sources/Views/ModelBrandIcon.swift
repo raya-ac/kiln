@@ -38,7 +38,14 @@ enum ModelBrandAssets {
     static let black = load("black")
 
     private static func load(_ color: String) -> NSImage {
-        guard let url = Bundle.module.url(forResource: "OpenAI-\(color)-monoblossom", withExtension: "png", subdirectory: "brands"),
+        let bundle: Bundle
+        if let location = Bundle.main.resourceURL?.appendingPathComponent("Kiln_Kiln.bundle"),
+           let packaged = Bundle(url: location) {
+            bundle = packaged
+        } else {
+            bundle = .module
+        }
+        guard let url = bundle.url(forResource: "OpenAI-\(color)-monoblossom", withExtension: "png", subdirectory: "brands"),
               let image = NSImage(contentsOf: url) else { return NSImage() }
         return image
     }

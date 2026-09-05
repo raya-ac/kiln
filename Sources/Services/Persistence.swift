@@ -189,6 +189,7 @@ struct MessageData: Codable {
     let blocks: [BlockData]
     let timestamp: Double
     var isPinned: Bool?
+    var model: String?
 
     init(from msg: ChatMessage) {
         self.id = msg.id
@@ -196,6 +197,7 @@ struct MessageData: Codable {
         self.blocks = msg.blocks.map { BlockData(from: $0) }
         self.timestamp = msg.timestamp.timeIntervalSince1970
         self.isPinned = msg.isPinned
+        self.model = msg.model?.rawValue
     }
 
     func toChatMessage() -> ChatMessage {
@@ -204,7 +206,8 @@ struct MessageData: Codable {
             role: MessageRole(rawValue: role) ?? .user,
             blocks: blocks.map { $0.toBlock() },
             timestamp: Date(timeIntervalSince1970: timestamp),
-            isPinned: isPinned ?? false
+            isPinned: isPinned ?? false,
+            model: model.flatMap(AgentModel.init(rawValue:))
         )
     }
 }

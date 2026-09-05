@@ -1316,7 +1316,7 @@ final class RemoteControlServer: ObservableObject {
       } else if (block.type === 'trace') {
         const entries = (block.entries || []).slice(-12);
         return `<div class="trace-block">
-          <div class="trace-head">Codex log · ${(block.entries || []).length}</div>
+          <div class="trace-head">Run log · ${(block.entries || []).length}</div>
           ${entries.map(e => `<div class="trace-entry"><span class="lvl">[${escHTML(e.level || 'info')}]</span> ${escHTML(e.phase || '')}: ${escHTML(e.title || '')}${e.detail ? `\n${escHTML(e.detail)}` : ''}</div>`).join('')}
         </div>`;
       } else if (block.type === 'toolUse') {

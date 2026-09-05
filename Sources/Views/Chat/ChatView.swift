@@ -924,7 +924,7 @@ struct PinnedMessagesStrip: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Text(msg.role == .user ? "You" : (store.activeSession?.model.assistantName ?? "Assistant"))
+                Text(msg.role == .user ? "You" : msg.assistantName)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(msg.role == .user ? Color.kilnTextSecondary : Color.kilnAccent)
                     .frame(width: 38, alignment: .leading)
