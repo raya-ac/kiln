@@ -51,6 +51,9 @@ private struct ModelPickerView: View {
             }
             .pickerStyle(.segmented).padding(.horizontal, 14).padding(.bottom, 10)
             Divider()
+            if let warning = store.codexCatalogWarning, provider == .codex {
+                Text(warning).font(.system(size: 11)).foregroundStyle(Color.kilnWarning).padding(12)
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(AgentModel.groupedByProvider.filter { $0.provider == provider }) { group in
@@ -100,6 +103,7 @@ private struct ModelPickerView: View {
         .frame(width: 390, height: 460)
         .background(Color.kilnBg)
         .onAppear { provider = selection.provider }
+        .task { await store.refreshCodexModelCatalog() }
         .onChange(of: provider) {
             if provider == .opencode && OpenCodeModels.shared.models.isEmpty {
                 refreshing = true

@@ -4,6 +4,19 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.11.0] — 2026-09-05
+
+### Added
+- Settings > CLI Updates checks installed Codex and OpenCode versions against stable releases.
+- Package-manager-aware update commands, release links, missing-install and offline states, and explicit Homebrew release-lag status.
+- Read-only checks on opening the tab, with a one-hour in-memory cache and manual refresh. No installations are modified.
+
+### Fixed
+- New chats and the new-session form honor the saved working folder and default model.
+- CLI processes receive the selected folder as both their working directory and PWD.
+- Codex lookup prefers system CLI locations over a stale per-user fallback copy.
+- Model catalogs must match the selected Codex version. Missing model metadata is shown as a warning, not a successful event; Astra is no longer an unconditional fallback default.
+
 ## [1.10.0] — 2026-09-05
 
 ### Added

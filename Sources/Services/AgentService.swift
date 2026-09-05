@@ -75,6 +75,7 @@ final class AgentService: ObservableObject {
         let existing = env["PATH"] ?? ""
         env["PATH"] = (extraPaths + [existing]).filter { !$0.isEmpty }.joined(separator: ":")
         env["FORCE_COLOR"] = "0"
+        env["PWD"] = resolvedDir
         if backend == .opencode { env["OPENCODE_CONFIG_CONTENT"] = OpenCodeProtocol.configuration(options) }
         process.environment = env
 
@@ -203,7 +204,8 @@ final class AgentService: ObservableObject {
     }
 
     private func resolveWorkDir(_ workDir: String) -> String? {
-        let expanded = (workDir as NSString).expandingTildeInPath
+        let expanded = ((workDir as NSString).expandingTildeInPath as NSString).standardizingPath
+        guard (expanded as NSString).isAbsolutePath else { return nil }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
             return expanded

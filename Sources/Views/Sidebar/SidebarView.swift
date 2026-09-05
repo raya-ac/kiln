@@ -193,7 +193,7 @@ struct SidebarView: View {
                 Menu {
                     Button("New session") {
                         if store.selectedSidebarTab == .chat {
-                            store.createSession(workDir: NSHomeDirectory(), kind: .chat)
+                            store.quickCreateChatSession()
                         } else {
                             store.showNewSessionSheet = true
                         }
@@ -398,7 +398,7 @@ struct SidebarView: View {
                             .foregroundStyle(Color.kilnTextSecondary)
                         Button {
                             if store.selectedSidebarTab == .chat {
-                                store.createSession(workDir: NSHomeDirectory(), kind: .chat)
+                                store.quickCreateChatSession()
                             } else {
                                 store.showNewSessionSheet = true
                             }

@@ -592,13 +592,7 @@ struct OnboardingView: View {
 
     private func probeCodex() async {
         codexStatus = .checking
-        let candidates = [
-            "\(NSHomeDirectory())/.local/bin/codex",
-            "/usr/local/bin/codex",
-            "/opt/homebrew/bin/codex",
-        ]
-        let found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-        guard let path = found else {
+        guard let path = CLIUpdateInspector.executable(for: .codex) else {
             codexStatus = .missing
             codexPath = nil
             codexVersion = nil

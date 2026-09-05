@@ -141,6 +141,7 @@ final class AppStore: ObservableObject {
         sessions = fresh
     }
     @Published var showSettings = false
+    @Published var showCLIUpdates = false
     @Published var selectedSidebarTab: SessionKind = .code
 
     // Overlays
@@ -365,8 +366,36 @@ final class AppStore: ObservableObject {
     func agent(for model: AgentModel) -> AgentService { model.provider == .codex ? codex : opencode }
     @Published var modelCatalogRevision = 0
     @Published var modelCatalogError: String?
+    @Published var codexCatalogWarning: String?
+    func refreshCodexModelCatalog() async {
+        do {
+            let data = try await CodexCLI.output(["--version"])
+            guard let version = CLIVersion(String(decoding: data, as: UTF8.self)) else { throw CLIUpdateError.invalidVersion }
+            ModelCatalog.shared.reload(installedVersion: version)
+            codexCatalogWarning = ModelCatalog.shared.loadedFromCache ? nil
+                : "No matching model catalog for Codex \(version.text). Showing fallback models."
+        } catch {
+            codexCatalogWarning = "Could not verify the Codex model catalog. Check the CLI installation."
+        }
+        modelCatalogRevision += 1
+    }
+
+    var activeModelWarning: String? {
+        guard let model = activeSession?.model, model.provider == .codex else { return nil }
+        if let codexCatalogWarning { return codexCatalogWarning }
+        if !ModelCatalog.shared.models.contains(where: { $0.model == model }) {
+            return "\(model.label) is not in this CLI's model catalog. Fallback metadata may reduce reliability."
+        }
+        return codexCatalogWarning
+    }
+
+    func openCLIUpdates() {
+        showCLIUpdates = true
+        showSettings = true
+    }
+
     func refreshModelCatalog() async {
-        ModelCatalog.shared.reload()
+        await refreshCodexModelCatalog()
         do { try await OpenCodeModels.shared.reload(); modelCatalogError = nil }
         catch { modelCatalogError = "OpenCode model list unavailable. Check installation and configuration." }
         modelCatalogRevision += 1
@@ -1469,6 +1498,7 @@ final class AppStore: ObservableObject {
                 guard let self else { return }
                 self.handleAgentEvent(event, sessionId: sessionId)
             }
+        if model.provider == .codex { await refreshCodexModelCatalog() }
     }
 
     private func shouldAutoCompact(sessionId: String) -> Bool {

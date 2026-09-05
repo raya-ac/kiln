@@ -18,17 +18,21 @@ struct SettingsView: View {
     @FocusState private var portFocused: Bool
 
     enum SettingsTab: String, CaseIterable, Identifiable {
-        case settings, stats
+        case settings, stats, cliUpdates
         var id: String { rawValue }
-        var label: String { self == .settings ? "Settings" : "Stats" }
-        var icon: String { self == .settings ? "gearshape" : "chart.bar.fill" }
+        var label: String {
+            switch self { case .settings: "Settings"; case .stats: "Stats"; case .cliUpdates: "CLI Updates" }
+        }
+        var icon: String {
+            switch self { case .settings: "gearshape"; case .stats: "chart.bar.fill"; case .cliUpdates: "arrow.down.circle" }
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header with tab switcher
             HStack {
-                Text(tab == .settings ? store.settings.language.ui.settings : "Stats")
+                Text(tab == .settings ? store.settings.language.ui.settings : tab.label)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
 
@@ -74,12 +78,20 @@ struct SettingsView: View {
 
             if tab == .stats {
                 StatsView()
+            } else if tab == .cliUpdates {
+                CLIUpdatesView()
             } else {
                 settingsScroll
             }
         }
         .frame(width: 540, height: 560)
         .background(Color.kilnBg)
+        .onAppear {
+            if store.showCLIUpdates { tab = .cliUpdates; store.showCLIUpdates = false }
+        }
+        .onChange(of: store.showCLIUpdates) { _, requested in
+            if requested { tab = .cliUpdates; store.showCLIUpdates = false }
+        }
         // Persist on any settings mutation — lets us drop the per-Toggle
         // `saveSettings()` calls and gives SwiftUI a direct `$store.settings.X`
         // binding so toggles animate live instead of waiting for re-open.

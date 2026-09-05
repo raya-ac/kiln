@@ -40,6 +40,19 @@ struct ChatTranscriptView: View {
                 .frame(height: 34)
                 .background(Color.kilnSurface)
 
+                if let warning = store.activeModelWarning {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text(warning).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        Button { store.openCLIUpdates() } label: {
+                            Image(systemName: "arrow.down.circle")
+                        }.help("Check CLI updates").accessibilityLabel("Check CLI updates")
+                    }
+                    .font(.system(size: 11)).foregroundStyle(Color.kilnWarning)
+                    .padding(.horizontal, 20).padding(.vertical, 8)
+                }
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if messages.count > visibleCount {
@@ -103,6 +116,7 @@ struct ChatTranscriptView: View {
                 }
             }
         }
+        .task { await store.refreshCodexModelCatalog() }
     }
 
     private func jump(_ id: String, proxy: ScrollViewProxy) {

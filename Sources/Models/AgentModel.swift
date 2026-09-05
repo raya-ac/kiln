@@ -39,7 +39,7 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
     static let gpt54Mini = Self(rawValue: "gpt-5.4-mini")!
     static let gpt53Codex = Self(rawValue: "gpt-5.3-codex")!
     static let gpt53CodexSpark = Self(rawValue: "gpt-5.3-codex-spark")!
-    static let defaultModel = gpt6Astra
+    static let defaultModel = gpt55
     static var allCases: [Self] { groupedByProvider.flatMap(\.models) }
     static let olderModels: [Self] = [.gpt54, .gpt53Codex, Self(rawValue: "gpt-5.2")!, Self(rawValue: "gpt-5.1-codex-max")!]
     struct Group: Identifiable {
@@ -93,6 +93,7 @@ final class ModelCatalog: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot: [ModelDescriptor] = []
     private(set) var loadedFromCache = false
+    private var cliVersion: CLIVersion?
 
     var models: [ModelDescriptor] {
         lock.lock()
@@ -109,11 +110,14 @@ final class ModelCatalog: @unchecked Sendable {
 
     init() { reload() }
 
-    func reload() {
+    func reload(installedVersion: CLIVersion? = nil) {
+        lock.lock()
+        if let installedVersion { cliVersion = installedVersion }
+        let expectedVersion = cliVersion
+        lock.unlock()
         let data = try? Data(contentsOf: Self.codexHome.appendingPathComponent("models_cache.json"))
-        let parsed = data.flatMap(Self.parse) ?? []
+        let parsed = data.flatMap { Self.parse($0, installedVersion: expectedVersion) } ?? []
         let fallback: [ModelDescriptor] = [
-            .init(model: .gpt6Astra, displayName: "GPT-6 Astra", description: "Complex coding and reasoning", contextWindow: 272_000, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"]),
             .init(model: .gpt55, displayName: "GPT-5.5", description: "Coding and general work", contextWindow: 272_000, efforts: ["low", "medium", "high", "xhigh"]),
             .init(model: .gpt54Mini, displayName: "GPT-5.4 Mini", description: "Smaller, faster tasks", contextWindow: 272_000, efforts: ["low", "medium", "high", "xhigh"])
         ]
@@ -123,8 +127,8 @@ final class ModelCatalog: @unchecked Sendable {
         lock.unlock()
     }
 
-    static func parse(_ data: Data) -> [ModelDescriptor]? {
-        struct Envelope: Decodable { let models: [Entry] }
+    static func parse(_ data: Data, installedVersion: CLIVersion? = nil) -> [ModelDescriptor]? {
+        struct Envelope: Decodable { let models: [Entry]; let client_version: String? }
         struct Entry: Decodable {
             let slug: String
             let display_name: String?
@@ -135,6 +139,7 @@ final class ModelCatalog: @unchecked Sendable {
         }
         struct Effort: Decodable { let effort: String }
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return nil }
+        if let installedVersion, envelope.client_version.flatMap(CLIVersion.init) != installedVersion { return nil }
         var seen = Set<String>()
         return envelope.models.compactMap { entry in
             guard entry.visibility == "list", let model = AgentModel(rawValue: entry.slug),

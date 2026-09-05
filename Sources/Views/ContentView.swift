@@ -225,7 +225,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(Color.kilnPreferredColorScheme)
         .sheet(isPresented: $store.showNewSessionSheet) {
-            NewSessionSheet()
+            NewSessionSheet(workDir: store.settings.defaultWorkDir, model: store.settings.defaultModel)
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .sheet(isPresented: $store.showOnboarding) {
@@ -738,9 +738,14 @@ struct EmptyStateView: View {
 
 struct NewSessionSheet: View {
     @EnvironmentObject var store: AppStore
-    @State private var workDir = NSHomeDirectory()
-    @State private var model: AgentModel = .defaultModel
+    @State private var workDir: String
+    @State private var model: AgentModel
     @Environment(\.dismiss) private var dismiss
+
+    init(workDir: String, model: AgentModel) {
+        _workDir = State(initialValue: workDir)
+        _model = State(initialValue: model)
+    }
 
     var body: some View {
         VStack(spacing: 24) {

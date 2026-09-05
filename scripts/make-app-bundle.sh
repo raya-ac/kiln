@@ -17,6 +17,7 @@
 #   dist/Kiln-<version>-<arch>.zip  — zipped + ready for Sparkle/GH Release
 #
 # Env vars (all optional):
+#   KILN_DIST_ROOT     optional separate staging directory
 #   CODESIGN_IDENTITY   "Developer ID Application: …" — signs the bundle
 #   SUFEED_URL          overrides the default appcast URL embedded in Info.plist
 #   SUPUBLIC_ED_KEY     EdDSA public key for Sparkle update verification
@@ -52,7 +53,7 @@ fi
 
 # 2. Per-arch workspace. `dist/` itself is shared so both arches' zips can
 # coexist for appcast generation.
-DIST="$ROOT/dist"
+DIST="${KILN_DIST_ROOT:-$ROOT/dist}"
 WORK="$DIST/$ARCH"
 APP="$WORK/$APP_NAME.app"
 mkdir -p "$DIST"

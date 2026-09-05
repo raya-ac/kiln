@@ -204,6 +204,16 @@ enum CodexProtocol {
             guard let item = json["item"] as? [String: Any],
                   let itemType = item["type"] as? String else { return [] }
             switch itemType {
+            case "error":
+                let message = item["message"] as? String ?? "Codex reported a diagnostic"
+                let metadataWarning = message.contains("Model metadata for")
+                return [.trace(trace(
+                    level: metadataWarning || message.contains("Under-development features") ? .warning : .error,
+                    phase: metadataWarning ? "model_metadata" : "diagnostic",
+                    title: metadataWarning ? "Model metadata unavailable" : "Codex diagnostic",
+                    detail: message,
+                    metadata: ["id": item["id"] as? String ?? ""]
+                ))]
             case "agent_message":
                 guard let text = item["text"] as? String, !text.isEmpty else { return [] }
                 let event = AgentEvent.trace(itemTrace(item, itemType: itemType, completed: true))

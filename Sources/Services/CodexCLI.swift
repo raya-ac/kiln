@@ -3,11 +3,11 @@ import Foundation
 enum CodexCLI {
     static var executablePath: String {
         let home = NSHomeDirectory()
-        return ["\(home)/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
+        return ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "\(home)/.local/bin/codex"]
             .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/bin/env"
     }
 
-    static func output(_ arguments: [String], executable: String? = nil, command: String = "codex") async throws -> Data {
+    static func output(_ arguments: [String], executable: String? = nil, command: String = "codex", environment overrides: [String: String] = [:]) async throws -> Data {
         try await Task.detached {
             let process = Process()
             let path = executable ?? executablePath
@@ -15,6 +15,7 @@ enum CodexCLI {
             process.arguments = (path == "/usr/bin/env" ? [command] : []) + arguments
             var environment = ProcessInfo.processInfo.environment
             environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
+            environment.merge(overrides) { _, new in new }
             process.environment = environment
             let output = Pipe()
             process.standardOutput = output
