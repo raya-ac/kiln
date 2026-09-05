@@ -4,10 +4,19 @@ import AppKit
 
 struct ComposerView: View {
     @EnvironmentObject var store: AppStore
-    @State private var input = ""
+    private var input: String {
+        get { store.drafts.draft(for: store.activeSessionId).text }
+        nonmutating set { if let id = store.activeSessionId { store.drafts.setText(newValue, for: id) } }
+    }
+    private var inputBinding: Binding<String> {
+        let id = store.activeSessionId
+        return Binding(
+            get: { store.drafts.draft(for: id).text },
+            set: { text in if let id { store.drafts.setText(text, for: id) } })
+    }
     @State private var isFocused = false
     @State private var dropHovering = false
-    @State private var importingAttachments = 0
+    private var importingAttachments: Int { store.activeSessionId.flatMap { store.drafts.imports[$0] } ?? 0 }
     @State private var showSnippets = false
     @State private var showExpandedEditor = false
     /// When the user types `/` at the start of a line, we surface a
@@ -31,13 +40,16 @@ struct ComposerView: View {
             ComposerToolbar()
 
             // Undo-send banner (only when a send is pending)
-            if let pending = store.pendingSend {
-                UndoSendBanner(pending: pending) {
-                    if let restored = store.cancelPendingSend() {
-                        input = restored.text
-                        store.composerAttachments = restored.attachments
-                    }
-                }
+            if let pending = store.pendingSend, pending.delaySeconds > 0 {
+                UndoSendBanner(pending: pending) { store.cancelPendingSend() }
+            }
+            if let error = store.drafts.storageError {
+                HStack {
+                    Text(error).font(.system(size: 11)).foregroundStyle(Color.kilnWarning)
+                    Spacer()
+                    Button { store.drafts.retrySaving() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Retry saving drafts")
+                }.padding(.horizontal, 16).padding(.vertical, 6)
             }
 
             // Slash command popup — appears inline when the input starts with "/".
@@ -134,7 +146,7 @@ struct ComposerView: View {
                 .help("Expand editor")
 
                 VStack(spacing: 0) {
-                    ComposerTextInput(text: $input, isFocused: $isFocused,
+                    ComposerTextInput(text: inputBinding, isFocused: $isFocused,
                         placeholder: placeholderText,
                         fontSize: 13 * store.settings.fontScale.factor,
                         spellCheck: store.settings.spellCheck,
@@ -209,9 +221,10 @@ struct ComposerView: View {
                         hintButton("⌘.", "stop") { store.interrupt() }
                     }
                     Spacer()
-                    if !input.isEmpty {
+                    if !input.isEmpty || !store.composerAttachments.isEmpty {
                         Button {
                             input = ""
+                            store.clearAttachments()
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "xmark.circle.fill")
@@ -235,6 +248,8 @@ struct ComposerView: View {
             }
         }
         .background(Color.kilnBg)
+        .onDisappear { store.drafts.flush() }
+        .onChange(of: store.composerFocusRequest) { isFocused = true }
         .onDrop(of: [.fileURL, .image], isTargeted: $dropHovering) { providers in
             handleDrop(providers)
         }
@@ -250,7 +265,7 @@ struct ComposerView: View {
             .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .sheet(isPresented: $showExpandedEditor) {
-            ExpandedComposerEditor(text: $input, canSend: canSend, onPaste: handlePaste, onSend: { send() })
+            ExpandedComposerEditor(text: inputBinding, canSend: canSend, onPaste: handlePaste, onSend: { send() })
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .onChange(of: store.pendingComposerPrefill) { _, newValue in
@@ -285,7 +300,7 @@ struct ComposerView: View {
     private var canSend: Bool {
         let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !store.composerAttachments.isEmpty
-        return (hasText || hasAttachments) && importingAttachments == 0 && !store.isSessionBusy(store.activeSessionId)
+        return (hasText || hasAttachments) && importingAttachments == 0 && store.pendingSend == nil && !store.isSessionBusy(store.activeSessionId)
     }
 
     /// Returns the current slash query (text after the leading `/`) or nil
@@ -392,12 +407,10 @@ struct ComposerView: View {
         }
 
         let attached = store.composerAttachments
+        guard store.queueSend(text, attachments: attached) else { return }
         PromptHistoryStore.shared.record(text)
         historyIndex = -1
         savedDraft = ""
-        input = ""
-        store.clearAttachments()
-        store.queueSend(text, attachments: attached)
     }
 
     private func isRecognizedSlashCommand(_ raw: String) -> Bool {
@@ -1257,16 +1270,16 @@ struct ComposerView: View {
     }
 
     private func handlePaste(_ providers: [NSItemProvider]) {
-        let sessionID = store.activeSessionId
-        importingAttachments += 1
+        guard let sessionID = store.activeSessionId else { return }
+        store.drafts.beginImport(sessionID)
         Task { @MainActor in
-            defer { importingAttachments -= 1 }
+            defer { store.drafts.endImport(sessionID) }
             var failures: [String] = []
             for provider in providers {
                 do {
                     let attachment = try await AttachmentImporter().load(provider)
-                    guard store.activeSessionId == sessionID else { return }
-                    store.addAttachment(path: attachment.path, name: attachment.name)
+                    guard store.sessions.contains(where: { $0.id == sessionID }) else { return }
+                    store.drafts.addAttachment(attachment, for: sessionID)
                 } catch { failures.append(error.localizedDescription) }
             }
             if !failures.isEmpty { ToastCenter.shared.show(failures[0], kind: .error) }
@@ -1667,7 +1680,7 @@ struct UndoSendBanner: View {
     @State private var now: Date = .now
 
     private var remaining: Int {
-        let total = store.settings.undoSendWindow
+        let total = pending.delaySeconds
         let elapsed = Int(now.timeIntervalSince(pending.sentAt))
         return max(0, total - elapsed)
     }
@@ -1700,14 +1713,15 @@ struct UndoSendBanner: View {
                     .clipShape(RoundedRectangle(cornerRadius: 5))
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("z", modifiers: .command)
+            .keyboardShortcut("z", modifiers: [.command, .option])
+            .help("Undo send (Option-Command-Z)")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(Color.kilnSurface)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.kilnAccent).frame(height: 2)
-                .scaleEffect(x: CGFloat(remaining) / CGFloat(max(1, store.settings.undoSendWindow)), y: 1, anchor: .leading)
+                .scaleEffect(x: CGFloat(remaining) / CGFloat(max(1, pending.delaySeconds)), y: 1, anchor: .leading)
                 .animation(.linear(duration: 0.1), value: remaining)
         }
         .onReceive(Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()) { _ in

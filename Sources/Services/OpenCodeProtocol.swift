@@ -60,7 +60,11 @@ enum OpenCodeProtocol {
         case "step_finish":
             if let cost = part["cost"] as? Double { events.append(.cost(cost)) }
             if let tokens = part["tokens"] as? [String: Any] {
-                events.append(.usage(inputTokens: tokens["input"] as? Int ?? 0, outputTokens: tokens["output"] as? Int ?? 0))
+                let input = tokens["input"] as? Int ?? 0
+                let output = tokens["output"] as? Int ?? 0
+                events.append(.trace(AgentTraceEntry(source: "opencode", phase: "usage", title: "Token usage",
+                    metadata: ["inputTokens": String(input), "outputTokens": String(output)])))
+                events.append(.usage(inputTokens: input, outputTokens: output))
             }
         case "error":
             let error = json["error"] as? [String: Any] ?? [:]

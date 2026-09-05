@@ -5,6 +5,17 @@ enum Persistence {
     private static let baseDir = NSHomeDirectory() + "/.kiln"
     private static let sessionsDir = baseDir + "/sessions"
     private static let settingsPath = baseDir + "/settings.json"
+    static var compactionArchiveDirectory: URL { URL(fileURLWithPath: baseDir).appendingPathComponent("compaction-archives") }
+
+    static func saveCompactionArchive(_ session: Session, directory: URL = compactionArchiveDirectory) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let name = session.name.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: "-")
+        let date = ISO8601DateFormatter().string(from: .now).replacingOccurrences(of: ":", with: "-")
+        let file = directory.appendingPathComponent(date + "-" + String(name.prefix(50)) + "-" + UUID().uuidString + ".json")
+        let data = try JSONEncoder().encode(SessionData(from: session))
+        try data.write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
 
     // MARK: - Setup
 

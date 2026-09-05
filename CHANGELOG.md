@@ -4,6 +4,21 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.13.0] — 2026-09-05
+
+### Added
+- Per-conversation draft autosave, including attachments, with sidebar draft indicators and restart recovery.
+- Independent undo-send windows across conversations. Undo merges newer draft text; interrupted sends recover as drafts and never auto-send on launch.
+- Edit & retry restores a failed request and its attachments without deleting the conversation.
+- Auto-compact at 90% is now a Chat & Composer toggle, enabled by default for new and existing settings.
+- Full transcript archives before compaction, accessible from Chat & Composer settings.
+
+### Fixed
+- Pasting while switching conversations keeps the attachment in its original draft.
+- Unavailable attachments and draft storage failures no longer silently discard a send.
+- Auto-compaction no longer requires eight messages, and can recover reported usage from saved run logs after restarting.
+- Undo-send no longer steals the normal text-undo shortcut.
+
 ## [1.12.0] — 2026-09-05
 
 ### Changed

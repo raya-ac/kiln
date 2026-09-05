@@ -145,6 +145,10 @@ struct SettingsView: View {
     private var defaultsSection: some View {
         // Defaults
         SettingsSection(title: store.settings.language.ui.defaults) {
+            SettingsRow(label: store.settings.language.ui.modelLabel) {
+                ModelPickerButton(selection: $store.settings.defaultModel)
+            }
+
             SettingsRow(label: store.settings.language.ui.modeLabel) {
                 Picker("Mode", selection: $store.settings.defaultMode) {
                     ForEach(SessionMode.allCases) { mode in Text(mode.label).tag(mode) }
@@ -580,6 +584,21 @@ struct SettingsView: View {
     @ViewBuilder
     private var chatSection: some View {
         SettingsSection(title: "CHAT") {
+            SettingsRow(label: "Auto-compact") {
+                SettingsToggle(value: store.settings.autoCompactEnabled, set: { store.settings.autoCompactEnabled = $0 }) {
+                    Text("At 90% context").font(.system(size: 11)).foregroundStyle(Color.kilnTextSecondary)
+                }
+                Spacer()
+                Button {
+                    let directory = Persistence.compactionArchiveDirectory
+                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(directory)
+                } label: { Image(systemName: "folder") }
+                .buttonStyle(.borderless).help("Open conversation archives saved before compaction")
+                .accessibilityLabel("Open compaction archives")
+            }
+            .help("Compact before the next send at 90% reported context. Manual compaction remains available.")
+
             SettingsRow(label: "Avatars") {
                 SettingsToggle(value: store.settings.showAvatars) { v in
                     store.settings.showAvatars = v

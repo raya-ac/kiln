@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AVFoundation
+import Combine
 
 /// Central app state — owns sessions, drives UI, relays Codex events.
 @MainActor
@@ -10,6 +11,7 @@ final class AppStore: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var activeSessionId: String? {
         didSet {
+            if oldValue != activeSessionId { drafts.flush() }
             // Clear "done" pulse when the user focuses the session.
             if let id = activeSessionId {
                 recentlyCompleted.removeValue(forKey: id)
@@ -290,7 +292,13 @@ final class AppStore: ObservableObject {
     @Published var settings: KilnSettings = KilnSettings()
 
     // Composer attachments (files/images pending send)
-    @Published var composerAttachments: [ComposerAttachment] = []
+    let drafts = ComposerDraftStore()
+    private var draftSubscription: AnyCancellable?
+    @Published var composerFocusRequest = 0
+    var composerAttachments: [ComposerAttachment] {
+        get { drafts.draft(for: activeSessionId).attachments }
+        set { if let id = activeSessionId { drafts.setAttachments(newValue, for: id) } }
+    }
 
     // Pending send (undo-send window). When non-nil, the composer shows an
     // "Undo" banner and the actual send is delayed by `settings.undoSendWindow`
@@ -301,9 +309,12 @@ final class AppStore: ObservableObject {
         let text: String
         let attachments: [ComposerAttachment]
         let sentAt: Date
+        let delaySeconds: Int
     }
-    @Published var pendingSend: PendingSend?
-    private var pendingSendTask: Task<Void, Never>?
+    @Published private var pendingSends: [String: PendingSend] = [:]
+    private var pendingSendTasks: [String: Task<Void, Never>] = [:]
+    var pendingSend: PendingSend? { activeSessionId.flatMap { pendingSends[$0] } }
+    func hasPendingSend(_ id: String) -> Bool { pendingSends[id] != nil }
 
     /// One-shot signal to prefill the composer input. Set from the
     /// file-tree "Ask Assistant about this file" action (or anywhere else
@@ -312,12 +323,12 @@ final class AppStore: ObservableObject {
     /// signal so re-sending the same string fires again.
     @Published var composerPrefill: String?
 
-    func cancelPendingSend() -> (text: String, attachments: [ComposerAttachment])? {
-        guard let pending = pendingSend else { return nil }
-        pendingSendTask?.cancel()
-        pendingSendTask = nil
-        pendingSend = nil
-        return (pending.text, pending.attachments)
+    func cancelPendingSend(for sessionId: String? = nil) {
+        guard let id = sessionId ?? activeSessionId, let pending = pendingSends[id] else { return }
+        pendingSendTasks.removeValue(forKey: pending.sessionId)?.cancel()
+        pendingSends.removeValue(forKey: pending.sessionId)
+        drafts.restorePending(pending.sessionId, requestID: pending.id)
+        composerFocusRequest += 1
     }
 
     // Full-window video overlay (nil = nothing playing)
@@ -343,7 +354,8 @@ final class AppStore: ObservableObject {
     func addAttachment(path: String, name: String) {
         // Dedup by path
         guard !composerAttachments.contains(where: { $0.path == path }) else { return }
-        composerAttachments.append(ComposerAttachment(id: UUID().uuidString, path: path, name: name))
+        guard let id = activeSessionId else { return }
+        drafts.addAttachment(ComposerAttachment(id: UUID().uuidString, path: path, name: name), for: id)
     }
 
     func removeAttachment(_ id: String) {
@@ -418,6 +430,7 @@ final class AppStore: ObservableObject {
     // MARK: - Init
 
     init() {
+        draftSubscription = drafts.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         Persistence.ensureDirectories()
         settings = Persistence.loadSettings()
         sessionMode = settings.defaultMode
@@ -676,6 +689,9 @@ final class AppStore: ObservableObject {
     }
 
     func deleteSession(_ id: String) {
+        pendingSendTasks.removeValue(forKey: id)?.cancel()
+        pendingSends.removeValue(forKey: id)
+        drafts.remove(id)
         if let session = sessions.first(where: { $0.id == id }) {
             agent(for: session.model).kill(sessionId: id)
             agent(for: session.model).forgetThread(for: id)
@@ -1010,6 +1026,7 @@ final class AppStore: ObservableObject {
     func clearSession(_ id: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         guard !isSessionBusy(id) else { return }
+        cancelPendingSend(for: id)
         agent(for: sessions[idx].model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
         sessions[idx].wasInterrupted = false
@@ -1277,7 +1294,7 @@ final class AppStore: ObservableObject {
     func compactSession(sessionId targetSessionId: String? = nil,
                         continueWith followUpText: String? = nil,
                         attachments followUpAttachments: [ComposerAttachment] = [],
-                        capturedOptions: SendOptions? = nil) async {
+                        capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil) async {
         guard let id = targetSessionId ?? activeSessionId,
               let session = sessions.first(where: { $0.id == id }),
               !isSessionBusy(id), !compactingSessionIds.contains(id), !session.messages.isEmpty else { return }
@@ -1292,12 +1309,17 @@ final class AppStore: ObservableObject {
             ToastCenter.shared.show("Compaction failed or the conversation changed. History was retained.")
             return
         }
+        do { try Persistence.saveCompactionArchive(session) }
+        catch {
+            ToastCenter.shared.show("Could not archive the conversation. Compaction was cancelled.", kind: .error)
+            return
+        }
         sessions[idx].messages = [ChatMessage(role: .assistant, blocks: [.text(summary)], model: session.model)]
         agent(for: session.model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
         Persistence.saveSession(sessions[idx])
         if let followUpText {
-            await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions)
+            await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
         }
     }
 
@@ -1391,24 +1413,55 @@ final class AppStore: ObservableObject {
 
     /// Entry point from the composer. Honors the undo-send window setting;
     /// pending sends can be cancelled for the configured duration.
-    func queueSend(_ text: String, attachments: [ComposerAttachment] = []) {
-        guard let session = activeSession else { return }
+    @discardableResult
+    func queueSend(_ text: String, attachments: [ComposerAttachment] = []) -> Bool {
+        guard let session = activeSession, !session.readOnly, !isSessionBusy(session.id),
+              pendingSends[session.id] == nil, !drafts.isImporting(session.id) else { return false }
+        let request = ComposerDraft(text: text, attachments: attachments)
+        guard !request.isEmpty else { return false }
+        for file in attachments {
+            guard (try? AttachmentImporter.file(URL(fileURLWithPath: file.path))) != nil else {
+                ToastCenter.shared.show("Attachment unavailable: " + file.name, kind: .error)
+                return false
+            }
+        }
         let sid = session.id
+        let requestID = UUID().uuidString
+        guard drafts.stage(request, for: sid, requestID: requestID) else {
+            ToastCenter.shared.show(drafts.storageError ?? "This chat already has a pending message.", kind: .error)
+            return false
+        }
         let options = makeSendOptions(for: session)
-        pendingSendTask?.cancel()
-        let window = settings.undoSendWindow
-        if window <= 0 {
-            Task { await sendMessage(text, attachments: attachments, targetSessionId: sid, capturedOptions: options) }
-            return
+        let delay = max(0, settings.undoSendWindow)
+        let pending = PendingSend(id: requestID, sessionId: sid, text: text,
+            attachments: attachments, sentAt: .now, delaySeconds: delay)
+        pendingSends[sid] = pending
+        pendingSendTasks[sid] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.pendingSends[sid]?.id == pending.id else { return }
+            self.pendingSends.removeValue(forKey: sid)
+            self.pendingSendTasks.removeValue(forKey: sid)
+            guard let current = self.sessions.first(where: { $0.id == sid }),
+                  current.model == session.model, current.workDir == session.workDir else {
+                self.drafts.restorePending(sid, requestID: pending.id)
+                ToastCenter.shared.show("Session changed. Your message was restored as a draft.", kind: .info)
+                return
+            }
+            await self.sendMessage(text, attachments: attachments, targetSessionId: sid, capturedOptions: options, queuedRequestID: pending.id)
+            self.drafts.restorePending(sid, requestID: pending.id)
         }
-        let pending = PendingSend(id: UUID().uuidString, sessionId: sid, text: text, attachments: attachments, sentAt: .now)
-        pendingSend = pending
-        pendingSendTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(window) * 1_000_000_000)
-            guard !Task.isCancelled, let self, self.pendingSend?.id == pending.id else { return }
-            self.pendingSend = nil
-            await self.sendMessage(text, attachments: attachments, targetSessionId: sid, capturedOptions: options)
-        }
+        return true
+    }
+
+    func editLastRequest() {
+        guard let session = activeSession, !isSessionBusy(session.id),
+              let message = session.messages.last(where: { $0.role == .user }) else { return }
+        let request = ComposerDraft(
+            text: message.blocks.compactMap { if case .text(let text) = $0 { return text }; return nil }.joined(separator: "\n"),
+            attachments: message.blocks.compactMap { if case .attachment(let file) = $0 { return file }; return nil })
+        drafts.set(request.merging(drafts.draft(for: session.id)), for: session.id)
+        drafts.flush()
+        composerFocusRequest += 1
     }
 
     private func makeSendOptions(for session: Session) -> SendOptions {
@@ -1444,7 +1497,7 @@ final class AppStore: ObservableObject {
         return options
     }
 
-    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil) async {
+    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil) async {
         guard let target = targetSessionId ?? activeSessionId,
               let idx = sessions.firstIndex(where: { $0.id == target }),
               !isSessionBusy(target), !sessions[idx].readOnly,
@@ -1467,7 +1520,8 @@ final class AppStore: ObservableObject {
                 sessionId: sessionId,
                 continueWith: expandedText,
                 attachments: attachments,
-                capturedOptions: options
+                capturedOptions: options,
+                queuedRequestID: queuedRequestID
             )
             return
         }
@@ -1496,6 +1550,7 @@ final class AppStore: ObservableObject {
         }
         sessions[idx].wasInterrupted = true
         Persistence.saveSession(sessions[idx])
+        if let queuedRequestID { drafts.completePending(sessionId, requestID: queuedRequestID) }
 
         // Initialize THIS session's runtime — leaves any other concurrently
         // running sessions' runtimes untouched.
@@ -1526,8 +1581,11 @@ final class AppStore: ObservableObject {
         }()
         guard baseWindow > 0 else { return false }
         let rt = runtime(sessionId)
-        let usage = Double(rt.inputTokens + rt.outputTokens) / Double(baseWindow)
-        return session.messages.count >= 8 && usage >= 0.9
+        let saved = AutoCompactionPolicy.lastUsage(in: session.messages)
+        let input = rt.inputTokens > 0 ? rt.inputTokens : saved.input
+        let output = rt.inputTokens > 0 ? rt.outputTokens : saved.output
+        return AutoCompactionPolicy.shouldCompact(enabled: settings.autoCompactEnabled, inputTokens: input,
+            outputTokens: output, contextWindow: baseWindow)
     }
 
     // MARK: - Per-session tunnels

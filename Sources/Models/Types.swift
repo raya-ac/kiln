@@ -1292,6 +1292,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     var showAvatars: Bool = true
     var showTimestamps: TimestampDisplay = .hover
     var autoScroll: Bool = true
+    var autoCompactEnabled: Bool = true
     var thinkingCollapsedByDefault: Bool = false
     var showFollowUpChips: Bool = true
 
@@ -1345,6 +1346,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
         showAvatars = (try? c.decode(Bool.self, forKey: .showAvatars)) ?? true
         showTimestamps = (try? c.decode(TimestampDisplay.self, forKey: .showTimestamps)) ?? .hover
         autoScroll = (try? c.decode(Bool.self, forKey: .autoScroll)) ?? true
+        autoCompactEnabled = (try? c.decode(Bool.self, forKey: .autoCompactEnabled)) ?? true
         thinkingCollapsedByDefault = (try? c.decode(Bool.self, forKey: .thinkingCollapsedByDefault)) ?? false
         showFollowUpChips = (try? c.decode(Bool.self, forKey: .showFollowUpChips)) ?? true
         sendKey = (try? c.decode(SendKey.self, forKey: .sendKey)) ?? .enter

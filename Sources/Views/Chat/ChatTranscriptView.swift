@@ -78,7 +78,15 @@ struct ChatTranscriptView: View {
                             LiveAssistantRow()
                         }
                         if let error = store.lastError {
-                            ErrorRow(error: error).padding(20)
+                            VStack(alignment: .leading, spacing: 8) {
+                                ErrorRow(error: error)
+                                if !store.isBusy {
+                                    Button { store.editLastRequest() } label: {
+                                        Label("Edit & retry", systemImage: "pencil")
+                                    }.buttonStyle(.borderless)
+                                    .help("Restore the last request and attachments without removing the conversation")
+                                }
+                            }.padding(20)
                         }
                         if let session = store.activeSession, session.wasInterrupted,
                            !store.isBusy, session.messages.last?.role == .user {

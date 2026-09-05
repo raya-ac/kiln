@@ -198,7 +198,7 @@ struct ChatView: View {
                 .padding(.vertical, 10)
                 .background(Color.kilnSurface)
             } else {
-                ComposerView()
+                ComposerView().id(store.activeSessionId)
             }
         }
         .background(Color.kilnBg)

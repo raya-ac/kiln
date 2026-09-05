@@ -611,6 +611,10 @@ struct SessionRow: View {
                             Circle()
                                 .fill(Color.kilnAccent)
                                 .frame(width: 5, height: 5)
+                        } else if store.hasPendingSend(session.id) {
+                            Image(systemName: "clock").font(.system(size: 10)).help("Message pending")
+                        } else if store.drafts.hasDraft(session.id) {
+                            Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(Color.kilnAccent).help("Unsent draft")
                         } else if store.recentlyCompleted[session.id] != nil {
                             // Session finished while user was elsewhere —
                             // pulse a green dot until they open it.
