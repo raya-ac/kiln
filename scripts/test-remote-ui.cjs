@@ -23,7 +23,8 @@ const data = {
     {id:'m4',role:'assistant',model:model.id,assistantName:model.label,timestamp:1788580110,blocks:[{type:'text',text:'Both are available below the composer. The session list and workspace tools move into drawers on mobile.\n\n```swift\nlet preferences = session.composerPreferences\n```'}]}],
   live:{isBusy:false,streamingText:'',thinkingText:'',activeToolCalls:[]},
   toolbar:{sessionMode:'build',permissionMode:'ask',thinkingEnabled:true,effortLevel:'high',openAIFastMode:false},
-  usage:{inputTokens:22000,outputTokens:1400,totalCost:0},
+  usage:{inputTokens:9000000,outputTokens:1400,totalCost:0},
+  context:{usedTokens:31246,window:380000},
   settings:{themeMode:'dark',accentHex:'EC4899',defaultWorkDir:'/Users/ari/projects',defaultModel:'gpt-5.5',autoCompactEnabled:true,language:'en',sendKey:'enter',userDisplayName:'ari'},
   models:[model,{...model,id:'gpt-5.5',label:'GPT-5.5'},{...model,id:'gpt-5.3-codex',label:'GPT-5.3-Codex',older:true,supportsFast:false}]
 };
@@ -72,6 +73,10 @@ const server = http.createServer(async (req, res) => {
     await page.goto('http://127.0.0.1:'+server.address().port);
     await page.getByRole('heading',{name:'Kiln workspace redesign'}).waitFor();
     console.log('Loaded workspace');
+    assert((await page.locator('#contextInfo').innerText()).includes('8%'),'Context uses latest occupancy, not nine million processed tokens');
+    data.context=null;await page.evaluate(()=>refreshAll());
+    assert.equal(await page.locator('#contextInfo').innerText(),'Context unavailable');
+    data.context={usedTokens:31246,window:380000};await page.evaluate(()=>refreshAll());
     assert.equal(await page.getByRole('button',{name:'Fast mode'}).count(),1);
     await page.getByLabel('Reasoning',{exact:true}).selectOption('ultra');
     await page.waitForFunction(()=>state.toolbar.effortLevel==='ultra');

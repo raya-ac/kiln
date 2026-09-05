@@ -198,6 +198,8 @@ struct SessionRuntimeState: Sendable {
     var lastError: String? = nil
     var inputTokens: Int = 0
     var outputTokens: Int = 0
+    var contextUsage: ContextUsage? = nil
+    var contextChecked: Bool = false
 }
 
 struct ToolResultBlock: Sendable {

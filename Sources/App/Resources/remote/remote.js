@@ -193,8 +193,10 @@ function renderChatHeader() {
  document.getElementById('busyBadge').textContent=state.live.isBusy?'Working':'Connected';
  document.getElementById('activeSessionName').textContent=s?.name||'';
  document.getElementById('messageCount').textContent=state.messages.length+' messages';
- const total=(state.usage.inputTokens||0)+(state.usage.outputTokens||0);
- document.getElementById('contextInfo').textContent=total?formatTokens(total)+' tokens':'';
+ const context=state.context;
+ const valid=context&&Number.isFinite(context.usedTokens)&&context.usedTokens>=0&&Number.isFinite(context.window)&&context.window>0;
+ document.getElementById('contextInfo').textContent=valid?formatTokens(context.usedTokens)+' / '+formatTokens(context.window)+' · '+Math.floor(context.usedTokens/context.window*100)+'%':'Context unavailable';
+ document.getElementById('contextInfo').title=valid?'Latest backend context, not total tokens processed':'Automatic compaction waits for reliable backend context';
  document.getElementById('retryBtn').disabled=!s||state.live.isBusy||!state.messages.length;
  document.getElementById('exportBtn').disabled=!s;
  updateSendState(); hydrateIcons();
@@ -674,6 +676,7 @@ async function refreshAll() {
   state.live=data.live||state.live;
   state.toolbar=data.toolbar||state.toolbar;
   state.usage=data.usage||state.usage;
+  state.context=data.context||null;
   state.settings={...state.settings,...data.settings};
   state.models=data.models||[];
   if(previous!==state.activeId){loadDraft();messageSignature='';openDisclosures.clear();followsOutput=true;}

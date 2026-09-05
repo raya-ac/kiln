@@ -1425,17 +1425,8 @@ struct ModelProviderIcon: View {
 struct ContextDisplay: View {
     @EnvironmentObject var store: AppStore
 
-    private var contextWindow: Int {
-        guard let model = store.activeSession?.model else { return 200_000 }
-        if store.extendedContext, let ext = model.extendedContextWindow {
-            return ext
-        }
-        return model.contextWindow
-    }
-
-    private var totalTokens: Int {
-        store.inputTokens + store.outputTokens
-    }
+    private var contextWindow: Int { store.contextUsage?.window ?? 0 }
+    private var totalTokens: Int { store.contextUsage?.usedTokens ?? 0 }
 
     private var usagePercent: Double {
         guard contextWindow > 0 else { return 0 }
@@ -1458,7 +1449,7 @@ struct ContextDisplay: View {
     var body: some View {
         HStack(spacing: 8) {
             // Token count + context bar
-            if totalTokens > 0 {
+            if store.contextUsage != nil {
                 HStack(spacing: 4) {
                     // Horizontal progress bar (replaces the ring — easier to read at a glance)
                     ZStack(alignment: .leading) {
@@ -1489,7 +1480,12 @@ struct ContextDisplay: View {
                             .foregroundStyle(usageColor)
                     }
                 }
-                .help("\(store.inputTokens) input + \(store.outputTokens) output tokens · \(Int(usagePercent * 100))% of context")
+                .help("Latest backend context: \(totalTokens) / \(contextWindow) tokens. Usage totals are separate.")
+            }
+
+            if store.contextUsage == nil {
+                Text("Context unavailable").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    .help("The backend has not reported reliable current context. Automatic compaction will not run on guessed usage.")
             }
 
             // Cost moved out — the per-session cost in the chat header

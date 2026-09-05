@@ -37,7 +37,9 @@ previews contact the relevant provider, or FixupX for X posts. private, deleted,
 
 there's conversation search, forks, pinned messages, export, and an editor for longer prompts. drafts are saved per chat. undo-send gives you a chance to pull a request back, and interrupted queued requests come back as drafts rather than sending themselves after a restart.
 
-auto-compact is on by default at 90% reported context usage. it runs before the next send and saves the original conversation first. turn it off in chat & composer settings. saved compaction archives can be restored as a separate chat.
+auto-compact is on by default at 90% of the backend's current context, not the total tokens processed across a run. codex reports the latest request size and its effective context limit; kiln uses those same numbers for the meter and trigger. it checks before the next send, saves an archive, and compacts the existing codex thread without replacing the visible conversation or restarting it.
+
+if the measurement isn't available, kiln says so and doesn't guess. opencode's current CLI transport only supplies usage totals here, so kiln's automatic trigger stays inactive for it; manual compaction is still available. this toggle controls kiln's trigger, not the backend's own context management. turn it off in chat & composer settings. saved archives can be restored as a separate chat.
 
 ## the workspace
 

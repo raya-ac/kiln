@@ -24,6 +24,7 @@ final class AppStore: ObservableObject {
                 // we don't stall the selection animation with a git shellout.
                 DispatchQueue.main.async { [weak self] in
                     self?.refreshWorkdirActivity(id)
+                    Task { await self?.refreshContextUsage(sessionId: id) }
                 }
             } else {
                 UserDefaults.standard.removeObject(forKey: "kiln.activeSessionId")
@@ -311,6 +312,33 @@ final class AppStore: ObservableObject {
     var inputTokens: Int { activeRuntime.inputTokens }
     var outputTokens: Int { activeRuntime.outputTokens }
 
+    var contextUsage: ContextUsage? {
+        guard let session = activeSession else { return nil }
+        return contextUsage(for: session)
+    }
+
+    private func contextUsage(for session: Session) -> ContextUsage? {
+        let service = agent(for: session.model)
+        guard let thread = service.threadID(for: session.id) else { return nil }
+        let rt = runtime(session.id)
+        if rt.contextChecked {
+            guard let context = rt.contextUsage, context.modelID == session.model.rawValue,
+                  context.threadID == thread else { return nil }
+            return context
+        }
+        return AutoCompactionPolicy.lastContext(in: session.messages, modelID: session.model.rawValue, threadID: thread)
+    }
+
+    func refreshContextUsage(sessionId: String) async {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
+        let service = agent(for: session.model)
+        let thread = service.threadID(for: sessionId)
+        let context = await service.currentContext(sessionId: sessionId, model: session.model)
+        guard sessions.first(where: { $0.id == sessionId })?.model == session.model,
+              service.threadID(for: sessionId) == thread else { return }
+        mutateRuntime(sessionId) { $0.contextUsage = context; $0.contextChecked = true }
+    }
+
     /// Total cost is summed across all sessions — this is a running total
     /// for the whole app, not per-session.
     @Published var totalCost: Double = 0
@@ -480,6 +508,11 @@ final class AppStore: ObservableObject {
         if let savedId = UserDefaults.standard.string(forKey: "kiln.activeSessionId"),
            sessions.contains(where: { $0.id == savedId }) {
             activeSessionId = savedId
+        }
+
+        Task { [weak self] in
+            guard let self, let id = self.activeSessionId else { return }
+            await self.refreshContextUsage(sessionId: id)
         }
 
         // Restore remote server config from UserDefaults and auto-start if enabled.
@@ -1339,6 +1372,26 @@ final class AppStore: ObservableObject {
               !isSessionBusy(id), !compactingSessionIds.contains(id), !session.messages.isEmpty else { return }
         compactingSessionIds.insert(id)
         defer { compactingSessionIds.remove(id) }
+        if session.model.provider == .codex {
+            guard let thread = codex.threadID(for: id) else {
+                ToastCenter.shared.show("Send a message to establish a backend session before compacting.", kind: .error)
+                return
+            }
+            do {
+                try Persistence.saveCompactionArchive(session)
+                try await codex.compactThread(sessionId: id, workDir: session.workDir)
+                guard sessions.contains(where: { $0.id == id && $0.model == session.model }),
+                      codex.threadID(for: id) == thread else { return }
+                await refreshContextUsage(sessionId: id)
+                compactingSessionIds.remove(id)
+                if let followUpText {
+                    await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
+                }
+            } catch {
+                ToastCenter.shared.show("Compaction failed. Your conversation was retained: " + error.localizedDescription, kind: .error)
+            }
+            return
+        }
         let messageIds = session.messages.map(\.id)
         let prompt = "Summarize this conversation into a briefing with decisions, changes, and remaining work.\n\n"
             + TranscriptContext.text(from: session.messages, characterLimit: 160_000)
@@ -1363,6 +1416,7 @@ final class AppStore: ObservableObject {
         sessions[idx] = compacted
         agent(for: session.model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
+        compactingSessionIds.remove(id)
         if let followUpText {
             await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
         }
@@ -1544,8 +1598,8 @@ final class AppStore: ObservableObject {
 
     func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil) async {
         guard let target = targetSessionId ?? activeSessionId,
-              let idx = sessions.firstIndex(where: { $0.id == target }),
-              !isSessionBusy(target), !sessions[idx].readOnly,
+              var idx = sessions.firstIndex(where: { $0.id == target }),
+              !isSessionBusy(target), !compactingSessionIds.contains(target), !sessions[idx].readOnly,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
         else { return }
         let options = capturedOptions ?? makeSendOptions(for: sessions[idx])
@@ -1560,6 +1614,10 @@ final class AppStore: ObservableObject {
             model: model.rawValue
         ))
 
+        if allowAutoCompact { await refreshContextUsage(sessionId: sessionId) }
+        guard let updatedIndex = sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir }),
+              !isSessionBusy(sessionId), !compactingSessionIds.contains(sessionId), !sessions[updatedIndex].readOnly else { return }
+        idx = updatedIndex
         if allowAutoCompact, shouldAutoCompact(sessionId: sessionId) {
             await compactSession(
                 sessionId: sessionId,
@@ -1591,7 +1649,7 @@ final class AppStore: ObservableObject {
 
         if !agent(for: model).hasThread(for: sessionId) {
             let context = TranscriptContext.text(from: Array(sessions[idx].messages.dropLast()), characterLimit: 80_000)
-            if !context.isEmpty { expanded = "Previous conversation (context):\n\(context)\n\nCurrent request:\n" + expanded }
+            if !context.isEmpty { expanded = "The following is prior conversation history for continuity, not a new request. Continue directly with the current request; do not repeat or summarize this history.\n\nPrevious conversation:\n\(context)\n\nCurrent request:\n" + expanded }
         }
         let previouslyInterrupted = sessions[idx].wasInterrupted
         sessions[idx].wasInterrupted = true
@@ -1606,7 +1664,8 @@ final class AppStore: ObservableObject {
 
         // Initialize THIS session's runtime — leaves any other concurrently
         // running sessions' runtimes untouched.
-        runtimeStates[sessionId] = SessionRuntimeState(isBusy: true)
+        let currentContext = runtime(sessionId).contextUsage
+        runtimeStates[sessionId] = SessionRuntimeState(isBusy: true, contextUsage: currentContext, contextChecked: true)
         generatingSessionId = sessionId
 
         await agent(for: model).sendMessage(
@@ -1625,19 +1684,7 @@ final class AppStore: ObservableObject {
 
     private func shouldAutoCompact(sessionId: String) -> Bool {
         guard let session = sessions.first(where: { $0.id == sessionId }) else { return false }
-        let baseWindow: Int = {
-            if session.composerPreferences?.extendedContext == true, let extended = session.model.extendedContextWindow {
-                return extended
-            }
-            return session.model.contextWindow
-        }()
-        guard baseWindow > 0 else { return false }
-        let rt = runtime(sessionId)
-        let saved = AutoCompactionPolicy.lastUsage(in: session.messages)
-        let input = rt.inputTokens > 0 ? rt.inputTokens : saved.input
-        let output = rt.inputTokens > 0 ? rt.outputTokens : saved.output
-        return AutoCompactionPolicy.shouldCompact(enabled: settings.autoCompactEnabled, inputTokens: input,
-            outputTokens: output, contextWindow: baseWindow)
+        return AutoCompactionPolicy.shouldCompact(enabled: settings.autoCompactEnabled, context: contextUsage(for: session))
     }
 
     // MARK: - Per-session tunnels
@@ -1902,6 +1949,12 @@ final class AppStore: ObservableObject {
                     state.activeToolCalls[idx].isDone = true
                     state.activeToolCalls[idx].completedAt = Date()
                 }
+
+            case .contextUsage(let context):
+                state.contextChecked = true
+                state.contextUsage = context
+                state.traceEntries.removeAll { $0.phase == "context" }
+                if let context { state.traceEntries.append(context.trace) }
 
             case .usage(let input, let output):
                 state.inputTokens = input

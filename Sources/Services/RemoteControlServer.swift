@@ -621,6 +621,7 @@ final class RemoteControlServer: ObservableObject {
                 "outputTokens": store.outputTokens,
                 "totalCost": store.totalCost,
             ],
+            "context": store.contextUsage.map { ["usedTokens": $0.usedTokens, "window": $0.window] } as Any? ?? NSNull(),
             "settings": [
                 "defaultWorkDir": store.settings.defaultWorkDir,
                 "language": store.settings.language.rawValue,

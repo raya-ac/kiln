@@ -11,6 +11,7 @@ enum AgentEvent: Sendable {
     case blockStop(index: Int)
     case messageStop
     case usage(inputTokens: Int, outputTokens: Int)
+    case contextUsage(ContextUsage?)
     case toolResult(toolUseId: String, content: String, isError: Bool)
     case cost(Double)
     case error(String)

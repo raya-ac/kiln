@@ -4,6 +4,18 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.18.0] — 2026-09-05
+
+### Fixed
+- Measure Codex context using the matching backend thread's latest request and effective context window, not aggregate turn usage or a guessed 272K limit.
+- Share the same current-context measurement between native UI, web UI, and the 90% auto-compaction trigger. Restore it from backend state after restart.
+- Treat missing or invalid context as unavailable; never trigger auto-compaction from legacy usage totals.
+- Compact Codex inside its existing backend thread, retaining visible chat history and session identity rather than replacing the conversation with a summary.
+- Keep imported/forked history as continuity context only, without asking the assistant to repeat it.
+
+### Changed
+- OpenCode usage totals are no longer presented as context occupancy. Kiln automatic compaction stays inactive there until a reliable current-context measurement is available; manual compaction remains available.
+
 ## [1.17.0] — 2026-09-05
 
 ### Added

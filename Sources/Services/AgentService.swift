@@ -19,6 +19,19 @@ final class AgentService: ObservableObject {
     }
 
     func hasThread(for sessionId: String) -> Bool { threadIds[sessionId] != nil }
+    func threadID(for sessionId: String) -> String? { threadIds[sessionId] }
+
+    func currentContext(sessionId: String, model: AgentModel) async -> ContextUsage? {
+        guard backend == .codex, let thread = threadIds[sessionId] else { return nil }
+        let path = ProcessInfo.processInfo.environment["CODEX_HOME"] ?? NSHomeDirectory() + "/.codex"
+        return await CodexContextReader.shared.read(threadID: thread, modelID: model.rawValue,
+            home: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
+    }
+
+    func compactThread(sessionId: String, workDir: String) async throws {
+        guard backend == .codex, runningProcesses[sessionId] == nil, let thread = threadIds[sessionId] else { throw CocoaError(.featureUnsupported) }
+        try await CodexThreadCompactor.compact(threadID: thread, executable: executablePath, workDir: workDir)
+    }
 
     func forgetThread(for sessionId: String) {
         threadIds[sessionId] = nil
@@ -105,6 +118,16 @@ final class AgentService: ObservableObject {
             return
         }
 
+        let contextTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.runningProcesses[sessionId] === process else { return }
+                let context = await self.currentContext(sessionId: sessionId, model: model)
+                guard !Task.isCancelled, self.runningProcesses[sessionId] === process else { return }
+                onEvent(.contextUsage(context))
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        defer { contextTask.cancel() }
         let backend = self.backend
         let writeTask = Task.detached {
             defer { try? stdin.fileHandleForWriting.close() }
@@ -171,6 +194,10 @@ final class AgentService: ObservableObject {
         if code != 0 {
             onEvent(.error("\(backend.label) exited with code \(code): \(String(decoding: stderrData.suffix(4000), as: UTF8.self))"))
         }
+        contextTask.cancel()
+        let context = await currentContext(sessionId: sessionId, model: model)
+        guard runningProcesses[sessionId] === process else { return }
+        onEvent(.contextUsage(context))
         // Finalize once, after errors, usage, and stderr have been delivered.
         onEvent(.done)
     }
