@@ -18,73 +18,79 @@ struct SettingsView: View {
     @FocusState private var portFocused: Bool
 
     enum SettingsTab: String, CaseIterable, Identifiable {
-        case settings, stats, cliUpdates
+        case settings, appearance, chat, integrations, remote, advanced, stats, cliUpdates, about
         var id: String { rawValue }
         var label: String {
-            switch self { case .settings: "Settings"; case .stats: "Stats"; case .cliUpdates: "CLI Updates" }
+            switch self {
+            case .settings: "General"
+            case .appearance: "Appearance"
+            case .chat: "Chat & Composer"
+            case .integrations: "Integrations"
+            case .remote: "Remote Access"
+            case .advanced: "Advanced"
+            case .stats: "Usage"
+            case .cliUpdates: "CLI Updates"
+            case .about: "About"
+            }
         }
         var icon: String {
-            switch self { case .settings: "gearshape"; case .stats: "chart.bar.fill"; case .cliUpdates: "arrow.down.circle" }
+            switch self {
+            case .settings: "gearshape"
+            case .appearance: "paintpalette"
+            case .chat: "text.bubble"
+            case .integrations: "puzzlepiece.extension"
+            case .remote: "network"
+            case .advanced: "slider.horizontal.3"
+            case .stats: "chart.bar"
+            case .cliUpdates: "arrow.down.circle"
+            case .about: "info.circle"
+            }
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header with tab switcher
-            HStack {
-                Text(tab == .settings ? store.settings.language.ui.settings : tab.label)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.kilnText)
-
-                Spacer().frame(width: 16)
-
-                HStack(spacing: 2) {
-                    ForEach(SettingsTab.allCases) { t in
-                        let selected = tab == t
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) { tab = t }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: t.icon)
-                                    .font(.system(size: 10))
-                                Text(t.label)
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                        }
-                        .buttonStyle(.plain)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Settings").font(.system(size: 16, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.bottom, 16)
+                ForEach(SettingsTab.allCases) { item in
+                    Button { tab = item } label: {
+                        Label(item.label, systemImage: item.icon)
+                            .font(.system(size: 12, weight: tab == item ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 9)
+                            .background(tab == item ? Color.kilnAccentMuted : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(tab == item ? Color.kilnAccent : Color.kilnTextSecondary)
+                    .accessibilityAddTraits(tab == item ? .isSelected : [])
                 }
-
                 Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .frame(width: 24, height: 24)
-                        .background(Color.kilnSurfaceElevated)
-                        .clipShape(Circle())
+            }
+            .padding(14)
+            .frame(width: 184)
+            .background(Color.kilnSurface)
+            Divider()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(tab.label).font(.system(size: 17, weight: .semibold))
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain).help("Close settings").accessibilityLabel("Close settings")
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(Color.kilnText)
+                .padding(24)
+                Divider()
+                if tab == .stats { StatsView() }
+                else if tab == .cliUpdates { CLIUpdatesView() }
+                else { settingsScroll }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-
-            Rectangle().fill(Color.kilnBorder).frame(height: 1)
-
-            if tab == .stats {
-                StatsView()
-            } else if tab == .cliUpdates {
-                CLIUpdatesView()
-            } else {
-                settingsScroll
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 540, height: 560)
+        .frame(width: 820, height: 640)
         .background(Color.kilnBg)
         .onAppear {
             if store.showCLIUpdates { tab = .cliUpdates; store.showCLIUpdates = false }
@@ -104,403 +110,366 @@ struct SettingsView: View {
     }
 
     private var settingsScroll: some View {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Defaults
-                    SettingsSection(title: store.settings.language.ui.defaults) {
-                        // Default model
-                        SettingsRow(label: store.settings.language.ui.modelLabel) {
-                            ModelPickerButton(selection: $store.settings.defaultModel)
-                        }
-
-                        // Default mode
-                        SettingsRow(label: store.settings.language.ui.modeLabel) {
-                            HStack(spacing: 2) {
-                                ForEach(SessionMode.allCases) { mode in
-                                    let selected = store.settings.defaultMode == mode
-                                    Button {
-                                        store.settings.defaultMode = mode
-                                        store.saveSettings()
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: mode.icon)
-                                                .font(.system(size: 9))
-                                            Text(mode.label)
-                                                .font(.system(size: 11, weight: .medium))
-                                        }
-                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 5)
-                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        // Default permissions
-                        SettingsRow(label: store.settings.language.ui.permissionsLabel) {
-                            HStack(spacing: 2) {
-                                ForEach(PermissionMode.allCases) { perm in
-                                    let selected = store.settings.defaultPermissions == perm
-                                    Button {
-                                        store.settings.defaultPermissions = perm
-                                        store.saveSettings()
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: perm.icon)
-                                                .font(.system(size: 9))
-                                            Text(perm.label)
-                                                .font(.system(size: 11, weight: .medium))
-                                        }
-                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 5)
-                                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        // Default working directory
-                        SettingsRow(label: store.settings.language.ui.workDir) {
-                            HStack(spacing: 8) {
-                                Text(store.settings.defaultWorkDir)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(Color.kilnTextSecondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer()
-                                Button(store.settings.language.ui.browse) {
-                                    let panel = NSOpenPanel()
-                                    panel.canChooseDirectories = true
-                                    panel.canChooseFiles = false
-                                    panel.directoryURL = URL(fileURLWithPath: store.settings.defaultWorkDir)
-                                    if panel.runModal() == .OK, let url = panel.url {
-                                        store.settings.defaultWorkDir = url.path
-                                        store.saveSettings()
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.kilnText)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Color.kilnSurfaceElevated)
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
-                            }
-                        }
-                    }
-
-                    // Language
-                    SettingsSection(title: store.settings.language.ui.language) {
-                        SettingsRow(label: store.settings.language.ui.languageLabel) {
-                            // Native Menu — compact, doesn't fight the row
-                            // width, and matches the other dropdowns in
-                            // Settings (model, mode, permissions).
-                            // Picker with menu style renders the selected
-                            // row as the trigger label — which gives us the
-                            // flag + language name visible at rest, with a
-                            // native dropdown on click. (A Menu's custom
-                            // `label:` gets clobbered by `.borderlessButton`
-                            // style, which is why the text was missing.)
-                            Picker("", selection: Binding(
-                                get: { store.settings.language },
-                                set: { store.settings.language = $0; store.saveSettings() }
-                            )) {
-                                ForEach(AppLanguage.allCases) { lang in
-                                    Text("\(lang.flag)  \(lang.label)")
-                                        .tag(lang)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .fixedSize()
-                        }
-
-                        Text(store.settings.language.ui.langDescription)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color.kilnTextTertiary)
-                    }
-
-                    // Engram
-                    SettingsSection(title: store.settings.language.ui.memory) {
-                        SettingsRow(label: store.settings.language.ui.enableEngram) {
-                            SettingsToggle(value: store.settings.useEngram) { v in
-                                store.settings.useEngram = v
-                                // Auto-apply the engram primer on opt-in when
-                                // the prompt is blank, so new users don't have
-                                // to copy-paste it from docs.
-                                if v && store.settings.systemPrompt.isEmpty {
-                                    store.settings.systemPrompt = KilnSettings.engramSystemPrompt
-                                }
-                            }
-                        }
-
-                        // Manual path override. Detected path auto-discovery
-                        // covers the common cases; this lets users point Kiln
-                        // at a venv / shim / dev checkout when engram lives
-                        // somewhere unusual. Empty = auto-detect.
-                        SettingsRow(label: "Engram binary") {
-                            HStack(spacing: 6) {
-                                Text(store.settings.engramPath.isEmpty ? "auto-detect" : store.settings.engramPath)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(store.settings.engramPath.isEmpty ? Color.kilnTextTertiary : Color.kilnText)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Button("Pick…") {
-                                    let panel = NSOpenPanel()
-                                    panel.canChooseFiles = true
-                                    panel.canChooseDirectories = false
-                                    panel.allowsMultipleSelection = false
-                                    panel.prompt = "Use this binary"
-                                    panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
-                                    if panel.runModal() == .OK, let url = panel.url,
-                                       FileManager.default.isExecutableFile(atPath: url.path) {
-                                        store.settings.engramPath = url.path
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.kilnTextSecondary)
-                                if !store.settings.engramPath.isEmpty {
-                                    Button("Clear") { store.settings.engramPath = "" }
-                                        .buttonStyle(.plain)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Color.kilnTextTertiary)
-                                }
-                            }
-                        }
-
-                        if store.settings.useEngram {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(store.settings.language.ui.systemPrompt)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Color.kilnTextSecondary)
-
-                                TextEditor(text: Binding(
-                                    get: { store.settings.systemPrompt },
-                                    set: { store.settings.systemPrompt = $0 }
-                                ))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Color.kilnText)
-                                .scrollContentBackground(.hidden)
-                                .padding(8)
-                                .frame(minHeight: 120)
-                                .background(Color.kilnBg)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorder, lineWidth: 1))
-
-                                HStack {
-                                    Button(store.settings.language.ui.resetToDefault) {
-                                        // With engram on, "default" is the
-                                        // engram primer — the empty base
-                                        // prompt would disable the tools.
-                                        store.settings.systemPrompt = store.settings.useEngram
-                                            ? KilnSettings.engramSystemPrompt
-                                            : KilnSettings.defaultSystemPrompt
-                                        store.saveSettings()
-                                    }
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-
-                                    Spacer()
-
-                                    Button(store.settings.language.ui.save) {
-                                        store.saveSettings()
-                                    }
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Color.kilnAccent)
-                                }
-                            }
-                        }
-                    }
-
-                    // Appearance
-                    appearanceSection
-
-                    // Chat
-                    chatSection
-
-                    // Composer
-                    composerSection
-
-                    // MCP servers
-                    mcpSection
-
-                    // Advanced
-                    advancedSection
-
-                    // Notifications
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                switch tab {
+                case .settings:
+                    defaultsSection
+                    languageSection
                     notificationsSection
-
-                    // Keyboard shortcuts
+                case .appearance: appearanceSection
+                case .chat:
+                    chatSection
+                    composerSection
                     shortcutsSection
-
-                    // Remote Control
+                case .integrations:
+                    memorySection
+                    mcpSection
+                case .remote:
                     remoteControlSection
-
-                    // Warden Tunnel (expose Kiln / dev servers publicly)
                     wardenTunnelSection
-
-                    // Live view of every running tunnel (Kiln + sessions)
                     allTunnelsSection
+                case .advanced:
+                    advancedSection
+                    miscSection
+                case .about: aboutSection
+                case .stats, .cliUpdates: EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .id(tab)
+    }
 
-                    // Easter egg
-                    SettingsSection(title: "MISC") {
-                        // Export every session as a zip of markdown files.
-                        HStack {
-                            Text("Export all")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.kilnTextSecondary)
-                                .frame(width: 120, alignment: .leading)
-                            Spacer()
-                            Text("\(store.sessions.count) sessions")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.kilnTextTertiary)
-                            Button("Export zip") {
-                                guard let zipURL = store.exportAllSessionsAsZip() else { return }
-                                let panel = NSSavePanel()
-                                panel.allowedContentTypes = [.zip]
-                                panel.nameFieldStringValue = "kiln-sessions-\(ISO8601DateFormatter().string(from: .now).prefix(10)).zip"
-                                if panel.runModal() == .OK, let dest = panel.url {
-                                    try? FileManager.default.removeItem(at: dest)
-                                    try? FileManager.default.copyItem(at: zipURL, to: dest)
-                                    NSWorkspace.shared.activateFileViewerSelecting([dest])
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.kilnAccent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.kilnAccentMuted)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
+    private var defaultsSection: some View {
+        // Defaults
+        SettingsSection(title: store.settings.language.ui.defaults) {
+            SettingsRow(label: store.settings.language.ui.modeLabel) {
+                Picker("Mode", selection: $store.settings.defaultMode) {
+                    ForEach(SessionMode.allCases) { mode in Text(mode.label).tag(mode) }
+                }
+                .labelsHidden().pickerStyle(.segmented).controlSize(.small).fixedSize()
+            }
+
+            SettingsRow(label: store.settings.language.ui.permissionsLabel) {
+                Picker("Permissions", selection: $store.settings.defaultPermissions) {
+                    ForEach(PermissionMode.allCases) { mode in Text(mode.label).tag(mode) }
+                }
+                .labelsHidden().pickerStyle(.segmented).controlSize(.small).fixedSize()
+            }
+
+            // Default working directory
+            SettingsRow(label: store.settings.language.ui.workDir) {
+                HStack(spacing: 8) {
+                    Text(store.settings.defaultWorkDir)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button(store.settings.language.ui.browse) {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.directoryURL = URL(fileURLWithPath: store.settings.defaultWorkDir)
+                        if panel.runModal() == .OK, let url = panel.url {
+                            store.settings.defaultWorkDir = url.path
+                            store.saveSettings()
                         }
-
-                        // Settings backup — JSON round-trip of the whole KilnSettings.
-                        HStack {
-                            Text("Settings")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.kilnTextSecondary)
-                                .frame(width: 120, alignment: .leading)
-                            Spacer()
-                            Text("backup / restore")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.kilnTextTertiary)
-                            Button("Export") {
-                                guard let data = store.exportSettingsJSONData() else { return }
-                                let panel = NSSavePanel()
-                                panel.allowedContentTypes = [.json]
-                                panel.nameFieldStringValue = "kiln-settings-\(ISO8601DateFormatter().string(from: .now).prefix(10)).json"
-                                if panel.runModal() == .OK, let dest = panel.url {
-                                    try? data.write(to: dest)
-                                    NSWorkspace.shared.activateFileViewerSelecting([dest])
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.kilnAccent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.kilnAccentMuted)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                            Button("Import") {
-                                let panel = NSOpenPanel()
-                                panel.allowedContentTypes = [.json]
-                                panel.allowsMultipleSelection = false
-                                panel.canChooseDirectories = false
-                                if panel.runModal() == .OK, let src = panel.url,
-                                   let data = try? Data(contentsOf: src) {
-                                    _ = store.importSettingsJSON(data)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.kilnAccent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.kilnAccentMuted)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                        }
-
-                        // Session import — paste a single session JSON back in.
-                        // Export-single-session lives in the sidebar context menu;
-                        // this is the matching import entry point.
-                        HStack {
-                            Text("Import session")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.kilnTextSecondary)
-                                .frame(width: 120, alignment: .leading)
-                            Spacer()
-                            Text("from JSON")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.kilnTextTertiary)
-                            Button("Import") {
-                                let panel = NSOpenPanel()
-                                panel.allowedContentTypes = [.json]
-                                panel.allowsMultipleSelection = false
-                                panel.canChooseDirectories = false
-                                if panel.runModal() == .OK, let src = panel.url,
-                                   let data = try? Data(contentsOf: src) {
-                                    _ = store.importSessionJSON(data)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.kilnAccent)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.kilnAccentMuted)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                        }
-
                     }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.kilnText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.kilnSurfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+            }
+        }
+    }
 
-                    // About
-                    SettingsSection(title: store.settings.language.ui.about) {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.kilnAccent, Color.kilnAccent.opacity(0.6)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .frame(width: 40, height: 40)
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 20, weight: .heavy))
-                                    .foregroundStyle(Color.kilnBg)
-                            }
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Kiln Code")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Color.kilnText)
-                                Text(store.settings.language.ui.tagline)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                                Text(verbatim: "© \(Calendar.current.component(.year, from: .now)) Raya Creations")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                            }
-                            Spacer()
-                            Text(Self.versionString)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Color.kilnTextTertiary)
-                                .textSelection(.enabled)
-                        }
+    private var languageSection: some View {
+        // Language
+        SettingsSection(title: store.settings.language.ui.language) {
+            SettingsRow(label: store.settings.language.ui.languageLabel) {
+                // Native Menu — compact, doesn't fight the row
+                // width, and matches the other dropdowns in
+                // Settings (model, mode, permissions).
+                // Picker with menu style renders the selected
+                // row as the trigger label — which gives us the
+                // flag + language name visible at rest, with a
+                // native dropdown on click. (A Menu's custom
+                // `label:` gets clobbered by `.borderlessButton`
+                // style, which is why the text was missing.)
+                Picker("", selection: Binding(
+                    get: { store.settings.language },
+                    set: { store.settings.language = $0; store.saveSettings() }
+                )) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Text("\(lang.flag)  \(lang.label)")
+                            .tag(lang)
                     }
                 }
-                .padding(24)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
             }
+
+            Text(store.settings.language.ui.langDescription)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.kilnTextTertiary)
+        }
+    }
+
+    private var memorySection: some View {
+        // Engram
+        SettingsSection(title: store.settings.language.ui.memory) {
+            SettingsRow(label: store.settings.language.ui.enableEngram) {
+                SettingsToggle(value: store.settings.useEngram) { v in
+                    store.settings.useEngram = v
+                    // Auto-apply the engram primer on opt-in when
+                    // the prompt is blank, so new users don't have
+                    // to copy-paste it from docs.
+                    if v && store.settings.systemPrompt.isEmpty {
+                        store.settings.systemPrompt = KilnSettings.engramSystemPrompt
+                    }
+                }
+            }
+
+            // Manual path override. Detected path auto-discovery
+            // covers the common cases; this lets users point Kiln
+            // at a venv / shim / dev checkout when engram lives
+            // somewhere unusual. Empty = auto-detect.
+            SettingsRow(label: "Engram binary") {
+                HStack(spacing: 6) {
+                    Text(store.settings.engramPath.isEmpty ? "auto-detect" : store.settings.engramPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(store.settings.engramPath.isEmpty ? Color.kilnTextTertiary : Color.kilnText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Pick…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = true
+                        panel.canChooseDirectories = false
+                        panel.allowsMultipleSelection = false
+                        panel.prompt = "Use this binary"
+                        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+                        if panel.runModal() == .OK, let url = panel.url,
+                           FileManager.default.isExecutableFile(atPath: url.path) {
+                            store.settings.engramPath = url.path
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    if !store.settings.engramPath.isEmpty {
+                        Button("Clear") { store.settings.engramPath = "" }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.kilnTextTertiary)
+                    }
+                }
+            }
+
+            if store.settings.useEngram {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.settings.language.ui.systemPrompt)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.kilnTextSecondary)
+
+                    TextEditor(text: Binding(
+                        get: { store.settings.systemPrompt },
+                        set: { store.settings.systemPrompt = $0 }
+                    ))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.kilnText)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 120)
+                    .background(Color.kilnBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorder, lineWidth: 1))
+
+                    HStack {
+                        Button(store.settings.language.ui.resetToDefault) {
+                            // With engram on, "default" is the
+                            // engram primer — the empty base
+                            // prompt would disable the tools.
+                            store.settings.systemPrompt = store.settings.useEngram
+                                ? KilnSettings.engramSystemPrompt
+                                : KilnSettings.defaultSystemPrompt
+                            store.saveSettings()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.kilnTextTertiary)
+
+                        Spacer()
+
+                        Button(store.settings.language.ui.save) {
+                            store.saveSettings()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.kilnAccent)
+                    }
+                }
+            }
+        }
+    }
+
+    private var miscSection: some View {
+        // Easter egg
+        SettingsSection(title: "MISC") {
+            // Export every session as a zip of markdown files.
+            HStack {
+                Text("Export all")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 120, alignment: .leading)
+                Spacer()
+                Text("\(store.sessions.count) sessions")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                Button("Export zip") {
+                    guard let zipURL = store.exportAllSessionsAsZip() else { return }
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.zip]
+                    panel.nameFieldStringValue = "kiln-sessions-\(ISO8601DateFormatter().string(from: .now).prefix(10)).zip"
+                    if panel.runModal() == .OK, let dest = panel.url {
+                        try? FileManager.default.removeItem(at: dest)
+                        try? FileManager.default.copyItem(at: zipURL, to: dest)
+                        NSWorkspace.shared.activateFileViewerSelecting([dest])
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.kilnAccentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+            // Settings backup — JSON round-trip of the whole KilnSettings.
+            HStack {
+                Text("Settings")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 120, alignment: .leading)
+                Spacer()
+                Text("backup / restore")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                Button("Export") {
+                    guard let data = store.exportSettingsJSONData() else { return }
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.json]
+                    panel.nameFieldStringValue = "kiln-settings-\(ISO8601DateFormatter().string(from: .now).prefix(10)).json"
+                    if panel.runModal() == .OK, let dest = panel.url {
+                        try? data.write(to: dest)
+                        NSWorkspace.shared.activateFileViewerSelecting([dest])
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.kilnAccentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                Button("Import") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.json]
+                    panel.allowsMultipleSelection = false
+                    panel.canChooseDirectories = false
+                    if panel.runModal() == .OK, let src = panel.url,
+                       let data = try? Data(contentsOf: src) {
+                        _ = store.importSettingsJSON(data)
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.kilnAccentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+            // Session import — paste a single session JSON back in.
+            // Export-single-session lives in the sidebar context menu;
+            // this is the matching import entry point.
+            HStack {
+                Text("Import session")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.kilnTextSecondary)
+                    .frame(width: 120, alignment: .leading)
+                Spacer()
+                Text("from JSON")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                Button("Import") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.json]
+                    panel.allowsMultipleSelection = false
+                    panel.canChooseDirectories = false
+                    if panel.runModal() == .OK, let src = panel.url,
+                       let data = try? Data(contentsOf: src) {
+                        _ = store.importSessionJSON(data)
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.kilnAccent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.kilnAccentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+
+        }
+    }
+
+    private var aboutSection: some View {
+        // About
+        SettingsSection(title: store.settings.language.ui.about) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.kilnAccent, Color.kilnAccent.opacity(0.6)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 20, weight: .heavy))
+                        .foregroundStyle(Color.kilnBg)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Kiln Code")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.kilnText)
+                    Text(store.settings.language.ui.tagline)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                    Text(verbatim: "© \(Calendar.current.component(.year, from: .now)) Raya Creations")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                }
+                Spacer()
+                Text(Self.versionString)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.kilnTextTertiary)
+                    .textSelection(.enabled)
+            }
+        }
     }
 
     // MARK: - Version
@@ -635,7 +604,7 @@ struct SettingsView: View {
                     .foregroundStyle(Color.kilnTextTertiary)
             }
 
-            SettingsRow(label: "Thinking") {
+            SettingsRow(label: "Reasoning") {
                 SettingsToggle(
                     value: store.settings.thinkingCollapsedByDefault,
                     set: { store.settings.thinkingCollapsedByDefault = $0 }
@@ -1045,21 +1014,16 @@ struct SettingsView: View {
     // Helper — renders a horizontal pill picker for an enum.
     @ViewBuilder
     private func pickRow<T: Hashable>(options: [T], current: T, set: @escaping (T) -> Void, label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 2) {
-            ForEach(options, id: \.self) { opt in
-                let selected = opt == current
-                Button { set(opt) } label: {
-                    Text(label(opt))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(selected ? Color.kilnAccent : Color.kilnSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                }
-                .buttonStyle(.plain)
+        Picker("", selection: Binding(get: { current }, set: { set($0) })) {
+            ForEach(options, id: \.self) { option in
+                Text(label(option)).tag(option)
             }
         }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .fixedSize()
+
     }
 
     // MARK: - Remote Control Section
@@ -1604,15 +1568,13 @@ struct SettingsSection<Content: View>: View {
             Text(title)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(Color.kilnTextTertiary)
-                .tracking(1)
+                .tracking(0)
 
             VStack(alignment: .leading, spacing: 10) {
                 content
             }
-            .padding(16)
-            .background(Color.kilnSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.kilnBorder, lineWidth: 1))
+            .padding(.vertical, 6)
+            Divider().padding(.top, 8)
         }
     }
 }
@@ -1634,52 +1596,18 @@ struct SettingsRow<Content: View>: View {
 
 // MARK: - SettingsToggle
 //
-// Custom-built switch. macOS SwiftUI's Toggle(.switch) bridges to NSSwitch,
-// which refuses to animate its knob when the underlying binding source
-// isn't itself a SwiftUI-observed value (e.g. UserDefaults, a nested
-// ObservableObject like store.remoteServer). We sidestep the bridge
-// entirely: this is just a Button with a local @State driving the knob.
 struct SettingsToggle<Label: View>: View {
     let value: Bool
     let set: (Bool) -> Void
     @ViewBuilder let label: () -> Label
-    @State private var local: Bool = false
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         HStack(spacing: 8) {
-            Button {
-                let new = !local
-                withAnimation(.easeInOut(duration: 0.15)) { local = new }
-                set(new)
-            } label: {
-                ZStack(alignment: local ? .trailing : .leading) {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(local ? Color.kilnAccent : Color.kilnSurfaceElevated)
-                        .frame(width: 32, height: 18)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.kilnBorder.opacity(local ? 0 : 0.6), lineWidth: 1)
-                        )
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 14, height: 14)
-                        .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
-                        .padding(.horizontal, 2)
-                }
-                .contentShape(Rectangle())
-                .opacity(isEnabled ? 1.0 : 0.45)
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
+            Toggle("Enabled", isOn: Binding(get: { value }, set: { set($0) }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             label()
-        }
-        .onAppear { local = value }
-        .onChange(of: value) { _, v in
-            if v != local {
-                withAnimation(.easeInOut(duration: 0.15)) { local = v }
-            }
         }
     }
 }

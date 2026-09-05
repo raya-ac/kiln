@@ -6,7 +6,7 @@ enum OpenCodeProtocol {
             .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/bin/env"
     }
 
-    static func arguments(sessionId: String?, model: AgentModel, workDir: String, options: SendOptions) -> [String] {
+    static func arguments(sessionId: String?, model: AgentModel, workDir: String, options: SendOptions, filePaths: [String] = []) -> [String] {
         var args = ["run", "--format", "json", "--model", model.cliModel, "--dir", workDir, "--pure"]
         if let sessionId { args += ["--session", sessionId] }
         if options.mode == .plan || options.chatMode || options.permissions == .deny {
@@ -20,6 +20,7 @@ enum OpenCodeProtocol {
                 args += ["--variant", effort]
             }
         }
+        args += filePaths.flatMap { ["--file", $0] }
         return args
     }
 

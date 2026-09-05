@@ -5,8 +5,9 @@ import AppKit
 struct ComposerView: View {
     @EnvironmentObject var store: AppStore
     @State private var input = ""
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
     @State private var dropHovering = false
+    @State private var importingAttachments = 0
     @State private var showSnippets = false
     @State private var showExpandedEditor = false
     /// When the user types `/` at the start of a line, we surface a
@@ -63,6 +64,10 @@ struct ComposerView: View {
             // Workdir activity chip — visible only when there are uncommitted
             // changes in the session's workdir. Click to see which files.
             WorkdirActivityChip()
+
+            if importingAttachments > 0 {
+                ProgressView("Adding attachments...").controlSize(.small).padding(.top, 6)
+            }
 
             // Attachment chips
             if !store.composerAttachments.isEmpty {
@@ -129,131 +134,24 @@ struct ComposerView: View {
                 .help("Expand editor")
 
                 VStack(spacing: 0) {
-                    TextField(placeholderText, text: $input, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13 * store.settings.fontScale.factor))
-                        .foregroundStyle(Color.kilnText)
-                        .lineLimit(1...8)
-                        .focused($isFocused)
-                        .onSubmit {
-                            // If the slash popup is open and has a selection, Enter accepts that.
-                            // Exception: if the user has typed the full label
-                            // (e.g. `/timeline`), skip the re-insert dance and
-                            // just execute it. Otherwise it takes two Enters
-                            // to run a known command, which is maddening.
-                            if let matches = slashMatches, !matches.isEmpty {
-                                let typed = input.trimmingCharacters(in: .whitespaces).lowercased()
-                                let pick = matches[min(slashSelectedIndex, matches.count - 1)]
-                                if pick.label.lowercased() == typed {
-                                    send()
-                                } else {
-                                    insertSlashCommand(pick)
-                                }
-                                return
-                            }
-                            // @file popup — Enter picks the highlighted path.
-                            if let atMatchList = atMatches, !atMatchList.isEmpty {
-                                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
-                                return
-                            }
-                            if store.settings.sendKey == .enter { send() }
-                            else { input += "\n" }
-                        }
+                    ComposerTextInput(text: $input, isFocused: $isFocused,
+                        placeholder: placeholderText,
+                        fontSize: 13 * store.settings.fontScale.factor,
+                        spellCheck: store.settings.spellCheck,
+                        onSubmit: submitAction,
+                        onCommandReturn: { if store.settings.sendKey == .cmdEnter { send() } },
+                        onKey: handleInputKey,
+                        onPaste: handlePaste)
                         .onAppear { isFocused = true }
                         .onChange(of: store.composerPrefill) { _, new in
-                            // External prefill hook (e.g. "Ask Assistant about
-                            // this file"). Append with a separator if the
-                            // user already has text typed; otherwise just
-                            // drop it in. Always focus and clear the signal.
                             guard let text = new, !text.isEmpty else { return }
-                            if input.isEmpty {
-                                input = text
-                            } else {
-                                input += input.hasSuffix("\n") ? text : "\n" + text
-                            }
+                            input += input.isEmpty || input.hasSuffix("\n") ? text : "\n" + text
                             isFocused = true
                             DispatchQueue.main.async { store.composerPrefill = nil }
-                        }
-                        .disableAutocorrection(!store.settings.spellCheck)
-                        .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .tiff]) { providers in
-                            handlePaste(providers)
                         }
                         .onChange(of: input) { _, _ in
                             slashSelectedIndex = 0
                             atSelectedIndex = 0
-                        }
-                        .onKeyPress(.upArrow) {
-                            // Slash popup takes priority.
-                            if let matches = slashMatches, !matches.isEmpty {
-                                slashSelectedIndex = max(0, slashSelectedIndex - 1)
-                                return .handled
-                            }
-                            // @file popup — up/down within the match list.
-                            if let atMatchList = atMatches, !atMatchList.isEmpty {
-                                atSelectedIndex = max(0, atSelectedIndex - 1)
-                                return .handled
-                            }
-                            // History recall — only when input is empty or already browsing.
-                            let entries = PromptHistoryStore.shared.entries
-                            guard !entries.isEmpty else { return .ignored }
-                            if historyIndex == -1 && input.isEmpty == false { return .ignored }
-                            if historyIndex == -1 { savedDraft = input }
-                            historyIndex = min(historyIndex + 1, entries.count - 1)
-                            input = entries[historyIndex]
-                            return .handled
-                        }
-                        .onKeyPress(.downArrow) {
-                            if let matches = slashMatches, !matches.isEmpty {
-                                slashSelectedIndex = min(matches.count - 1, slashSelectedIndex + 1)
-                                return .handled
-                            }
-                            if let atMatchList = atMatches, !atMatchList.isEmpty {
-                                atSelectedIndex = min(atMatchList.count - 1, atSelectedIndex + 1)
-                                return .handled
-                            }
-                            guard historyIndex >= 0 else { return .ignored }
-                            let entries = PromptHistoryStore.shared.entries
-                            historyIndex -= 1
-                            if historyIndex < 0 {
-                                input = savedDraft
-                                savedDraft = ""
-                            } else {
-                                input = entries[min(historyIndex, entries.count - 1)]
-                            }
-                            return .handled
-                        }
-                        .onKeyPress(.escape) {
-                            // Clear the / at the front to dismiss the popup.
-                            if slashMatches != nil { input = ""; return .handled }
-                            // @file popup — escape removes the trailing
-                            // `@query` token so the user drops back to
-                            // normal typing without losing prior text.
-                            if let token = AtTokenScanner.current(in: input),
-                               atMatches != nil {
-                                input = AtTokenScanner.replace(token, with: "", in: input)
-                                    .replacingOccurrences(of: "@  ", with: " ")
-                                    .trimmingCharacters(in: .whitespaces)
-                                return .handled
-                            }
-                            // Exit history browse mode cleanly.
-                            if historyIndex >= 0 {
-                                input = savedDraft
-                                savedDraft = ""
-                                historyIndex = -1
-                                return .handled
-                            }
-                            return .ignored
-                        }
-                        .onKeyPress(.tab) {
-                            if let matches = slashMatches, !matches.isEmpty {
-                                insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
-                                return .handled
-                            }
-                            if let atMatchList = atMatches, !atMatchList.isEmpty {
-                                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
-                                return .handled
-                            }
-                            return .ignored
                         }
                 }
                 .padding(.horizontal, 14)
@@ -352,7 +250,7 @@ struct ComposerView: View {
             .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .sheet(isPresented: $showExpandedEditor) {
-            ExpandedComposerEditor(text: $input, onSend: { send() })
+            ExpandedComposerEditor(text: $input, canSend: canSend, onPaste: handlePaste, onSend: { send() })
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
         .onChange(of: store.pendingComposerPrefill) { _, newValue in
@@ -387,7 +285,7 @@ struct ComposerView: View {
     private var canSend: Bool {
         let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !store.composerAttachments.isEmpty
-        return (hasText || hasAttachments) && !store.isSessionBusy(store.activeSessionId)
+        return (hasText || hasAttachments) && importingAttachments == 0 && !store.isSessionBusy(store.activeSessionId)
     }
 
     /// Returns the current slash query (text after the leading `/`) or nil
@@ -1232,6 +1130,113 @@ struct ComposerView: View {
         }
     }
 
+    private var submitAction: (() -> Void)? {
+        if store.settings.sendKey == .enter || slashMatches != nil || atMatches != nil {
+            return { handleSubmit() }
+        }
+        return nil
+    }
+
+    private func handleSubmit() {
+            // If the slash popup is open and has a selection, Enter accepts that.
+            // Exception: if the user has typed the full label
+            // (e.g. `/timeline`), skip the re-insert dance and
+            // just execute it. Otherwise it takes two Enters
+            // to run a known command, which is maddening.
+            if let matches = slashMatches, !matches.isEmpty {
+                let typed = input.trimmingCharacters(in: .whitespaces).lowercased()
+                let pick = matches[min(slashSelectedIndex, matches.count - 1)]
+                if pick.label.lowercased() == typed {
+                    send()
+                } else {
+                    insertSlashCommand(pick)
+                }
+                return
+            }
+            // @file popup — Enter picks the highlighted path.
+            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
+                return
+            }
+            if store.settings.sendKey == .enter { send() }
+            else { input += "\n" }
+    }
+
+    private func handleInputKey(_ key: KeyEquivalent) -> KeyPress.Result {
+        switch key {
+        case .upArrow:
+            // Slash popup takes priority.
+            if let matches = slashMatches, !matches.isEmpty {
+                slashSelectedIndex = max(0, slashSelectedIndex - 1)
+                return .handled
+            }
+            // @file popup — up/down within the match list.
+            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                atSelectedIndex = max(0, atSelectedIndex - 1)
+                return .handled
+            }
+            // History recall — only when input is empty or already browsing.
+            let entries = PromptHistoryStore.shared.entries
+            guard !entries.isEmpty else { return .ignored }
+            if historyIndex == -1 && input.isEmpty == false { return .ignored }
+            if historyIndex == -1 { savedDraft = input }
+            historyIndex = min(historyIndex + 1, entries.count - 1)
+            input = entries[historyIndex]
+            return .handled
+        case .downArrow:
+            if let matches = slashMatches, !matches.isEmpty {
+                slashSelectedIndex = min(matches.count - 1, slashSelectedIndex + 1)
+                return .handled
+            }
+            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                atSelectedIndex = min(atMatchList.count - 1, atSelectedIndex + 1)
+                return .handled
+            }
+            guard historyIndex >= 0 else { return .ignored }
+            let entries = PromptHistoryStore.shared.entries
+            historyIndex -= 1
+            if historyIndex < 0 {
+                input = savedDraft
+                savedDraft = ""
+            } else {
+                input = entries[min(historyIndex, entries.count - 1)]
+            }
+            return .handled
+        case .escape:
+            // Clear the / at the front to dismiss the popup.
+            if slashMatches != nil { input = ""; return .handled }
+            // @file popup — escape removes the trailing
+            // `@query` token so the user drops back to
+            // normal typing without losing prior text.
+            if let token = AtTokenScanner.current(in: input),
+               atMatches != nil {
+                input = AtTokenScanner.replace(token, with: "", in: input)
+                    .replacingOccurrences(of: "@  ", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                return .handled
+            }
+            // Exit history browse mode cleanly.
+            if historyIndex >= 0 {
+                input = savedDraft
+                savedDraft = ""
+                historyIndex = -1
+                return .handled
+            }
+            return .ignored
+        case .tab:
+            if let matches = slashMatches, !matches.isEmpty {
+                insertSlashCommand(matches[min(slashSelectedIndex, matches.count - 1)])
+                return .handled
+            }
+            if let atMatchList = atMatches, !atMatchList.isEmpty {
+                insertAtFile(atMatchList[min(atSelectedIndex, atMatchList.count - 1)])
+                return .handled
+            }
+            return .ignored
+        default: return .ignored
+        }
+    }
+
     private func pickFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -1245,50 +1250,26 @@ struct ComposerView: View {
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var handled = false
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                handled = true
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
-                    var url: URL?
-                    if let d = data as? Data {
-                        url = URL(dataRepresentation: d, relativeTo: nil)
-                    } else if let u = data as? URL {
-                        url = u
-                    }
-                    guard let u = url else { return }
-                    Task { @MainActor in
-                        store.addAttachment(path: u.path, name: u.lastPathComponent)
-                    }
-                }
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                handled = true
-                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.png.identifier) { data, _ in
-                    guard let d = data else { return }
-                    Task { @MainActor in
-                        if let path = writePastedImage(d, ext: "png") {
-                            store.addAttachment(path: path, name: "pasted.png")
-                        }
-                    }
-                }
-            }
-        }
-        return handled
+        let accepted = providers.filter(AttachmentImporter.accepts)
+        guard !accepted.isEmpty else { return false }
+        handlePaste(accepted)
+        return true
     }
 
     private func handlePaste(_ providers: [NSItemProvider]) {
-        _ = handleDrop(providers)
-    }
-
-    private func writePastedImage(_ data: Data, ext: String) -> String? {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kiln-attachments", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let file = dir.appendingPathComponent("pasted-\(Int(Date().timeIntervalSince1970)).\(ext)")
-        do {
-            try data.write(to: file)
-            return file.path
-        } catch {
-            return nil
+        let sessionID = store.activeSessionId
+        importingAttachments += 1
+        Task { @MainActor in
+            defer { importingAttachments -= 1 }
+            var failures: [String] = []
+            for provider in providers {
+                do {
+                    let attachment = try await AttachmentImporter().load(provider)
+                    guard store.activeSessionId == sessionID else { return }
+                    store.addAttachment(path: attachment.path, name: attachment.name)
+                } catch { failures.append(error.localizedDescription) }
+            }
+            if !failures.isEmpty { ToastCenter.shared.show(failures[0], kind: .error) }
         }
     }
 }
@@ -1385,50 +1366,54 @@ struct ComposerToolbar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if !isChatSession {
-                    // Mode toggle: Plan / Build — code sessions only
-                    ToolbarPill(
-                        icon: store.sessionMode.icon,
-                        label: store.sessionMode.label,
-                        color: store.sessionMode == .plan ? .cyan : Color.kilnAccent,
-                        active: true
-                    ) {
-                        store.sessionMode = store.sessionMode == .build ? .plan : .build
-                    }
-                    .help(store.sessionMode.description)
+                    Menu {
+                        Picker("Mode", selection: $store.sessionMode) {
+                            ForEach(SessionMode.allCases) { mode in
+                                Label(mode.label, systemImage: mode.icon).tag(mode)
+                            }
+                        }
+                    } label: { Label(store.sessionMode.label, systemImage: store.sessionMode.icon) }
+                    .help("Session mode")
 
-                    // Permissions — code sessions only
-                    ToolbarPill(
-                        icon: store.permissionMode.icon,
-                        label: store.permissionMode.label,
-                        color: permissionColor,
-                        active: true
-                    ) {
-                        cyclePermissions()
-                    }
-                    .help(store.permissionMode.description)
-
-
+                    Menu {
+                        Picker("Permissions", selection: $store.permissionMode) {
+                            ForEach(PermissionMode.allCases) { mode in
+                                Label(mode.label, systemImage: mode.icon).tag(mode)
+                            }
+                        }
+                    } label: { Label(store.permissionMode.label, systemImage: "lock.shield") }
+                    .help("Tool permissions")
                 }
 
-                // Thinking toggle
-                ToolbarPill(
-                    icon: "brain",
-                    label: store.thinkingEnabled ? "Reasoning" : "Default reasoning",
-                    color: store.thinkingEnabled ? Color.kilnAccent : Color.kilnTextSecondary,
-                    active: store.thinkingEnabled
-                ) {
-                    store.thinkingEnabled.toggle()
-                }
-                .help("Show reasoning summaries and choose effort")
-
-                if store.thinkingEnabled && !(store.activeSession?.model.reasoningEfforts.isEmpty ?? true) {
-                    Picker("Reasoning", selection: $store.effortLevel) {
-                        ForEach(EffortLevel.allCases.filter { store.activeSession?.model.reasoningEfforts.contains($0.rawValue) ?? false }) { effort in
-                            Text(effort.label).tag(effort)
+                Menu {
+                    Button {
+                        store.thinkingEnabled = false
+                    } label: {
+                        Label("Default", systemImage: store.thinkingEnabled ? "circle" : "checkmark")
+                    }
+                    Divider()
+                    ForEach(EffortLevel.allCases.filter { store.activeSession?.model.reasoningEfforts.contains($0.rawValue) ?? false }) { effort in
+                        Button {
+                            store.thinkingEnabled = true
+                            store.effortLevel = effort
+                        } label: {
+                            Label(effort.label, systemImage: store.thinkingEnabled && store.effortLevel == effort ? "checkmark" : "circle")
                         }
                     }
-                    .pickerStyle(.menu).fixedSize()
-                    .help("Reasoning effort")
+                } label: {
+                    Label(store.thinkingEnabled ? store.effortLevel.label : "Reasoning", systemImage: "brain")
+                }
+                .help("Reasoning effort")
+                .disabled(store.activeSession?.model.reasoningEfforts.isEmpty ?? true)
+
+                if let session = store.activeSession, session.model.supportsOpenAIFastMode {
+                    Toggle(isOn: Binding(get: { session.openAIFastMode }, set: { store.setOpenAIFastMode($0) })) {
+                        Label(session.openAIFastMode ? "Fast" : "Normal", systemImage: session.openAIFastMode ? "bolt.fill" : "bolt")
+                    }
+                    .toggleStyle(.button)
+                    .help("Normal / Fast. " + session.model.fastModeDescription)
+                    .accessibilityLabel("Fast mode")
+                    .disabled(store.isSessionBusy(session.id))
                 }
 
                 // Model picker lives in the chat header strip now —
@@ -1439,27 +1424,14 @@ struct ComposerToolbar: View {
                 // Rate-limit meter — shows tokens-per-5min velocity
                 RateLimitMeter()
             }
+            .controlSize(.small)
+            .font(.system(size: 11, weight: .medium))
+            .buttonStyle(.borderless)
+            .disabled(store.isSessionBusy(store.activeSessionId))
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
         }
     }
-
-    private var permissionColor: Color {
-        switch store.permissionMode {
-        case .bypass: Color.kilnAccent
-        case .ask: .blue
-        case .deny: Color.kilnError
-        }
-    }
-
-    private func cyclePermissions() {
-        switch store.permissionMode {
-        case .bypass: store.permissionMode = .ask
-        case .ask: store.permissionMode = .deny
-        case .deny: store.permissionMode = .bypass
-        }
-    }
-
 
 }
 
@@ -1862,7 +1834,11 @@ private struct SlashCommandRow: View {
 
 struct ExpandedComposerEditor: View {
     @Binding var text: String
+    let canSend: Bool
+    let onPaste: ([NSItemProvider]) -> Void
     let onSend: () -> Void
+    @State private var focused = true
+    @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1879,10 +1855,18 @@ struct ExpandedComposerEditor: View {
                     .foregroundStyle(Color.kilnTextTertiary)
             }
 
-            TextEditor(text: $text)
-                .font(.system(size: 13))
-                .foregroundStyle(Color.kilnText)
-                .scrollContentBackground(.hidden)
+            if !store.composerAttachments.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack {
+                        ForEach(store.composerAttachments) { attachment in
+                            AttachmentChip(attachment: attachment) { store.removeAttachment(attachment.id) }
+                        }
+                    }
+                }.frame(height: 58)
+            }
+
+            ComposerTextInput(text: $text, isFocused: $focused, expanded: true,
+                onCommandReturn: { if canSend { dismiss(); onSend() } }, onPaste: onPaste)
                 .padding(10)
                 .frame(minHeight: 360, idealHeight: 420)
                 .background(Color.kilnSurface)
@@ -1921,7 +1905,7 @@ struct ExpandedComposerEditor: View {
                 .background(Color.kilnAccent)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
             }
         }
         .padding(20)

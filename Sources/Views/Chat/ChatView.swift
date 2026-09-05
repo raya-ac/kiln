@@ -132,24 +132,7 @@ struct ChatView: View {
                     ))
                     .disabled(store.isBusy)
 
-                    if session.model.supportsOpenAIFastMode {
-                        Button {
-                            store.setOpenAIFastMode(!session.openAIFastMode)
-                        } label: {
-                            HStack(spacing: 4) {
-                                ModelBrandIcon(brand: .chatgpt, size: 9)
-                                Text("Fast")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(session.openAIFastMode ? Color.kilnBg : Color.kilnTextSecondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(session.openAIFastMode ? Color(hex: 0x0EA5E9) : Color.kilnSurfaceElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                        }
-                        .buttonStyle(.plain)
-                        .help(session.openAIFastMode ? "Fast mode is on for this \(session.model.label) session" : "Enable Codex fast mode for this \(session.model.label) session")
-                    }
+
                 }
             }
             .padding(.horizontal, 16)
@@ -287,7 +270,7 @@ struct LiveAssistantRow: View {
 
                     // Live thinking
                     if !store.thinkingText.isEmpty {
-                        ThinkingRow(text: store.thinkingText)
+                        ThinkingRow(text: store.thinkingText, isStreaming: store.isBusy && store.streamingText.isEmpty)
                     }
 
                     if !store.traceEntries.isEmpty {
@@ -334,53 +317,6 @@ struct LiveAssistantRow: View {
 }
 
 // MARK: - Thinking
-
-struct ThinkingRow: View {
-    let text: String
-    @EnvironmentObject var store: AppStore
-    @State private var expanded: Bool = false
-    @State private var didInit: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button { expanded.toggle() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                        .frame(width: 12)
-                    Image(systemName: "brain")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                    Text(store.settings.language.ui.thinking)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            if expanded {
-                Text(text)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.kilnTextTertiary)
-                    .italic()
-                    .textSelection(.enabled)
-                    .padding(.top, 6)
-                    .padding(.leading, 20)
-            }
-        }
-        .padding(10)
-        .background(Color.kilnSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorderSubtle, lineWidth: 1))
-        .onAppear {
-            if !didInit {
-                expanded = !store.settings.thinkingCollapsedByDefault
-                didInit = true
-            }
-        }
-    }
-}
 
 // MARK: - Tool Call Card
 

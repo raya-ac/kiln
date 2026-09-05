@@ -6,7 +6,8 @@ enum CodexProtocol {
         threadId: String?,
         model: AgentModel,
         workDir: String,
-        options: SendOptions
+        options: SendOptions,
+        imagePaths: [String] = []
     ) -> [String] {
         var args: [String] = []
         args += fastModeArgs(for: model, options: options)
@@ -25,6 +26,7 @@ enum CodexProtocol {
             if sandboxMode(for: options) == "--dangerously-bypass-approvals-and-sandbox" {
                 args.append("--dangerously-bypass-approvals-and-sandbox")
             }
+            args += imagePaths.flatMap { ["--image", $0] }
             args += [threadId, "-"]
             return args
         }
@@ -42,6 +44,7 @@ enum CodexProtocol {
         case let sandbox:
             args += ["--sandbox", sandbox]
         }
+        args += imagePaths.flatMap { ["--image", $0] }
         args.append("-")
         return args
     }
@@ -58,9 +61,10 @@ enum CodexProtocol {
     }
 
     nonisolated static func fastModeArgs(for model: AgentModel, options: SendOptions) -> [String] {
-        guard options.openAIFastMode, model.supportsOpenAIFastMode else { return [] }
+        guard let tier = model.fastModeTier, model.supportsOpenAIFastMode else { return [] }
+        guard options.openAIFastMode else { return ["-c", #"service_tier="default""#] }
         return [
-            "-c", #"service_tier="fast""#,
+            "-c", #"service_tier="\#(tier)""#,
             "-c", "features.fast_mode=true",
         ]
     }
@@ -107,7 +111,7 @@ enum CodexProtocol {
             metadata["reasoningSummary"] = "auto"
         }
         if options.openAIFastMode {
-            metadata["serviceTier"] = "fast"
+            metadata["serviceTier"] = model.fastModeTier ?? "fast"
         }
         return trace(
             level: .info,

@@ -4,6 +4,25 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.12.0] — 2026-09-05
+
+### Changed
+- Settings now has dedicated General, Appearance, Chat & Composer, Integrations, Remote Access, Advanced, Usage, CLI Updates, and About sections.
+- Use native switches, segmented settings controls, and explicit session mode and permission menus instead of cycling buttons.
+- Reasoning summaries are readable, collapsible sections with live/completed states and a copy action, without the dim italic box.
+- A single reasoning-effort menu replaces the separate toggle and picker.
+
+### Fixed
+- Restore Normal/Fast beside the composer using the selected CLI's advertised service tiers. Normal explicitly overrides a global fast preference; unsupported models do not receive fast parameters.
+
+## [1.11.1] — 2026-09-05
+
+### Fixed
+- Paste screenshots and Finder files directly into the chat or expanded composer. TIFF, PNG, and JPEG clipboard images are normalized to persistent PNG attachments with unique filenames.
+- Native paste handling preserves ordinary text editing, and attachment import failures are shown instead of silently ignored.
+- Send images as native Codex image inputs on new and resumed turns, and pass files through OpenCode's attachment option.
+- Discover the model list directly from the selected Codex CLI instead of getting stuck on a mismatched shared cache. Refresh retains supported reasoning levels and keeps older models separate.
+
 ## [1.11.0] — 2026-09-05
 
 ### Added

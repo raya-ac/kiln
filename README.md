@@ -54,8 +54,9 @@ is installed automatically. Checks run when the tab opens, reuse successful
 results for an hour, and can be refreshed manually.
 
 The searchable model picker has Codex, Older models, and OpenCode groups.
-Codex models come from the installed CLI's model cache, with a small fallback
-catalog when the cache is missing. Refresh the picker after updating Codex.
+Codex models come directly from the selected CLI through its model-list API.
+A matching local cache is only a fallback when discovery fails. The picker keeps
+the exact model IDs and supported reasoning levels returned by the CLI.
 Older OpenAI models remain selectable; account availability is determined by
 the backend. OpenCode models load on selecting its tab and retain provider/model IDs.
 Model availability in a catalog does not imply that credentials are configured.
@@ -88,8 +89,8 @@ open .build/release/Kiln
 That gets you the raw binary. To produce a real `Kiln.app` bundle (the kind Finder recognises, with auto-updates wired up):
 
 ```bash
-./scripts/make-app-bundle.sh 1.11.0 arm64      # Apple Silicon
-./scripts/make-app-bundle.sh 1.11.0 x86_64     # Intel
+./scripts/make-app-bundle.sh 1.12.0 arm64      # Apple Silicon
+./scripts/make-app-bundle.sh 1.12.0 x86_64     # Intel
 open dist/arm64/Kiln.app
 ```
 
@@ -97,7 +98,7 @@ Either works fine for trying it out.
 
 ## Releases & auto-updates
 
-Push a tag like `v1.11.0` and GitHub Actions will:
+Push a tag like `v1.12.0` and GitHub Actions will:
 
 1. Build separate Apple Silicon and Intel `.app` bundles.
 2. Code-sign and notarise them (if you've added the Apple secrets).
@@ -157,7 +158,7 @@ Common commands are wrapped in a `Makefile`:
 ```bash
 make           # lists everything
 make run       # debug build + open the binary
-make bundle VERSION=1.11.0 ARCH=arm64
+make bundle VERSION=1.12.0 ARCH=arm64
 make lint      # swift-format --lint
 make format    # swift-format --in-place
 make logo      # re-render the brand mark

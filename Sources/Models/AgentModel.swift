@@ -75,7 +75,9 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
     var contextWindow: Int { descriptor?.contextWindow ?? 272_000 }
     var extendedContextWindow: Int? { nil }
     var supportsExtendedContext: Bool { false }
-    var supportsOpenAIFastMode: Bool { false }
+    var supportsOpenAIFastMode: Bool { provider == .codex && descriptor?.fastModeTier != nil }
+    var fastModeTier: String? { descriptor?.fastModeTier }
+    var fastModeDescription: String { descriptor?.fastModeDescription ?? "Faster responses may use more credits." }
     var tint: Color { Color.kilnAccent }
     var reasoningEfforts: [String] { descriptor?.efforts ?? (provider == .opencode ? [] : ["low", "medium", "high", "xhigh"]) }
 }
@@ -86,6 +88,8 @@ struct ModelDescriptor: Sendable {
     let description: String
     let contextWindow: Int
     let efforts: [String]
+    var fastModeTier: String? = nil
+    var fastModeDescription: String? = nil
 }
 
 final class ModelCatalog: @unchecked Sendable {
@@ -94,6 +98,24 @@ final class ModelCatalog: @unchecked Sendable {
     private var snapshot: [ModelDescriptor] = []
     private(set) var loadedFromCache = false
     private var cliVersion: CLIVersion?
+    private var liveVersion: CLIVersion?
+    private var liveRefresh: Date?
+
+    func hasRecentLiveModels(for version: CLIVersion) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return liveVersion == version && liveRefresh.map { Date().timeIntervalSince($0) < 300 } == true
+    }
+
+    func replaceLive(_ models: [ModelDescriptor], version: CLIVersion) {
+        lock.lock()
+        defer { lock.unlock() }
+        snapshot = models
+        cliVersion = version
+        liveVersion = version
+        liveRefresh = .now
+        loadedFromCache = true
+    }
 
     var models: [ModelDescriptor] {
         lock.lock()
@@ -114,6 +136,9 @@ final class ModelCatalog: @unchecked Sendable {
         lock.lock()
         if let installedVersion { cliVersion = installedVersion }
         let expectedVersion = cliVersion
+        if liveVersion == expectedVersion, liveRefresh != nil { lock.unlock(); return }
+        liveVersion = nil
+        liveRefresh = nil
         lock.unlock()
         let data = try? Data(contentsOf: Self.codexHome.appendingPathComponent("models_cache.json"))
         let parsed = data.flatMap { Self.parse($0, installedVersion: expectedVersion) } ?? []

@@ -367,21 +367,33 @@ final class AppStore: ObservableObject {
     @Published var modelCatalogRevision = 0
     @Published var modelCatalogError: String?
     @Published var codexCatalogWarning: String?
-    func refreshCodexModelCatalog() async {
+    @Published var refreshingCodexModels = false
+    func refreshCodexModelCatalog(force: Bool = false) async {
+        guard !refreshingCodexModels else { return }
+        refreshingCodexModels = true
+        defer { refreshingCodexModels = false; modelCatalogRevision += 1 }
         do {
             let data = try await CodexCLI.output(["--version"])
             guard let version = CLIVersion(String(decoding: data, as: UTF8.self)) else { throw CLIUpdateError.invalidVersion }
+            if !force, ModelCatalog.shared.hasRecentLiveModels(for: version) { return }
             ModelCatalog.shared.reload(installedVersion: version)
-            codexCatalogWarning = ModelCatalog.shared.loadedFromCache ? nil
-                : "No matching model catalog for Codex \(version.text). Showing fallback models."
+            do {
+                let models = try await CodexModelDiscovery.fetch()
+                ModelCatalog.shared.replaceLive(models, version: version)
+                codexCatalogWarning = nil
+            } catch {
+                codexCatalogWarning = ModelCatalog.shared.loadedFromCache
+                    ? "Could not refresh models. Showing the last available catalog."
+                    : "Could not load models from the selected Codex CLI. Showing fallback models."
+            }
         } catch {
-            codexCatalogWarning = "Could not verify the Codex model catalog. Check the CLI installation."
+            codexCatalogWarning = "Could not verify the Codex installation. Check CLI Updates."
         }
-        modelCatalogRevision += 1
     }
 
     var activeModelWarning: String? {
         guard let model = activeSession?.model, model.provider == .codex else { return nil }
+        if refreshingCodexModels { return nil }
         if let codexCatalogWarning { return codexCatalogWarning }
         if !ModelCatalog.shared.models.contains(where: { $0.model == model }) {
             return "\(model.label) is not in this CLI's model catalog. Fallback metadata may reduce reliability."
@@ -395,7 +407,7 @@ final class AppStore: ObservableObject {
     }
 
     func refreshModelCatalog() async {
-        await refreshCodexModelCatalog()
+        await refreshCodexModelCatalog(force: true)
         do { try await OpenCodeModels.shared.reload(); modelCatalogError = nil }
         catch { modelCatalogError = "OpenCode model list unavailable. Check installation and configuration." }
         modelCatalogRevision += 1
@@ -944,7 +956,9 @@ final class AppStore: ObservableObject {
             codex.forgetThread(for: sessions[idx].id)
             opencode.forgetThread(for: sessions[idx].id)
         }
-        if !model.reasoningEfforts.contains(effortLevel.rawValue) { effortLevel = .medium }
+        if !model.reasoningEfforts.contains(effortLevel.rawValue) {
+            effortLevel = model.reasoningEfforts.compactMap(EffortLevel.init(rawValue:)).first ?? .medium
+        }
         sessions[idx].model = model
         if !model.supportsOpenAIFastMode {
             sessions[idx].openAIFastMode = false
@@ -953,7 +967,7 @@ final class AppStore: ObservableObject {
     }
 
     func setOpenAIFastMode(_ enabled: Bool) {
-        guard let idx = activeSessionIndex else { return }
+        guard let idx = activeSessionIndex, !isSessionBusy(sessions[idx].id) else { return }
         sessions[idx].openAIFastMode = sessions[idx].model.supportsOpenAIFastMode ? enabled : false
         Persistence.saveSession(sessions[idx])
     }
@@ -1493,7 +1507,8 @@ final class AppStore: ObservableObject {
                 message: expanded,
                 model: model,
                 workDir: workDir,
-                options: options
+                options: options,
+                attachments: attachments
             ) { [weak self] event in
                 guard let self else { return }
                 self.handleAgentEvent(event, sessionId: sessionId)

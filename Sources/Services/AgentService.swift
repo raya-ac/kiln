@@ -30,6 +30,7 @@ final class AgentService: ObservableObject {
         model: AgentModel,
         workDir: String,
         options: SendOptions = SendOptions(),
+        attachments: [ComposerAttachment] = [],
         onEvent: @MainActor @Sendable @escaping (AgentEvent) -> Void
     ) async {
         guard runningProcesses[sessionId] == nil else {
@@ -48,12 +49,13 @@ final class AgentService: ObservableObject {
             args.append(backend.rawValue)
         }
         args += backend == .opencode
-            ? OpenCodeProtocol.arguments(sessionId: threadIds[sessionId], model: model, workDir: resolvedDir, options: options)
+            ? OpenCodeProtocol.arguments(sessionId: threadIds[sessionId], model: model, workDir: resolvedDir, options: options, filePaths: attachments.map(\.path))
             : CodexProtocol.buildArguments(
             threadId: threadIds[sessionId],
             model: model,
             workDir: resolvedDir,
-            options: options
+            options: options,
+            imagePaths: attachments.filter(\.isImage).map(\.path)
         )
 
         let process = Process()

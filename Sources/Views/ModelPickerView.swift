@@ -40,9 +40,10 @@ private struct ModelPickerView: View {
                     refreshing = true
                     Task { await store.refreshModelCatalog(); refreshing = false }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    if refreshing || store.refreshingCodexModels { ProgressView().controlSize(.small) }
+                    else { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(refreshing)
+                .disabled(refreshing || store.refreshingCodexModels)
                 .help("Refresh model catalogs")
             }.padding(14)
             Picker("Backend", selection: $provider) {

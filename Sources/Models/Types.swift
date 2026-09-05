@@ -1397,6 +1397,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
 // MARK: - File tree
 
 struct ComposerAttachment: Identifiable, Sendable, Equatable, Codable, Hashable {
+    var isImage: Bool { ["png", "jpg", "jpeg", "gif", "webp", "tif", "tiff", "heic", "bmp"].contains((path as NSString).pathExtension.lowercased()) }
     let id: String
     let path: String
     let name: String
