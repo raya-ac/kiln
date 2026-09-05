@@ -201,6 +201,7 @@ function renderChatHeader() {
 }
 
 function renderMedia(media){
+ if(media.kind==='link')return renderRichLink(media);
  let url;
  try{
   const candidate=new URL(media.source);
@@ -222,6 +223,8 @@ function renderMedia(media){
 }
 
 function hydrateMedia(root=document){
+ root.querySelectorAll('a[href]').forEach(a=>{const fixed=fixupXURL(a.href);if(fixed)a.href=fixed;});
+ hydrateRichLinks(root);
  root.querySelectorAll('.inline-media img,.inline-media video,.inline-media audio').forEach(el=>{
   if(el.dataset.mediaWired)return;el.dataset.mediaWired='true';
   el.addEventListener('error',()=>{el.closest('figure').querySelector('.media-error').hidden=false;if(el.tagName==='IMG')el.hidden=true;});
@@ -235,6 +238,92 @@ function hydrateMedia(root=document){
   });
  });
 }
+
+function renderRichLink(media){
+ const provider=escHTML(media.provider||media.label),label=escHTML(media.label||media.provider);
+ let url;try{url=new URL(media.source);if(url.protocol!=='https:'||url.username||url.password)return '';}catch{return '';}
+ return `<figure class="rich-link" data-link="${escHTML(media.id)}" data-session="${escHTML(state.activeId)}" data-provider="${provider}">
+ <button class="link-load" aria-label="Load ${provider} embed"><img class="link-thumbnail" hidden alt="" referrerpolicy="no-referrer"><span class="link-play">${icon(media.provider==='Twitter / X'?'message-square':'circle-play')}</span></button>
+ <div class="link-player" hidden></div><div class="link-post" hidden></div><figcaption><div class="link-caption"><span class="link-provider">${media.provider==='Twitter / X'?'X via fixupx.com':provider}</span><button class="icon-button link-retry" hidden title="Retry link preview" aria-label="Retry link preview">${icon('refresh-cw')}</button><button class="icon-button link-close" hidden title="Close embed" aria-label="Close embed">${icon('x')}</button><a class="icon-button" href="${escHTML(url.href)}" target="_blank" rel="noopener noreferrer" title="Open on ${media.provider==='Twitter / X'?'FixupX':provider}" aria-label="Open on ${media.provider==='Twitter / X'?'FixupX':provider}">${icon('external-link')}</a></div><strong class="link-title">${label}</strong><span class="link-author"></span><span class="link-status" role="status"></span></figcaption></figure>`;
+}
+
+function fixupXURL(raw){
+ try{
+  const url=new URL(raw);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.port)return null;
+  if(!['x.com','www.x.com','twitter.com','www.twitter.com','mobile.twitter.com','mobile.x.com','fixupx.com','www.fixupx.com','fxtwitter.com','www.fxtwitter.com'].includes(url.hostname))return null;
+  const match=url.pathname.match(/^\/(?:[^/]+\/status|i\/web\/status)\/(\d{2,20})(?:\/|$)/);
+  return match?'https://fixupx.com/i/status/'+match[1]:null;
+ }catch{return null;}
+}
+
+function renderFixupXPost(card,post){
+ const container=card.querySelector('.link-post');
+ const media=items=>(items||[]).map(item=>renderMedia({id:item.url,source:item.url,kind:item.kind,label:item.kind==='image'?'Post image':'Post video'})).join('');
+ const quote=post.quote?`<blockquote class="post-quote"><strong>${escHTML(post.quote.author)} @${escHTML(post.quote.handle)}</strong><div class="post-text">${escHTML(post.quote.text)}</div>${media(post.quote.media)}</blockquote>`:'';
+ container.innerHTML=`<strong class="post-author">${escHTML(post.author)}</strong><span class="post-handle">@${escHTML(post.handle)}</span><div class="post-text">${escHTML(post.text)}</div>${media(post.media)}${quote}${post.timestamp?'<time>'+escHTML(new Date(post.timestamp*1000).toLocaleString())+'</time>':''}`;
+ container.hidden=false;card.querySelector('.link-load').hidden=true;card.querySelector('.link-title').hidden=true;card.querySelector('.link-author').hidden=true;
+ hydrateIcons();hydrateMedia(container);
+}
+
+const linkMetadataCache=new Map();
+const linkPreviewObserver=new IntersectionObserver(entries=>{
+ for(const entry of entries)if(entry.isIntersecting){linkPreviewObserver.unobserve(entry.target);loadLinkMetadata(entry.target);}
+},{rootMargin:'200px'});
+
+async function loadLinkMetadata(card,refresh=false){
+ if(card._loading)return card._loading;
+ const key=card.dataset.session+':'+card.dataset.link;
+ card._loading=(async()=>{
+  try{
+   const theme=document.documentElement.dataset.theme==='light'?'light':'dark';
+   let data=!refresh&&linkMetadataCache.get(key+theme);
+   if(!data){
+    data=await api('/api/link-preview?session='+encodeURIComponent(card.dataset.session)+'&id='+encodeURIComponent(card.dataset.link)+'&theme='+theme+(refresh?'&refresh=1':''));
+    if(linkMetadataCache.size>=256)linkMetadataCache.clear();
+    if(!data.unavailable)linkMetadataCache.set(key+theme,data);
+   }
+   card._metadata=data;
+   card.querySelector('.link-title').textContent=data.title||card.dataset.provider;
+   card.querySelector('.link-author').textContent=data.author||'';
+   card.querySelector('.link-status').textContent=data.unavailable?'Metadata unavailable. The original link is still available.':'';
+   card.querySelector('.link-retry').hidden=!data.unavailable;
+   if(data.post)renderFixupXPost(card,data.post);
+   if(data.thumbnail){
+    const image=card.querySelector('.link-thumbnail');image.onload=()=>{image.hidden=false;};image.onerror=()=>{image.hidden=true;};image.src=data.thumbnail;
+   }
+   return data;
+  }catch{
+   card.querySelector('.link-status').textContent='Preview unavailable. Open the original link.';
+   card.querySelector('.link-retry').hidden=false;
+  }finally{card._loading=null;}
+ })();
+ return card._loading;
+}
+
+function hydrateRichLinks(root){
+ // Removed cards must not remain retained by the observer between conversations.
+ for(const card of observedLinkCards)if(!card.isConnected){linkPreviewObserver.unobserve(card);observedLinkCards.delete(card);}
+ root.querySelectorAll('.rich-link').forEach(card=>{
+  if(card.dataset.wired)return;card.dataset.wired='true';observedLinkCards.add(card);linkPreviewObserver.observe(card);
+  const load=card.querySelector('.link-load'),player=card.querySelector('.link-player'),close=card.querySelector('.link-close');
+  if(card.dataset.provider==='Twitter / X')load.hidden=true;
+  close.onclick=()=>{player.replaceChildren();player.hidden=true;load.hidden=false;close.hidden=true;};
+  card.querySelector('.link-retry').onclick=()=>loadLinkMetadata(card,true);
+  load.onclick=async()=>{
+   load.disabled=true;
+   const data=card._metadata||await loadLinkMetadata(card);
+   load.disabled=false;if(!data||!card.isConnected)return;
+   const frame=document.createElement('iframe');frame.title=card.dataset.provider+' embed';frame.referrerPolicy='strict-origin-when-cross-origin';
+   frame.allow='encrypted-media; fullscreen; picture-in-picture';frame.allowFullscreen=true;
+   let url;try{url=new URL(data.embedURL);}catch{return;}
+   if(url.protocol!=='https:'||url.username||url.password||!['www.youtube-nocookie.com','player.vimeo.com','open.spotify.com','w.soundcloud.com','www.tiktok.com'].includes(url.hostname))return;
+   frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-popups');frame.src=url.href;
+   frame.style.height=Math.max(200,Math.min(440,Number(data.height)||300))+'px';
+   player.replaceChildren(frame);player.hidden=false;load.hidden=true;close.hidden=false;
+  };
+ });
+}
+const observedLinkCards=new Set();
 
 function renderBlock(block, key='') {
  if(block.type==='text') return '<div class="block-text">'+DOMPurify.sanitize(marked.parse(block.text||''),{USE_PROFILES:{html:true},FORBID_TAGS:['img','form','input','button','style','video','audio','iframe'],FORBID_ATTR:['style','id','name']})+'</div>'+(block.media||[]).map(renderMedia).join('');

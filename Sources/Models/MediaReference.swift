@@ -5,7 +5,7 @@ import cmark_gfm
 import cmark_gfm_extensions
 
 enum MediaKind: String, Codable, Sendable {
-    case image, video, audio, document, file
+    case image, video, audio, document, file, link
     var symbol: String {
         switch self {
         case .image: "photo"
@@ -13,6 +13,7 @@ enum MediaKind: String, Codable, Sendable {
         case .audio: "waveform"
         case .document: "doc.richtext"
         case .file: "doc"
+        case .link: "link"
         }
     }
 }
@@ -27,6 +28,9 @@ struct MediaReference: Identifiable, Equatable, Sendable {
         guard !source.isEmpty, source.utf8.count < 16_384 else { return nil }
         let scheme = URL(string: source)?.scheme?.lowercased()
         guard scheme == nil || ["https", "http", "file", "sandbox"].contains(scheme!) else { return nil }
+        if let link = RichLink.make(source) {
+            return Self(source: link.url.absoluteString, label: label.isEmpty ? link.provider.rawValue : label, kind: .link)
+        }
         let ext = (URL(string: source)?.pathExtension ?? (source as NSString).pathExtension).lowercased()
         let kind: MediaKind
         if ["mp4", "m4v", "mov", "webm", "mkv", "avi", "mpeg", "mpg", "ogv", "m3u8"].contains(ext) { kind = .video }

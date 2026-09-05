@@ -31,6 +31,10 @@ replies keep the model that produced them. reasoning summaries and tool output a
 
 image, video, audio, and PDF links in replies can render inline. video and audio wait for you to press play. supported formats depend on macOS or your browser; a file that can't preview still has an open link. ordinary web pages aren't turned into arbitrary embedded sites.
 
+YouTube, Vimeo, Spotify, SoundCloud, and TikTok links get titles, authors, thumbnails, and click-to-load players. X posts use fixupx.com: kiln gets the post through FixupX's API and shows the text, photos, videos, and quoted post itself. no X widget. twitter.com, x.com, fxtwitter.com, and fixupx.com post links all take the same path.
+
+previews contact the relevant provider, or FixupX for X posts. private, deleted, region-locked, or embed-disabled content can still fail; the original link stays available. regular websites stay as links rather than being fetched by the host as arbitrary pages.
+
 there's conversation search, forks, pinned messages, export, and an editor for longer prompts. drafts are saved per chat. undo-send gives you a chance to pull a request back, and interrupted queued requests come back as drafts rather than sending themselves after a restart.
 
 auto-compact is on by default at 90% reported context usage. it runs before the next send and saves the original conversation first. turn it off in chat & composer settings. saved compaction archives can be restored as a separate chat.
@@ -53,7 +57,7 @@ it isn't the entire desktop app in a browser. file editing, git, the terminal, a
 
 local media is only served when the conversation references it and it resolves inside that conversation's workspace or kiln's attachment folder. video supports range requests for seeking. unsupported files remain downloads.
 
-the web assets ship with the app, including icons, Markdown parsing, and sanitization. no runtime CDN scripts. refresh the web page after updating kiln.
+the web assets ship with the app, including icons, Markdown parsing, and sanitization. the interface doesn't load CDN scripts. optional embedded players load the provider's page in an isolated frame, without access to the chat or its token. refresh the web page after updating kiln.
 
 ## building it
 
@@ -93,6 +97,16 @@ node scripts/test-remote-ui.cjs
 ```
 
 that check needs Playwright available to Node and an installed Chrome. `KILN_BROWSER_CHANNEL` selects a different installed Playwright browser channel.
+
+the link-preview check uses public example posts and videos, not your conversations:
+
+```sh
+mkdir -p .tmp
+KILN_LIVE_LINK_TESTS=1 KILN_LINK_FIXTURES="$PWD/.tmp/rich-link-fixtures.json" swift test --filter RichLinkTests
+node scripts/test-rich-links.cjs
+```
+
+add `KILN_LIVE_EMBED_TESTS=1` to the link-preview browser check to load the real providers instead of local fixtures.
 
 the code is mostly SwiftUI and AppKit. `Sources/Services/` owns the agent and remote connections, `Sources/Models/` has the data types, and `Sources/Views/` has the native interface. the web client is in `Sources/App/Resources/remote/`.
 

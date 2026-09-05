@@ -4,6 +4,19 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.17.0] — 2026-09-05
+
+### Added
+- Rich link previews for YouTube, Twitter/X, Vimeo, Spotify, SoundCloud, and TikTok in native and web chats.
+- Use FixupX for X posts: author, text, images, videos, quoted posts, and timestamps rendered directly, with post links opening through fixupx.com.
+- Cached provider titles, authors, and thumbnails; click-to-load players, retry, close, and open-original controls.
+- Canonical links including YouTube Shorts, live videos and timestamps, and X/FixupX aliases.
+
+### Fixed
+- Keep provider players alive during remote chat polling and reserve thumbnail space during loading.
+- Supply the native app's embedding identity for YouTube playback and isolate provider pages from chat state, local files, and remote credentials.
+- Only fetch metadata from fixed provider API endpoints, with bounded responses, timeouts, no cookies, and no redirects. Never execute returned oEmbed HTML.
+
 ## [1.16.0] — 2026-09-05
 
 ### Added

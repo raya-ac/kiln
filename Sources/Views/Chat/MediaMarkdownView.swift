@@ -19,6 +19,10 @@ struct MediaMarkdownView: View {
                         .markdownInlineImageProvider(NoAutomaticInlineImageProvider())
                         .textSelection(.enabled)
                         .environment(\.openURL, OpenURLAction { url in
+                            if let link = RichLink.make(url.absoluteString), link.provider == .twitter {
+                                NSWorkspace.shared.open(link.url)
+                                return .handled
+                            }
                             guard ["http", "https", "file", "mailto", "kiln"].contains(url.scheme?.lowercased() ?? "") else { return .discarded }
                             if url.isFileURL, MediaReference.make(source: url.absoluteString)?.kind == .file {
                                 NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -27,7 +31,10 @@ struct MediaMarkdownView: View {
                             return .systemAction
                         })
                 }
-                ForEach(section.media) { media in InlineMediaView(media: media, workDir: workDir) }
+                ForEach(section.media) { media in
+                    if media.kind == .link, let link = RichLink.make(media.source) { RichLinkView(link: link) }
+                    else { InlineMediaView(media: media, workDir: workDir) }
+                }
             }
         }
     }
@@ -90,7 +97,7 @@ struct InlineMediaView: View {
                             .background(Color.kilnSurface)
                         }.buttonStyle(.plain).help("Play " + media.label)
                     }
-                case .file:
+                case .file, .link:
                     Label(media.label, systemImage: media.kind.symbol).font(.system(size: 12))
                 }
             } else {

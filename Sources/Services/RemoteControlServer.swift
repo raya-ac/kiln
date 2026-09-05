@@ -180,6 +180,24 @@ final class RemoteControlServer: ObservableObject {
         case ("GET", "/api/state"):
             return .json(Self.fullState(store: store))
 
+        case ("GET", "/api/link-preview"):
+            guard let sid = req.query["session"], let mediaID = req.query["id"],
+                  let session = store.sessions.first(where: { $0.id == sid }),
+                  let reference = session.messages.lazy.flatMap({ message in
+                      message.blocks.flatMap { block -> [MediaReference] in
+                          if case .text(let text) = block { return MediaMarkdown.references(text) }
+                          return []
+                      }
+                  }).first(where: { $0.id == mediaID && $0.kind == .link }),
+                  let link = RichLink.make(reference.source) else { return .notFound }
+            let metadata = await LinkMetadataService.shared.metadata(for: link, refresh: req.query["refresh"] == "1")
+            var payload: [String: Any] = ["title": metadata.title, "author": metadata.author,
+                "unavailable": metadata.unavailable, "provider": link.provider.rawValue, "height": link.height]
+            payload["thumbnail"] = metadata.thumbnail
+            payload["embedURL"] = link.embedURL?.absoluteString
+            if let post = metadata.post { payload["post"] = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(post)) }
+            return .json(payload)
+
         case ("GET", "/api/media"), ("HEAD", "/api/media"):
             guard let sid = req.query["session"], let mediaID = req.query["id"],
                   let session = store.sessions.first(where: { $0.id == sid }) else { return .notFound }
@@ -688,7 +706,9 @@ final class RemoteControlServer: ObservableObject {
     }
 
     private static func mediaJSON(_ media: MediaReference) -> [String: Any] {
-        ["id": media.id, "source": media.source, "label": media.label, "kind": media.kind.rawValue]
+        var data: [String: Any] = ["id": media.id, "source": media.source, "label": media.label, "kind": media.kind.rawValue]
+        if let link = RichLink.make(media.source) { data["provider"] = link.provider.rawValue }
+        return data
     }
 
     private static func toolUseJSON(_ t: ToolUseBlock) -> [String: Any] {
