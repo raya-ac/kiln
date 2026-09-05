@@ -4,6 +4,40 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.10.0] — 2026-09-05
+
+### Added
+- Official monochrome OpenAI model icons throughout the model picker and chat UI.
+- Searchable model picker with current Codex models, an Older models group,
+  and OpenCode models loaded from the installed CLI.
+- OpenCode JSON run support with separate saved sessions, reasoning summaries,
+  tool results, usage, and interruption.
+- Transcript history paging, follow-output toggle, jump to latest, code-block
+  copy buttons, and searchable run logs with an issues filter.
+- Regression tests for streaming delivery before process exit, model migration,
+  duplicate block identities, permissions on resume, and backend event parsing.
+
+### Changed
+- Removed the Claude backend, branded resources, configuration readers, and
+  legacy approval hook. Existing conversations are retained; unsupported model
+  selections migrate to the current default.
+- Model definitions, CLI event protocols, process lifecycle, transcript layout,
+  message rendering, and run-log views now have separate ownership.
+- Reasoning menus use the model's supported efforts. Unsupported turn-limit and
+  extended-context controls are no longer shown.
+- Guarded mode labels explain non-interactive approval behavior.
+- Improved secondary-text contrast and simplified model selection.
+
+### Fixed
+- Agent events now reach the UI during the run instead of being buffered until exit.
+- Resume no longer passes unsupported color arguments or enables bypass in read-only modes.
+- Delayed sends retain their originating session after switching chats.
+- Compaction retains history on failure and cannot replace a changed conversation.
+- Clearing, rewinding, editing, retrying, and switching backend reset the corresponding
+  backend context. Retried attachments are preserved.
+- Transcript blocks use message/position identity, including repeated text blocks.
+- Sessions/settings are saved atomically. Diagnostics have bounded file retention.
+
 ## [1.9.5] — 2026-05-29
 
 ### Added

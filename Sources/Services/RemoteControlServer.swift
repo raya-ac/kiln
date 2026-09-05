@@ -36,16 +36,6 @@ final class RemoteControlServer: ObservableObject {
     private let authFailureLimit: Int = 10
     private let authLockoutDuration: TimeInterval = 60
 
-    /// Per-process shared secret used by the PreToolUse hook script to
-    /// authenticate its callbacks into `/api/hooks/pretooluse`. Regenerated on
-    /// every launch — not persisted, not exposed to the user. The hook script
-    /// receives it via the `KILN_HOOK_SECRET` env var at spawn time.
-    let hookSecret: String = {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
-        return bytes.map { String(format: "%02x", $0) }.joined()
-    }()
-
     private var listener: NWListener?
     nonisolated private let queue = DispatchQueue(label: "kiln.remote", qos: .userInitiated)
     private weak var store: AppStore?
@@ -150,13 +140,7 @@ final class RemoteControlServer: ObservableObject {
         // The PreToolUse hook endpoint authenticates with its own per-process
         // shared secret (X-Kiln-Hook-Secret) — the bearer token is for humans
         // on the remote UI, not for hook callbacks spawned by the local CLI.
-        if req.path == "/api/hooks/pretooluse" {
-            let provided = req.headers["x-kiln-hook-secret"] ?? ""
-            if !Self.constantTimeEq(provided, hookSecret) {
-                return .json(["error": "unauthorized"], status: 401)
-            }
-            return await handlePreToolUseHook(req)
-        }
+
 
         // Auth check (skip for root HTML so browsers can load the page and prompt)
         let needsAuth = !token.isEmpty && !req.path.hasPrefix("/static") && req.path != "/"
@@ -355,7 +339,7 @@ final class RemoteControlServer: ObservableObject {
             let workDir = (body["workDir"] as? String) ?? store.settings.defaultWorkDir
             let kindStr = (body["kind"] as? String) ?? "code"
             let kind: SessionKind = (kindStr == "chat") ? .chat : .code
-            let model = (body["model"] as? String).flatMap { ClaudeModel(rawValue: $0) }
+            let model = (body["model"] as? String).flatMap { AgentModel(rawValue: $0) }
             store.createSession(workDir: workDir, model: model, kind: kind)
             return .json([
                 "status": "created",
@@ -442,7 +426,7 @@ final class RemoteControlServer: ObservableObject {
         case ("POST", "/api/model"):
             guard let body = req.jsonBody,
                   let name = body["model"] as? String,
-                  let m = ClaudeModel(rawValue: name)
+                  let m = AgentModel(rawValue: name)
             else { return .json(["error": "invalid model"], status: 400) }
             store.setModel(m)
             return .json(["status": "ok"])
@@ -490,58 +474,6 @@ final class RemoteControlServer: ObservableObject {
         default:
             return .json(["error": "not found", "path": req.path], status: 404)
         }
-    }
-
-    // MARK: - PreToolUse hook handler
-
-    /// Handles the POST from `hook-pretooluse.sh`. The CC payload includes
-    /// `tool_name`, `tool_input`, and `session_id` (the CLI-side ID). We map
-    /// the CLI session back to our internal kiln session, enqueue a
-    /// `PendingApproval`, and block on the user's decision via a continuation.
-    ///
-    /// Returns `{ permissionDecision: "approve" | "deny", reason: "..." }`.
-    /// Fail-closed: malformed bodies or missing session mapping → deny.
-    @MainActor
-    private func handlePreToolUseHook(_ req: HTTPRequest) async -> HTTPResponse {
-        guard let store = store else {
-            return .json(["permissionDecision": "deny", "reason": "Kiln not ready"], status: 200)
-        }
-        guard let body = req.jsonBody else {
-            return .json(["permissionDecision": "deny", "reason": "Malformed hook payload"], status: 200)
-        }
-        let toolName = (body["tool_name"] as? String) ?? "unknown"
-        let toolInput = body["tool_input"] ?? [:]
-        let cliSessionId = (body["session_id"] as? String) ?? ""
-        let kilnId = store.claude.kilnSession(forCLI: cliSessionId)
-
-        // Pretty-print tool_input for the approval dialog.
-        let inputJSON: String = {
-            if let data = try? JSONSerialization.data(
-                withJSONObject: toolInput,
-                options: [.prettyPrinted, .sortedKeys]
-            ), let s = String(data: data, encoding: .utf8) {
-                return s
-            }
-            return "\(toolInput)"
-        }()
-
-        let approval = PendingApproval(
-            id: UUID().uuidString,
-            kilnSessionId: kilnId,
-            cliSessionId: cliSessionId,
-            toolName: toolName,
-            toolInputJSON: inputJSON,
-            createdAt: Date()
-        )
-
-        let decision = await store.awaitApproval(approval)
-        var payload: [String: Any] = [
-            "permissionDecision": decision.approve ? "approve" : "deny",
-        ]
-        if let reason = decision.reason, !reason.isEmpty {
-            payload["reason"] = reason
-        }
-        return .json(payload)
     }
 
     /// Reads the persistent auto-generated PSK from `~/.kiln/psk`, creating
@@ -628,7 +560,7 @@ final class RemoteControlServer: ObservableObject {
                 "themeMode": store.settings.themeMode.rawValue,
                 "accentHex": store.settings.accentHex,
             ],
-            "models": ClaudeModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0] },
+            "models": AgentModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0, "efforts": $0.reasoningEfforts] },
         ]
     }
 
@@ -1045,7 +977,6 @@ final class RemoteControlServer: ObservableObject {
       .pill-divider { width: 1px; background: var(--border); margin: 4px 2px; }
       .pill.model { font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700; }
       .pill.model.selected { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-      .pill.model.selected.opus { background: var(--amber); border-color: var(--amber); }
       .context-info { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 10px; font-family: ui-monospace, monospace; color: var(--text-tertiary); padding-right: 4px; white-space: nowrap; }
 
       .attach-chips { display: flex; gap: 6px; padding: 6px 12px; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); }
@@ -1442,11 +1373,9 @@ final class RemoteControlServer: ObservableObject {
       const pills = [];
       if (!isChat) {
         pills.push(`<button class="pill active ${tb.sessionMode === 'plan' ? 'plan' : ''}" data-action="mode">${tb.sessionMode === 'plan' ? '📋 plan' : '🔨 build'}</button>`);
-        const permLabel = { bypass: '🔓 bypass', ask: '❓ ask', deny: '🚫 deny' }[tb.permissionMode] || tb.permissionMode;
+        const permLabel = { bypass: '🔓 bypass', ask: 'guarded', deny: 'read-only' }[tb.permissionMode] || tb.permissionMode;
         const permCls = tb.permissionMode === 'ask' ? 'ask' : (tb.permissionMode === 'deny' ? 'deny' : '');
         pills.push(`<button class="pill active ${permCls}" data-action="perm">${permLabel}</button>`);
-        const turns = tb.maxTurns === null || tb.maxTurns === undefined ? '∞ turns' : (tb.maxTurns + ' turns');
-        pills.push(`<button class="pill ${tb.maxTurns != null ? 'active' : ''}" data-action="turns">↺ ${turns}</button>`);
       }
       pills.push(`<button class="pill ${tb.thinkingEnabled ? 'active think' : ''}" data-action="think">🧠 ${tb.thinkingEnabled ? 'think' : 'no think'}</button>`);
       if (tb.thinkingEnabled) {
@@ -1457,10 +1386,9 @@ final class RemoteControlServer: ObservableObject {
       // Models
       for (const m of state.models) {
         const sel = s.model === m.id;
-        const isOpus = m.id.includes('opus');
-        pills.push(`<button class="pill model ${sel ? 'selected' : ''} ${isOpus ? 'opus' : ''}" data-model="${m.id}">✦ ${m.label}</button>`);
+        pills.push(`<button class="pill model ${sel ? 'selected' : ''}" data-model="${escHTML(m.id)}">${escHTML(m.label)}</button>`);
       }
-      const ctxWindow = state.toolbar.extendedContext ? 1_000_000 : 200_000;
+      const ctxWindow = state.models.find(m => m.id === s.model)?.contextWindow || 272000;
       const totalTokens = (state.usage.inputTokens || 0) + (state.usage.outputTokens || 0);
       const pct = Math.min(100, (totalTokens / ctxWindow * 100));
       const ctxText = totalTokens > 0 ? `${formatTokens(totalTokens)}/${formatTokens(ctxWindow)} · $${(state.usage.totalCost || 0).toFixed(2)}` : '';

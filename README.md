@@ -4,7 +4,7 @@
 
 <h1 align="center">Kiln</h1>
 
-<p align="center">A native Mac app for agent CLIs like <a href="https://claude.com/claude-code">Claude Code</a> and <a href="https://developers.openai.com/codex/cli">Codex</a>.</p>
+<p align="center">A native Mac app for agent CLIs like <a href="https://developers.openai.com/codex/cli">Codex</a> and <a href="https://opencode.ai/docs/cli/">OpenCode</a>.</p>
 
 <p align="center">
   <a href="https://github.com/raya-ac/kiln/actions/workflows/ci.yml"><img src="https://github.com/raya-ac/kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Swift-6.0-orange?logo=swift&logoColor=white" alt="Swift 6.0">
 </p>
 
-Kiln runs agent CLIs as a proper desktop app instead of another terminal tab. Sessions live in a sidebar, approvals pop up as real dialogs, and the whole thing feels like the rest of your Mac. Built in SwiftUI. macOS 14 or later, Apple Silicon or Intel.
+Kiln runs agent CLIs as a proper desktop app instead of another terminal tab. Sessions live in a sidebar, tool activity streams into the transcript, and model selection stays close to the conversation. Built in SwiftUI. macOS 14 or later, Apple Silicon or Intel.
 
 ## Why
 
@@ -33,10 +33,7 @@ It's still early. I use it every day; you might want to wait.
   and "Ask About This File" right from the context menu.
 - Workdir activity chip above the composer — shows what the active agent's tools
   touched since HEAD, click a row for the diff. Event-driven, no polling.
-- Claude sessions keep working when you move their workdir — the underlying
-  CLI conversation file is migrated into the new project dir so context
-  carries across the move. Codex sessions currently start fresh after a
-  workdir change.
+- Changing workdir starts a fresh backend session and carries recent visible context forward.
 - ~60 local slash commands for git, repo inspection, clipboard/export,
   and quick session ops — typed right in the composer.
 - Cmd+Opt+1..9 to jump to the Nth visible session in the current tab.
@@ -44,9 +41,32 @@ It's still early. I use it every day; you might want to wait.
   Chinese, French, Spanish, Japanese, Italian, Portuguese, Russian,
   Korean, Dutch, Hindi, Arabic, Polish, Turkish, Swedish.
 - Per-session Cloudflare tunnels for remote control from your phone.
-- Real approval dialogs for Claude sessions instead of terminal prompts.
+- Guarded and read-only runs. Interactive approval requests are blocked in CLI JSON mode; bypass is an explicit choice.
 - Dock icon that live-tints to your accent color and follows dark mode.
 - Sparkle auto-updates.
+
+## Models and Backends
+
+The searchable model picker has Codex, Older models, and OpenCode groups.
+Codex models come from the installed CLI's model cache, with a small fallback
+catalog when the cache is missing. Refresh the picker after updating Codex.
+Older OpenAI models remain selectable; account availability is determined by
+the backend. OpenCode models load on selecting its tab and retain provider/model IDs.
+Model availability in a catalog does not imply that credentials are configured.
+
+Sign in using `codex login` or `opencode auth login`. Each backend owns its
+credentials and session storage. Kiln keeps separate resume mappings.
+OpenCode runs use `--pure` (external plugins disabled), disable automatic
+sharing, and apply the selected permission mode without modifying your configuration.
+
+Chat displays recent messages first, with Load earlier for history, Find, Follow
+output, and Jump to latest. Code blocks have copy buttons. Run logs can be
+filtered to issues or searched and copied. Reasoning panels show summaries
+provided by the backend.
+
+Conversations created by removed backends are retained and migrate to the default
+model. Session edits, clear, rewind, and retry reset backend context. Compaction
+only replaces a conversation after successful summarization.
 
 ## Running it
 
@@ -62,8 +82,8 @@ open .build/release/Kiln
 That gets you the raw binary. To produce a real `Kiln.app` bundle (the kind Finder recognises, with auto-updates wired up):
 
 ```bash
-./scripts/make-app-bundle.sh 1.9.1 arm64      # Apple Silicon
-./scripts/make-app-bundle.sh 1.9.1 x86_64     # Intel
+./scripts/make-app-bundle.sh 1.10.0 arm64      # Apple Silicon
+./scripts/make-app-bundle.sh 1.10.0 x86_64     # Intel
 open dist/arm64/Kiln.app
 ```
 
@@ -71,7 +91,7 @@ Either works fine for trying it out.
 
 ## Releases & auto-updates
 
-Push a tag like `v1.9.1` and GitHub Actions will:
+Push a tag like `v1.10.0` and GitHub Actions will:
 
 1. Build separate Apple Silicon and Intel `.app` bundles.
 2. Code-sign and notarise them (if you've added the Apple secrets).
@@ -118,7 +138,7 @@ For Apple code-signing and notarisation (optional — leave blank and the workfl
 Sources/
   App/          entry point, AppDelegate
   Views/        SwiftUI views — sidebar, chat, settings
-  Services/     AppStore, Claude/Codex backends, remote control, tunnels, updater
+  Services/     AppStore, shared agent runner, Codex/OpenCode protocols, remote control, tunnels, updater
   Models/       domain types
 scripts/        make-app-bundle.sh + entitlements
 .github/        CI + release workflows
@@ -131,7 +151,7 @@ Common commands are wrapped in a `Makefile`:
 ```bash
 make           # lists everything
 make run       # debug build + open the binary
-make bundle VERSION=1.9.1 ARCH=arm64
+make bundle VERSION=1.10.0 ARCH=arm64
 make lint      # swift-format --lint
 make format    # swift-format --in-place
 make logo      # re-render the brand mark

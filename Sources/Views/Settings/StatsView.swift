@@ -216,7 +216,7 @@ struct KilnStats {
         s.streakDays = computeStreak(activeDays: activeDaySet, calendar: cal)
 
         // Model usage
-        var modelCounts: [ClaudeModel: Int] = [:]
+        var modelCounts: [AgentModel: Int] = [:]
         for session in sessions {
             modelCounts[session.model, default: 0] += 1
         }
@@ -249,7 +249,7 @@ struct KilnStats {
 }
 
 struct ModelUsageRowData: Equatable {
-    let model: ClaudeModel
+    let model: AgentModel
     let count: Int
 }
 
@@ -385,7 +385,7 @@ private struct MiniStat: View {
 }
 
 private struct ModelUsageRow: View {
-    let model: ClaudeModel
+    let model: AgentModel
     let count: Int
     let total: Int
 

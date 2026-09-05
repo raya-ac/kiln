@@ -6,7 +6,7 @@ import Foundation
 /// `.kiln/` folder. Applies on top of the global settings for that session.
 /// None of the fields are required.
 struct WorkspaceConfig: Codable, Sendable {
-    var model: String?            // e.g. "claude-sonnet-4-6"
+    var model: String?            // e.g. "gpt-6-astra"
     var systemPrompt: String?     // prepended to global system prompt
     var sessionMode: String?      // "build" | "plan"
     var permissionMode: String?   // "bypass" | "ask" | "deny"

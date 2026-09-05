@@ -24,7 +24,7 @@ enum Persistence {
 
     static func saveSettings(_ settings: KilnSettings) {
         guard let data = try? JSONEncoder().encode(settings) else { return }
-        try? data.write(to: URL(fileURLWithPath: settingsPath))
+        try? data.write(to: URL(fileURLWithPath: settingsPath), options: .atomic)
     }
 
     // MARK: - Sessions
@@ -48,7 +48,7 @@ enum Persistence {
         let data = SessionData(from: session)
         guard let json = try? JSONEncoder().encode(data) else { return }
         let path = (sessionsDir as NSString).appendingPathComponent("\(session.id).json")
-        try? json.write(to: URL(fileURLWithPath: path))
+        try? json.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
     static func deleteSession(_ id: String) {
@@ -162,7 +162,7 @@ struct SessionData: Codable {
             id: id,
             workDir: workDir,
             name: name,
-            model: ClaudeModel(rawValue: model) ?? .sonnet46,
+            model: AgentModel(rawValue: model) ?? .defaultModel,
             isPinned: isPinned,
             group: group,
             forkedFrom: forkedFrom,

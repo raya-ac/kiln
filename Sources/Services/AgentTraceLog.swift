@@ -56,6 +56,13 @@ final class AgentTraceLog: @unchecked Sendable {
                     at: logURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
+                // Bound diagnostic retention without blocking the UI thread.
+                let size = (try? FileManager.default.attributesOfItem(atPath: logURL.path)[.size] as? NSNumber)?.intValue ?? 0
+                if size > 5 * 1024 * 1024 {
+                    let previous = logURL.appendingPathExtension("1")
+                    if FileManager.default.fileExists(atPath: previous.path) { try FileManager.default.removeItem(at: previous) }
+                    try FileManager.default.moveItem(at: logURL, to: previous)
+                }
                 let data = try encoder.encode(record)
                 let line = data + Data([0x0A])
                 if FileManager.default.fileExists(atPath: logURL.path) {
@@ -65,6 +72,7 @@ final class AgentTraceLog: @unchecked Sendable {
                     try handle.close()
                 } else {
                     try line.write(to: logURL, options: [.atomic])
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logURL.path)
                 }
             } catch {
                 // Logging must never make the app less stable.

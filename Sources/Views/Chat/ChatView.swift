@@ -8,7 +8,6 @@ struct ChatView: View {
     @State private var showInstructionsEditor = false
     @State private var findQuery: String = ""
     @State private var findMatchIndex: Int = 0
-    @State private var lastStreamScrollAt: Date = .distantPast
     /// Message id to scroll into view — set by the find bar, cleared after
     /// ScrollViewReader proxy.scrollTo runs.
     @State private var scrollToMessageId: String?
@@ -34,8 +33,8 @@ struct ChatView: View {
 
     private var disclaimerURL: URL? {
         switch store.activeSession?.model.provider {
-        case .claude:
-            return URL(string: "https://support.claude.com/en/articles/8525154-claude-is-providing-incorrect-or-misleading-responses-what-s-going-on")
+        case .opencode:
+            return URL(string: "https://opencode.ai/docs/")
         case .codex:
             return URL(string: "https://help.openai.com/en/articles/8313428-chatgpt-accuracy-and-limitations")
         case .none:
@@ -127,43 +126,11 @@ struct ChatView: View {
 
                     // Click model pill to switch mid-session. Current model
                     // gets a checkmark; others are one-click swaps.
-                    Menu {
-                        ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
-                            Section(group.provider.label) {
-                                ForEach(group.models) { m in
-                                    Button {
-                                        store.setModel(m)
-                                    } label: {
-                                        if m == session.model {
-                                            Label(m.label + " — " + m.fullId, systemImage: "checkmark")
-                                        } else {
-                                            Text(m.label + " — " + m.fullId)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            ModelBrandIcon(brand: session.model.brand, size: 10)
-                            Text(session.model.providerDisplayName)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Color.kilnTextSecondary)
-                            Text(session.model.shortLabel)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 7, weight: .bold))
-                        }
-                        .foregroundStyle(session.model.tint)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(session.model.tint.opacity(0.14))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Switch model for this session")
+                    ModelPickerButton(selection: Binding(
+                        get: { session.model },
+                        set: { store.setModel($0) }
+                    ))
+                    .disabled(store.isBusy)
 
                     if session.model.supportsOpenAIFastMode {
                         Button {
@@ -229,106 +196,8 @@ struct ChatView: View {
                 )
             }
 
-            // Messages
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Keep the transcript mounted while scrolling. SwiftUI's
-                    // lazy recycling is brittle with selectable Markdown and
-                    // nested disclosure rows; the crash shows up while older
-                    // messages are rehydrated during scroll.
-                    VStack(alignment: .leading, spacing: 0) {
-                        if let session = store.activeSession {
-                            // Disclaimer at top of every chat
-                            HStack(spacing: 6) {
-                                Image(systemName: "info.circle")
-                                    .font(.system(size: 10))
-                                Text(store.settings.language.ui.disclaimer)
-                                    .font(.system(size: 11))
-                                if let disclaimerURL {
-                                    Link(destination: disclaimerURL) {
-                                        Text(store.settings.language.ui.learnMore)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(Color.kilnAccent)
-                                    }
-                                }
-                            }
-                            .foregroundStyle(Color.kilnTextTertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-
-                            ForEach(session.messages) { msg in
-                                MessageRow(message: msg)
-                                    .id(msg.id)
-                            }
-                        }
-
-                        // Live assistant response (wraps thinking + tools + streaming in one container)
-                        // Only show on the session that's actually generating — otherwise
-                        // switching to a different session while one is streaming would
-                        // make the stream appear in the wrong chat.
-                        let isActiveGenerating = store.generatingSessionId == store.activeSessionId
-                        if isActiveGenerating && (store.isBusy || !store.streamingText.isEmpty || !store.activeToolCalls.isEmpty || !store.thinkingText.isEmpty) {
-                            LiveAssistantRow()
-                                .environmentObject(store)
-                        }
-
-                        // Error
-                        if let error = store.lastError {
-                            ErrorRow(error: error)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 8)
-                        }
-
-                        // Resume banner — shown when a prior send was
-                        // interrupted (process crash, app crash, force-quit).
-                        // Cleared once the user retries or dismisses.
-                        if let s = store.activeSession,
-                           s.wasInterrupted,
-                           !store.isSessionBusy(s.id),
-                           s.messages.last?.role == .user {
-                            ResumeInterruptedBanner()
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 8)
-                        }
-
-                        Color.clear.frame(height: 1).id("bottom")
-                    }
-                    .padding(.vertical, 8)
-                }
-                // During token streaming we scroll WITHOUT animation — the
-                // per-token onChange fires 30+ times/sec and stacking
-                // animations caused visible stutter. Message-count changes
-                // (new message append) still animate since they're discrete.
-                .onChange(of: store.streamingText) {
-                    guard store.settings.autoScroll else { return }
-                    // SwiftUI coalesces @Published updates at its refresh
-                    // rate, so raw scrollTo here rides that cadence without
-                    // animation stacking. Manual throttling made it look
-                    // chunky.
-                    proxy.scrollTo("bottom")
-                }
-                .onChange(of: store.activeSession?.messages.count) {
-                    guard store.settings.autoScroll else { return }
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo("bottom")
-                    }
-                }
-                .onChange(of: store.activeToolCalls.count) {
-                    guard store.settings.autoScroll else { return }
-                    proxy.scrollTo("bottom")
-                }
-                // Jump target set by the find bar.
-                .onChange(of: scrollToMessageId) { _, new in
-                    if let id = new {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            scrollToMessageId = nil
-                        }
-                    }
-                }
-            }
+            ChatTranscriptView(jumpTarget: $scrollToMessageId)
+                .id(store.activeSessionId)
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)
 
@@ -391,420 +260,6 @@ struct ChatView: View {
     }
 }
 
-// MARK: - Message Row
-
-struct MessageRow: View {
-    let message: ChatMessage
-    @EnvironmentObject var store: AppStore
-    @State private var hovering = false
-
-    private var isUser: Bool { message.role == .user }
-
-    private var estimatedTokens: Int {
-        let chars = message.blocks.map { block -> Int in
-            switch block {
-            case .text(let t): return t.count
-            case .thinking(let t): return t.count
-            case .trace(let entries): return entries.reduce(0) { $0 + $1.title.count + $1.detail.count }
-            case .toolUse(let b): return b.input.count + (b.result?.count ?? 0)
-            case .toolResult(let r): return r.content.count
-            default: return 0
-            }
-        }.reduce(0, +)
-        return max(1, chars / 4)
-    }
-
-    /// Gradient: cool (few tokens) → warm (many). Thresholds are intentionally
-    /// crude; the absolute scale doesn't matter, the relative heat does.
-    private var heatmapColor: Color {
-        let t = Double(estimatedTokens)
-        let ratio = min(1.0, log(max(1, t)) / log(10_000))  // 1 token → 0, 10k → 1
-        // Interpolate from cool blue → orange accent
-        let r = 0.2 + ratio * 0.77    // 0.2 → 0.97
-        let g = 0.4 - ratio * 0.15    // 0.4 → 0.25
-        let b = 0.8 - ratio * 0.7     // 0.8 → 0.1
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: 0.9)
-    }
-
-    /// Pull this message's plain-text body back into the composer and
-    /// truncate the session from here onward, so a resend replays from
-    /// this point. Classic chat "edit & resend" behavior.
-    private func requestEdit() {
-        guard isUser, let sid = store.activeSessionId else { return }
-        let text = message.blocks.compactMap { block -> String? in
-            if case .text(let t) = block { return t }
-            return nil
-        }.joined(separator: "\n\n")
-        store.pendingComposerPrefill = text
-        store.deleteMessageAndAfter(sessionId: sid, messageId: message.id)
-    }
-
-    /// User label — custom display name if set, otherwise the localized "You".
-    private var userLabel: String {
-        let custom = store.settings.userDisplayName.trimmingCharacters(in: .whitespaces)
-        return custom.isEmpty ? store.settings.language.ui.you : custom
-    }
-
-    private var shouldShowTimestamp: Bool {
-        switch store.settings.showTimestamps {
-        case .never: return false
-        case .always: return true
-        case .hover: return hovering
-        }
-    }
-
-    private var assistantName: String {
-        store.activeSession?.model.assistantName ?? "Assistant"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                // Avatar — can be hidden via settings
-                if store.settings.showAvatars {
-                    UserClaudeAvatar(
-                        isUser: isUser,
-                        brand: store.activeSession?.model.brand ?? .claude
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    // Role label
-                    HStack(spacing: 6) {
-                        Text(isUser ? userLabel : assistantName)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(isUser ? Color.kilnTextSecondary : Color.kilnAccent)
-
-                        if message.isPinned {
-                            Image(systemName: "pin.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color.kilnAccent)
-                                .help("Pinned")
-                        }
-
-                        // Timestamp display — respects settings (never/hover/always)
-                        if shouldShowTimestamp {
-                            Text(message.timestamp.formatted(.dateTime.hour().minute()))
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(Color.kilnTextTertiary)
-                        }
-
-                        Spacer()
-
-                        // Action buttons on hover
-                        if hovering {
-                            // Copy
-                            Button {
-                                let text = message.blocks.compactMap { block -> String? in
-                                    switch block {
-                                    case .text(let t): return t
-                                    case .thinking(let t): return t
-                                    case .trace(let entries): return entries.map { "[\($0.level.rawValue)] \($0.phase): \($0.title)\n\($0.detail)" }.joined(separator: "\n")
-                                    case .suggestions(let s): return s.map(\.label).joined(separator: " · ")
-                                    default: return nil
-                                    }
-                                }.joined(separator: "\n\n")
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(text, forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                                    .frame(width: 24, height: 20)
-                                    .background(Color.kilnSurfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.plain)
-                            .help(store.settings.language.ui.copy)
-
-                            // Fork
-                            // Save clipping — only assistant messages
-                            if message.role == .assistant {
-                                Button {
-                                    let text = message.blocks.compactMap { block -> String? in
-                                        if case .text(let t) = block { return t }
-                                        return nil
-                                    }.joined(separator: "\n\n")
-                                    guard !text.isEmpty else { return }
-                                    let title = String(text.prefix(50).split(separator: "\n").first ?? "Clipping")
-                                    ClippingStore.shared.add(Clipping(
-                                        title: String(title),
-                                        body: text,
-                                        sourceSessionId: store.activeSessionId,
-                                        sourceMessageId: message.id
-                                    ))
-                                } label: {
-                                    Image(systemName: "bookmark")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(Color.kilnTextTertiary)
-                                        .frame(width: 24, height: 20)
-                                        .background(Color.kilnSurfaceElevated)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Save as clipping")
-                            }
-
-                            // Quick Actions — assistant messages only. Pre-fills
-                            // the composer with a targeted follow-up prompt.
-                            if message.role == .assistant {
-                                Menu {
-                                    Button("Explain further") {
-                                        store.pendingComposerPrefill = "Explain that in more depth — what are the underlying mechanics?"
-                                    }
-                                    Button("Make it shorter") {
-                                        store.pendingComposerPrefill = "Give me a much tighter version of that answer."
-                                    }
-                                    Button("Give an example") {
-                                        store.pendingComposerPrefill = "Show me a concrete example of that."
-                                    }
-                                    Divider()
-                                    Button("Write tests for this") {
-                                        store.pendingComposerPrefill = "Write tests covering the code you just produced."
-                                    }
-                                    Button("Refactor for clarity") {
-                                        store.pendingComposerPrefill = "Refactor that for clarity — preserve behavior, rename anything unclear, and explain what changed."
-                                    }
-                                    Button("Add error handling") {
-                                        store.pendingComposerPrefill = "Add proper error handling to that code — only at system boundaries, no defensive noise."
-                                    }
-                                    Divider()
-                                    Button("Find edge cases") {
-                                        store.pendingComposerPrefill = "What edge cases might break that? List them concretely."
-                                    }
-                                    Button("Critique this") {
-                                        store.pendingComposerPrefill = "Critique that response — what's weak, what did you miss?"
-                                    }
-                                } label: {
-                                    Image(systemName: "sparkles")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(Color.kilnTextTertiary)
-                                        .frame(width: 24, height: 20)
-                                        .background(Color.kilnSurfaceElevated)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                                .menuStyle(.borderlessButton)
-                                .menuIndicator(.hidden)
-                                .fixedSize()
-                                .help("Quick actions")
-                            }
-
-                            // Pin / unpin
-                            Button {
-                                if let sessionId = store.activeSessionId {
-                                    store.togglePinMessage(sessionId: sessionId, messageId: message.id)
-                                }
-                            } label: {
-                                Image(systemName: message.isPinned ? "pin.fill" : "pin")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(message.isPinned ? Color.kilnAccent : Color.kilnTextTertiary)
-                                    .frame(width: 24, height: 20)
-                                    .background(Color.kilnSurfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.plain)
-                            .help(message.isPinned ? "Unpin" : "Pin")
-
-                            Button {
-                                if let sessionId = store.activeSessionId {
-                                    store.forkSession(fromSessionId: sessionId, atMessageId: message.id)
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.triangle.branch")
-                                        .font(.system(size: 9, weight: .semibold))
-                                    Text(store.settings.language.ui.fork)
-                                        .font(.system(size: 10, weight: .medium))
-                                }
-                                .foregroundStyle(Color.kilnTextTertiary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.kilnSurfaceElevated)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.plain)
-
-                            // Edit & resend (user messages only)
-                            if isUser {
-                                Button { requestEdit() } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(Color.kilnTextTertiary)
-                                        .frame(width: 24, height: 20)
-                                        .background(Color.kilnSurfaceElevated)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Edit & resend")
-                            }
-
-                            // Delete (with rewind to this point)
-                            Menu {
-                                Button("Delete this message only") {
-                                    if let sid = store.activeSessionId {
-                                        store.deleteMessage(sessionId: sid, messageId: message.id)
-                                    }
-                                }
-                                Button("Delete from here onwards", role: .destructive) {
-                                    if let sid = store.activeSessionId {
-                                        store.deleteMessageAndAfter(sessionId: sid, messageId: message.id)
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                                    .frame(width: 24, height: 20)
-                                    .background(Color.kilnSurfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            .menuStyle(.borderlessButton)
-                            .menuIndicator(.hidden)
-                            .fixedSize()
-                            .help("Delete…")
-                        }
-                    }
-
-                    ForEach(message.blocks) { block in
-                        switch block {
-                        case .text(let text):
-                            Markdown(text)
-                                .markdownTheme(.kilnScaled(store.settings.fontScale.factor))
-                                .textSelection(.enabled)
-
-                            // If the assistant embedded a unified diff in a
-                            // ```diff / ```patch block, surface an Apply bar
-                            // beneath the markdown. Only for assistant msgs.
-                            if message.role == .assistant {
-                                ForEach(DetectedPatch.detect(in: text)) { patch in
-                                    PatchApplyBar(patch: patch)
-                                }
-                            }
-
-                        case .thinking(let text):
-                            ThinkingRow(text: text)
-
-                        case .trace(let entries):
-                            AgentTraceRow(entries: entries)
-
-                        case .toolUse(let tool):
-                            ToolCallCard(tool: tool)
-
-                        case .toolResult:
-                            EmptyView()
-
-                        case .suggestions(let prompts):
-                            SuggestionChips(prompts: prompts)
-
-                        case .attachment(let a):
-                            AttachmentPreview(attachment: a)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12 * store.settings.density.padding)
-        }
-        .background(isUser ? Color.clear : Color.kilnSurface.opacity(0.4))
-        .overlay(alignment: .leading) {
-            if message.isPinned {
-                Rectangle()
-                    .fill(Color.kilnAccent)
-                    .frame(width: 3)
-            } else if store.settings.showTokenHeatmap {
-                // Token heatmap bar — warmer = more tokens. Rough estimate:
-                // one token per ~4 characters of message text.
-                Rectangle()
-                    .fill(heatmapColor)
-                    .frame(width: 3)
-                    .help("~\(estimatedTokens) tokens")
-            }
-        }
-        .onHover { hovering = $0 }
-    }
-}
-
-// MARK: - Markdown Theme
-
-extension MarkdownUI.Theme {
-    @MainActor static let kiln: Theme = kilnScaled(1.0)
-
-    /// Build a Markdown theme with font sizes scaled by `factor`. Lets the
-    /// user's font-scale setting actually affect chat message text.
-    @MainActor static func kilnScaled(_ factor: CGFloat) -> Theme {
-        return Theme()
-            .text {
-                ForegroundColor(Color.kilnText)
-                FontSize(13 * factor)
-            }
-            .code {
-                FontFamilyVariant(.monospaced)
-                FontSize(12 * factor)
-                ForegroundColor(Color.kilnAccent)
-            }
-            .codeBlock { configuration in
-                configuration.label
-                    .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
-                        FontSize(12 * factor)
-                        ForegroundColor(Color.kilnText)
-                    }
-                    .padding(12)
-                    .background(Color.kilnSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.kilnBorder, lineWidth: 1)
-                    )
-            }
-            .link {
-                ForegroundColor(Color.kilnAccent)
-            }
-            .heading1 { configuration in
-                configuration.label
-                    .markdownTextStyle {
-                        FontWeight(.bold)
-                        FontSize(20 * factor)
-                        ForegroundColor(Color.kilnText)
-                    }
-                    .markdownMargin(top: 16, bottom: 8)
-            }
-            .heading2 { configuration in
-                configuration.label
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(17 * factor)
-                        ForegroundColor(Color.kilnText)
-                    }
-                    .markdownMargin(top: 12, bottom: 6)
-            }
-            .heading3 { configuration in
-                configuration.label
-                    .markdownTextStyle {
-                        FontWeight(.semibold)
-                        FontSize(15 * factor)
-                        ForegroundColor(Color.kilnText)
-                    }
-                    .markdownMargin(top: 8, bottom: 4)
-            }
-            .paragraph { configuration in
-                configuration.label
-                    .markdownMargin(top: 0, bottom: 8)
-            }
-            .listItem { configuration in
-                configuration.label
-                    .markdownMargin(top: 2, bottom: 2)
-            }
-            .strong {
-                FontWeight(.semibold)
-            }
-            .emphasis {
-                FontStyle(.italic)
-            }
-    }
-}
-
 // MARK: - Live Assistant Row (unified streaming container)
 
 struct LiveAssistantRow: View {
@@ -815,7 +270,7 @@ struct LiveAssistantRow: View {
     }
 
     private var assistantBrand: ModelBrand {
-        store.activeSession?.model.brand ?? .claude
+        store.activeSession?.model.brand ?? .codex
     }
 
     var body: some View {
@@ -923,159 +378,6 @@ struct ThinkingRow: View {
                 expanded = !store.settings.thinkingCollapsedByDefault
                 didInit = true
             }
-        }
-    }
-}
-
-// MARK: - Agent Trace
-
-struct AgentTraceRow: View {
-    let entries: [AgentTraceEntry]
-    var live: Bool = false
-    @State private var expanded = false
-
-    private var visibleEntries: [AgentTraceEntry] {
-        expanded ? entries : Array(entries.suffix(5))
-    }
-
-    private var errorCount: Int {
-        entries.filter { $0.level == .error }.count
-    }
-
-    private var warningCount: Int {
-        entries.filter { $0.level == .warning }.count
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button { expanded.toggle() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                        .frame(width: 12)
-                    Image(systemName: live ? "waveform.path.ecg" : "list.bullet.rectangle")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(headerColor)
-                    Text("Codex log")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                    Text("\(entries.count)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                    if warningCount > 0 {
-                        TraceBadge(text: "\(warningCount) warn", color: Color.kilnWarning)
-                    }
-                    if errorCount > 0 {
-                        TraceBadge(text: "\(errorCount) err", color: Color.kilnError)
-                    }
-                    Spacer()
-                    if live {
-                        Text("live")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.kilnAccent)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-
-            if expanded || live {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(visibleEntries) { entry in
-                        AgentTraceEntryRow(entry: entry)
-                    }
-                }
-                .padding(.top, 8)
-            }
-        }
-        .padding(10)
-        .background(Color.kilnSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kilnBorderSubtle, lineWidth: 1))
-    }
-
-    private var headerColor: Color {
-        if errorCount > 0 { return Color.kilnError }
-        if warningCount > 0 { return Color.kilnWarning }
-        return live ? Color.kilnAccent : Color.kilnTextTertiary
-    }
-}
-
-private struct TraceBadge: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .foregroundStyle(color)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-    }
-}
-
-private struct AgentTraceEntryRow: View {
-    let entry: AgentTraceEntry
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(entry.phase)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(color)
-                    Text(entry.title)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(entry.timestamp.formatted(.dateTime.hour().minute().second()))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                }
-                if !entry.detail.isEmpty {
-                    Text(entry.detail)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                        .lineLimit(3)
-                        .textSelection(.enabled)
-                }
-                if !entry.metadata.isEmpty {
-                    Text(entry.metadata.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "  "))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Color.kilnTextTertiary.opacity(0.8))
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding(7)
-        .background(Color.kilnBg.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private var icon: String {
-        switch entry.level {
-        case .debug: "ladybug"
-        case .info: "info.circle"
-        case .success: "checkmark.circle"
-        case .warning: "exclamationmark.triangle"
-        case .error: "xmark.octagon"
-        }
-    }
-
-    private var color: Color {
-        switch entry.level {
-        case .debug: Color.kilnTextTertiary
-        case .info: Color.kilnAccent
-        case .success: Color.kilnSuccess
-        case .warning: Color.kilnWarning
-        case .error: Color.kilnError
         }
     }
 }
@@ -1204,11 +506,11 @@ struct ToolCallCard: View {
                     inputJSONView
                 }
 
-                // Inline image preview — if Claude wrote or edited an
+                // Inline image preview — if Codex wrote or edited an
                 // image file, show the result alongside the diff. Sniffs
                 // file_path from the input JSON; only loads on-demand
                 // once the tool has finished (to avoid thrashing disk
-                // while Claude is mid-write). Relative paths are resolved
+                // while Codex is mid-write). Relative paths are resolved
                 // against the active session's workDir — NSImage(contentsOfFile:)
                 // would otherwise use CWD and silently miss the file.
                 if tool.isDone,
@@ -1323,7 +625,7 @@ struct ToolCallCard: View {
     }
 
     /// Resolve a tool-supplied path against the active session's workdir.
-    /// Claude commonly passes relative paths (`"logo.png"`, `"src/foo.ts"`);
+    /// Codex commonly passes relative paths (`"logo.png"`, `"src/foo.ts"`);
     /// those need to be anchored to the session, not to Kiln's CWD.
     /// Absolute or tilde-prefixed paths are returned as-is (expanded).
     private func resolveToolPath(_ raw: String) -> String? {
@@ -1818,7 +1120,7 @@ struct AttachmentPreview: View {
 // MARK: - Session Instructions Editor
 //
 // Per-session system prompt override. Prepended to the global system prompt
-// when Claude runs. Useful for "in this session, always respond in Korean"
+// when Codex runs. Useful for "in this session, always respond in Korean"
 // or "treat every file as TypeScript" without touching global settings.
 
 struct SessionInstructionsEditor: View {
@@ -2145,44 +1447,14 @@ struct InSessionFindBar: View {
     }
 }
 
-// MARK: - Claude brand mark
+// MARK: - User / Codex Avatar
 //
-// Wraps the bundled Anthropic Claude starburst PNG as a template-rendered
-// Image so it tints with the current foreground color. The PNG lives at
-// Sources/App/Resources/ClaudeMark.png and is a white silhouette with an
-// alpha mask — set `.foregroundStyle(...)` at the call site to colour it.
-
-struct ClaudeMark: View {
-    var body: some View {
-        if let url = Bundle.module.url(forResource: "ClaudeMark", withExtension: "png"),
-           let img = NSImage(contentsOf: url) {
-            let templated: NSImage = {
-                let copy = img.copy() as! NSImage
-                copy.isTemplate = true
-                return copy
-            }()
-            Image(nsImage: templated)
-                .resizable()
-                .renderingMode(.template)
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-        } else {
-            // Resource missing — fall back so the UI doesn't blank out.
-            Image(systemName: "sparkle")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-        }
-    }
-}
-
-// MARK: - User / Claude Avatar
-//
-// 26pt circle rendered on every message row. Claude's side shows the
-// accent-tinted Claude starburst. The user's side shows a custom image
+// 26pt circle rendered on every message row. Codex's side shows the
+// accent-tinted Codex starburst. The user's side shows a custom image
 // when one is set (from AvatarStore), otherwise falls back to the
 // person.fill icon. Reacts live when the user picks a new avatar.
 
-struct UserClaudeAvatar: View {
+struct UserAssistantAvatar: View {
     let isUser: Bool
     let brand: ModelBrand
     @ObservedObject private var avatars: AvatarStore = .shared
@@ -2220,20 +1492,7 @@ struct AssistantAvatar: View {
                 .fill(Color.kilnAccentMuted)
                 .frame(width: 26, height: 26)
 
-            switch brand {
-            case .claude:
-                ClaudeMark()
-                    .foregroundStyle(Color.kilnAccent)
-                    .frame(width: 14, height: 14)
-            case .chatgpt:
-                OpenAIKnotMark()
-                    .foregroundStyle(Color.kilnAccent)
-                    .frame(width: 14, height: 14)
-            case .codex:
-                CodexMark()
-                    .foregroundStyle(Color.kilnAccent)
-                    .frame(width: 14, height: 14)
-            }
+            ModelBrandIcon(brand: brand, size: 16)
         }
     }
 }
@@ -2402,7 +1661,7 @@ struct BranchBadge: View {
 
 // MARK: - Inline image preview for Write/Edit tool calls
 
-/// Thumbnail-style preview of a file Claude just wrote. Reloads when
+/// Thumbnail-style preview of a file Codex just wrote. Reloads when
 /// `refreshKey` changes so repeated edits to the same path bust the
 /// NSImage cache. Capped at 240pt tall so a huge screenshot doesn't
 /// blow out the chat. Failures are silent — no point showing a

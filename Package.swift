@@ -27,13 +27,12 @@ let package = Package(
             // exclude it from SPM's resource handling.
             exclude: ["App/Resources/AppIcon.icns"],
             resources: [
+                .copy("App/Resources/brands"),
                 // Monaco editor host page + runtime. `vs/` is fetched by
                 // scripts/fetch-monaco.sh (or `make monaco`) and is not
                 // checked in — only .gitkeep lives under monaco/ by default.
                 .copy("App/Resources/editor"),
                 .copy("App/Resources/monaco"),
-                // Claude brand mark, used as the assistant-side chat avatar.
-                .copy("App/Resources/ClaudeMark.png"),
             ]
         ),
         .testTarget(

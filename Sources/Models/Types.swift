@@ -2,168 +2,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-// MARK: - Models
-
-enum ModelProvider: String, Sendable, Codable {
-    case claude
-    case codex
-
-    var assistantName: String {
-        switch self {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        }
-    }
-}
-
-enum ClaudeModel: String, CaseIterable, Identifiable, Sendable, Codable {
-    case opus47 = "claude-opus-4-7"
-    case sonnet46 = "claude-sonnet-4-6"
-    case haiku45 = "claude-haiku-4-5-20251001"
-    case gpt55 = "gpt-5.5"
-    case gpt54 = "gpt-5.4"
-    case gpt54Mini = "gpt-5.4-mini"
-    case gpt53Codex = "gpt-5.3-codex"
-    case gpt53CodexSpark = "gpt-5.3-codex-spark"
-    case gpt52 = "gpt-5.2"
-
-    var id: String { rawValue }
-
-    var provider: ModelProvider {
-        switch self {
-        case .opus47, .sonnet46, .haiku45: .claude
-        case .gpt55, .gpt54, .gpt54Mini, .gpt53Codex, .gpt53CodexSpark, .gpt52: .codex
-        }
-    }
-
-    var brand: ModelBrand {
-        switch self {
-        case .opus47, .sonnet46, .haiku45: .claude
-        case .gpt55, .gpt54, .gpt54Mini, .gpt52: .chatgpt
-        case .gpt53Codex, .gpt53CodexSpark: .codex
-        }
-    }
-
-    var supportsOpenAIFastMode: Bool {
-        self == .gpt54
-    }
-
-    /// Full CLI model ID (same as rawValue)
-    var fullId: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .opus47: "Opus 4.7"
-        case .sonnet46: "Sonnet 4.6"
-        case .haiku45: "Haiku 4.5"
-        case .gpt55: "GPT-5.5"
-        case .gpt54: "GPT-5.4"
-        case .gpt54Mini: "GPT-5.4 Mini"
-        case .gpt53Codex: "Codex"
-        case .gpt53CodexSpark: "Codex Spark"
-        case .gpt52: "GPT-5.2"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .opus47: "Opus"
-        case .sonnet46: "Sonnet"
-        case .haiku45: "Haiku"
-        case .gpt55: "5.5"
-        case .gpt54: "5.4"
-        case .gpt54Mini: "5.4 Mini"
-        case .gpt53Codex: "Codex"
-        case .gpt53CodexSpark: "Spark"
-        case .gpt52: "5.2"
-        }
-    }
-
-    var tier: String {
-        switch self {
-        case .opus47: "Flagship"
-        case .sonnet46: "Balanced"
-        case .haiku45: "Fast"
-        case .gpt55: "Frontier"
-        case .gpt54: "Frontier"
-        case .gpt54Mini: "Efficient"
-        case .gpt53Codex: "Coding"
-        case .gpt53CodexSpark: "Fast"
-        case .gpt52: "Balanced"
-        }
-    }
-
-    var assistantName: String { provider.assistantName }
-
-    /// Standard context window in tokens
-    var contextWindow: Int {
-        switch self {
-        case .opus47: 200_000
-        case .sonnet46: 200_000
-        case .haiku45: 200_000
-        case .gpt55: 272_000
-        case .gpt54: 272_000
-        case .gpt54Mini: 272_000
-        case .gpt53Codex: 272_000
-        case .gpt53CodexSpark: 128_000
-        case .gpt52: 272_000
-        }
-    }
-
-    /// Extended context (1M for Opus and Sonnet)
-    var extendedContextWindow: Int? {
-        switch self {
-        case .opus47, .sonnet46: 1_000_000
-        case .gpt55, .gpt54: 1_000_000
-        default: nil
-        }
-    }
-
-    var providerDisplayName: String {
-        brand == .chatgpt ? "ChatGPT" : provider.label
-    }
-
-    var tint: Color {
-        switch self {
-        case .opus47: Color(hex: 0xD97706)
-        case .sonnet46: Color(hex: 0xF97316)
-        case .haiku45: Color(hex: 0x71717A)
-        case .gpt55: Color(hex: 0x2563EB)
-        case .gpt54: Color(hex: 0x0EA5E9)
-        case .gpt54Mini: Color(hex: 0x38BDF8)
-        case .gpt53Codex: Color(hex: 0x10B981)
-        case .gpt53CodexSpark: Color(hex: 0x7C3AED)
-        case .gpt52: Color(hex: 0x14B8A6)
-        }
-    }
-
-    var supportsExtendedContext: Bool {
-        extendedContextWindow != nil
-    }
-
-    static var groupedByProvider: [(provider: ModelProvider, models: [ClaudeModel])] {
-        [
-            (.claude, allCases.filter { $0.provider == .claude }),
-            (.codex, allCases.filter { $0.provider == .codex }),
-        ]
-    }
-}
-
-extension ModelProvider {
-    var label: String {
-        switch self {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        }
-    }
-}
-
-enum ModelBrand: Sendable {
-    case claude
-    case chatgpt
-    case codex
-}
-
 // MARK: - Session Kind (Code vs Chat)
 
 enum SessionKind: String, CaseIterable, Identifiable, Sendable, Codable {
@@ -220,8 +58,8 @@ enum PermissionMode: String, CaseIterable, Identifiable, Sendable, Codable {
     var label: String {
         switch self {
         case .bypass: "Bypass"
-        case .ask: "Ask"
-        case .deny: "Deny"
+        case .ask: "Guarded"
+        case .deny: "Read-only"
         }
     }
 
@@ -236,56 +74,27 @@ enum PermissionMode: String, CaseIterable, Identifiable, Sendable, Codable {
     var description: String {
         switch self {
         case .bypass: "Skip all permission prompts"
-        case .ask: "Ask before risky operations"
-        case .deny: "Deny all tool use"
+        case .ask: "Workspace sandbox; operations needing interactive approval are blocked"
+        case .deny: "Read-only work; file changes are blocked"
         }
     }
 }
 
-/// Options passed to each Claude CLI invocation
+/// Options passed to each Codex CLI invocation
 struct SendOptions: Sendable {
     var mode: SessionMode = .build
-    var permissions: PermissionMode = .bypass
-    var extendedContext: Bool = false // 1M context for Opus
+    var permissions: PermissionMode = .ask
+    var extendedContext: Bool = false
     var maxTurns: Int? = nil       // --max-turns
     var systemPrompt: String? = nil // --system-prompt
-    var allowedTools: [String]? = nil // --allowedTools
     var chatMode: Bool = false     // disables all tools, pure chat
     var thinkingEnabled: Bool = false // prepend think keyword + pass effort
     var effortLevel: EffortLevel? = nil // --effort <level>
     var openAIFastMode: Bool = false
-    // PreToolUse hook target. Only used when permissions == .ask. The hook
-    // script reads both from env vars at invocation time and POSTs tool
-    // calls to http://127.0.0.1:<hookPort>/api/hooks/pretooluse with the
-    // shared secret in X-Kiln-Hook-Secret.
-    var hookPort: UInt16 = 8421
-    var hookSecret: String = ""
-}
-
-// MARK: - PreToolUse approvals
-
-/// A single pending tool-approval request surfaced by the PreToolUse
-/// hook. The approval sheet renders one of these; the user's decision
-/// resolves a `CheckedContinuation` held by the remote server so the
-/// spawned `claude` subprocess unblocks and either runs the tool or
-/// skips it.
-struct PendingApproval: Identifiable, Sendable, Equatable {
-    let id: String
-    let kilnSessionId: String?   // nil if we can't map CC session → Kiln session
-    let cliSessionId: String
-    let toolName: String
-    let toolInputJSON: String    // pretty-printed JSON of the tool input
-    let createdAt: Date
-}
-
-/// Result passed back to the hook endpoint after the user decides.
-struct HookDecision: Sendable {
-    let approve: Bool
-    let reason: String?
 }
 
 enum EffortLevel: String, CaseIterable, Identifiable, Sendable, Codable {
-    case low, medium, high, max
+    case low, medium, high, xhigh, max, ultra
 
     var id: String { rawValue }
     var label: String {
@@ -293,7 +102,9 @@ enum EffortLevel: String, CaseIterable, Identifiable, Sendable, Codable {
         case .low: "low"
         case .medium: "med"
         case .high: "high"
+        case .xhigh: "xhigh"
         case .max: "max"
+        case .ultra: "ultra"
         }
     }
     var cliValue: String { rawValue }
@@ -326,7 +137,7 @@ enum MessageRole: String, Sendable, Codable {
     case assistant
 }
 
-enum MessageBlock: Identifiable, Sendable {
+enum MessageBlock: Sendable {
     case text(String)
     case thinking(String)
     case trace([AgentTraceEntry])
@@ -339,26 +150,6 @@ enum MessageBlock: Identifiable, Sendable {
     /// A file/image the user attached. Rendered inline as a thumbnail card.
     case attachment(ComposerAttachment)
 
-    var id: String {
-        switch self {
-        case .text(let t): "text-\(stableIdentifier(for: t))"
-        case .thinking(let t): "think-\(stableIdentifier(for: t))"
-        case .trace(let entries): "trace-\(entries.map(\.id).joined(separator: "-"))"
-        case .toolUse(let b): b.id
-        case .toolResult(let b): b.toolUseId
-        case .suggestions(let s): "suggestions-\(s.map(\.id).joined())"
-        case .attachment(let a): "attachment-\(a.id)"
-        }
-    }
-
-    private func stableIdentifier(for value: String) -> String {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
-    }
 }
 
 struct SuggestionPrompt: Identifiable, Sendable, Hashable, Codable {
@@ -470,7 +261,7 @@ struct Session: Identifiable, Sendable {
     let id: String
     let workDir: String
     var name: String
-    var model: ClaudeModel
+    var model: AgentModel
     let createdAt: Date
     var messages: [ChatMessage]
     var isPinned: Bool
@@ -484,7 +275,7 @@ struct Session: Identifiable, Sendable {
     var sessionInstructions: String = ""
     /// Set true when a send starts; cleared on clean completion. If true on
     /// the next launch, we know the previous run was interrupted (app crash,
-    /// `claude` crash, force-quit) and can offer a retry.
+    /// `codex` crash, force-quit) and can offer a retry.
     var wasInterrupted: Bool = false
     /// Codex fast mode for ChatGPT-backed GPT-5.4 sessions. This maps to
     /// Codex's own fast service tier rather than changing models.
@@ -502,7 +293,7 @@ struct Session: Identifiable, Sendable {
     /// as a small dot next to the session name in the sidebar.
     var colorLabel: String? = nil
 
-    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: ClaudeModel = .gpt53Codex, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, workDir: String, name: String = "New Session", model: AgentModel = .defaultModel, isPinned: Bool = false, group: String? = nil, forkedFrom: String? = nil, kind: SessionKind = .code, readOnly: Bool = false, isArchived: Bool = false, sessionInstructions: String = "", tags: [String] = [], tunnelPort: Int? = nil, tunnelSub: String? = nil, colorLabel: String? = nil, openAIFastMode: Bool = false, createdAt: Date = .now) {
         self.id = id
         self.workDir = workDir
         self.name = name
@@ -588,10 +379,10 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable, Codable {
         }
     }
 
-    // Claude system prompt instruction. For languages without a full UI
-    // translation we still steer Claude's *output* language — the chat is
+    // Codex system prompt instruction. For languages without a full UI
+    // translation we still steer Codex's *output* language — the chat is
     // where localisation matters most anyway.
-    var claudeInstruction: String {
+    var assistantInstruction: String {
         switch self {
         case .en: return ""
         case .de: return "IMPORTANT: You MUST respond in German (Deutsch). All your responses should be in German."
@@ -1298,7 +1089,7 @@ struct UIStrings: Sendable {
     // Additional UI strings
     var forked: String = "forked"
     var you: String = "You"
-    var claude: String = "Assistant"
+    var assistant: String = "Assistant"
     var save: String = "Save"
     var loading: String = "Loading…"
     var notGitRepo: String = "Not a git repo"
@@ -1464,7 +1255,7 @@ enum ThemeMode: String, CaseIterable, Codable, Sendable, Identifiable {
 }
 
 struct KilnSettings: Codable, Sendable, Equatable {
-    var defaultModel: ClaudeModel = .gpt53Codex
+    var defaultModel: AgentModel = .defaultModel
     var defaultWorkDir: String = NSHomeDirectory()
     var systemPrompt: String = KilnSettings.defaultSystemPrompt
     // Off by default — new users get a clean slate and can opt in from
@@ -1478,7 +1269,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     /// lives somewhere unusual (custom venv, mise shim, dev checkout).
     var engramPath: String = ""
     var useAutoMemory: Bool = false
-    var defaultPermissions: PermissionMode = .bypass
+    var defaultPermissions: PermissionMode = .ask
     var defaultMode: SessionMode = .build
     /// Legacy field — accepted "dark" | "light". Kept for Codable back-compat
     /// so older preference files keep loading. New code should read/write
@@ -1490,7 +1281,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     var language: AppLanguage = .en
 
     // Appearance
-    var accentHex: String = "f97316"
+    var accentHex: String = "10b981"
     var fontScale: FontScale = .medium
     var density: Density = .comfortable
 
@@ -1528,7 +1319,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     // Custom decoder to handle missing keys from older settings files
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        defaultModel = (try? c.decode(ClaudeModel.self, forKey: .defaultModel)) ?? .gpt53Codex
+        defaultModel = (try? c.decode(AgentModel.self, forKey: .defaultModel)) ?? .defaultModel
         defaultWorkDir = (try? c.decode(String.self, forKey: .defaultWorkDir)) ?? NSHomeDirectory()
         systemPrompt = (try? c.decode(String.self, forKey: .systemPrompt)) ?? KilnSettings.defaultSystemPrompt
         useEngram = (try? c.decode(Bool.self, forKey: .useEngram)) ?? true
@@ -1545,7 +1336,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
             themeMode = ThemeMode(rawValue: theme) ?? .system
         }
         language = (try? c.decode(AppLanguage.self, forKey: .language)) ?? .en
-        accentHex = (try? c.decode(String.self, forKey: .accentHex)) ?? "f97316"
+        accentHex = (try? c.decode(String.self, forKey: .accentHex)) ?? "10b981"
         fontScale = (try? c.decode(FontScale.self, forKey: .fontScale)) ?? .medium
         density = (try? c.decode(Density.self, forKey: .density)) ?? .comfortable
         showAvatars = (try? c.decode(Bool.self, forKey: .showAvatars)) ?? true
@@ -1567,9 +1358,9 @@ struct KilnSettings: Codable, Sendable, Equatable {
         userAvatarFilename = (try? c.decode(String.self, forKey: .userAvatarFilename)) ?? ""
     }
 
-    init(defaultModel: ClaudeModel = .gpt53Codex, defaultWorkDir: String = NSHomeDirectory(),
+    init(defaultModel: AgentModel = .defaultModel, defaultWorkDir: String = NSHomeDirectory(),
          systemPrompt: String = KilnSettings.defaultSystemPrompt, useEngram: Bool = false,
-         useAutoMemory: Bool = false, defaultPermissions: PermissionMode = .bypass,
+         useAutoMemory: Bool = false, defaultPermissions: PermissionMode = .ask,
          defaultMode: SessionMode = .build, theme: String = "dark", language: AppLanguage = .en) {
         self.defaultModel = defaultModel; self.defaultWorkDir = defaultWorkDir
         self.systemPrompt = systemPrompt; self.useEngram = useEngram
@@ -1583,7 +1374,7 @@ struct KilnSettings: Codable, Sendable, Equatable {
     static let defaultSystemPrompt = ""
 
     /// System prompt snippet applied when the user enables engram. Written
-    /// into `systemPrompt` on opt-in so Claude knows the tools exist.
+    /// into `systemPrompt` on opt-in so Codex knows the tools exist.
     static let engramSystemPrompt = """
     You have access to engram, a cognitive memory system. Use it for ALL memory operations:
     - Before responding to a new session or a topic shift, silently use `recall` or `recall_hints` to load relevant context

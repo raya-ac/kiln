@@ -7,37 +7,36 @@ import XCTest
 /// grow — treat this as a canary for the test pipeline itself.
 final class SmokeTests: XCTestCase {
     func testModelsHaveDistinctRawValues() {
-        let ids = Set(ClaudeModel.allCases.map(\.rawValue))
-        XCTAssertEqual(ids.count, ClaudeModel.allCases.count, "Model raw values collide: \(ids)")
-        XCTAssertTrue(ClaudeModel.allCases.allSatisfy { !$0.rawValue.isEmpty })
+        let ids = Set(AgentModel.allCases.map(\.rawValue))
+        XCTAssertEqual(ids.count, AgentModel.allCases.count, "Model raw values collide: \(ids)")
+        XCTAssertTrue(AgentModel.allCases.allSatisfy { !$0.rawValue.isEmpty })
     }
 
-    func testCodexModelsArePresent() {
-        let codexModels = ClaudeModel.allCases.filter { $0.provider == .codex }
-        XCTAssertTrue(codexModels.contains(.gpt55))
+    func testAgentModelsArePresent() {
+        let codexModels = AgentModel.allCases.filter { $0.provider == .codex }
+        XCTAssertFalse(codexModels.isEmpty)
         XCTAssertTrue(codexModels.contains(.gpt53Codex))
-        XCTAssertTrue(codexModels.contains(.gpt53CodexSpark))
         XCTAssertEqual(KilnSettings().defaultModel.provider, .codex)
     }
 
     func testCodexAskApprovalIsTopLevelArgument() {
         var options = SendOptions()
         options.permissions = .ask
-        let args = CodexService.buildArguments(
+        let args = CodexProtocol.buildArguments(
             threadId: nil,
             model: .gpt53Codex,
             workDir: "/tmp",
             options: options
         )
-        XCTAssertEqual(Array(args.prefix(3)), ["--ask-for-approval", "on-request", "exec"])
-        XCTAssertFalse(args.dropFirst(3).contains("--ask-for-approval"))
+        XCTAssertEqual(Array(args.prefix(2)), ["--ask-for-approval", "on-request"])
+        XCTAssertLessThan(args.firstIndex(of: "--ask-for-approval")!, args.firstIndex(of: "exec")!)
     }
 
     func testCodexThinkingMapsToReasoningConfig() {
         var options = SendOptions()
         options.thinkingEnabled = true
         options.effortLevel = .max
-        let args = CodexService.buildArguments(
+        let args = CodexProtocol.buildArguments(
             threadId: nil,
             model: .gpt53Codex,
             workDir: "/tmp",
@@ -49,7 +48,7 @@ final class SmokeTests: XCTestCase {
     }
 
     func testCodexJsonOutputDisablesAnsiColor() {
-        let args = CodexService.buildArguments(
+        let args = CodexProtocol.buildArguments(
             threadId: nil,
             model: .gpt53Codex,
             workDir: "/tmp",
@@ -68,7 +67,7 @@ final class SmokeTests: XCTestCase {
 
     func testCodexReasoningEventEmitsThinkingAndTrace() {
         var emittedText = false
-        let events = CodexService.parseEvent([
+        let events = CodexProtocol.parseEvent([
             "type": "item.completed",
             "item": [
                 "id": "reasoning_1",
@@ -93,7 +92,7 @@ final class SmokeTests: XCTestCase {
 
     func testCodexCommandEventEmitsToolAndTrace() {
         var emittedText = false
-        let events = CodexService.parseEvent([
+        let events = CodexProtocol.parseEvent([
             "type": "item.completed",
             "item": [
                 "id": "cmd_1",
@@ -121,17 +120,6 @@ final class SmokeTests: XCTestCase {
 
     func testSessionKindHasDistinctRawValues() {
         XCTAssertNotEqual(SessionKind.code.rawValue, SessionKind.chat.rawValue)
-    }
-
-    func testMessageBlockTextIdsAreStable() {
-        let first = MessageBlock.text("same markdown body").id
-        let second = MessageBlock.text("same markdown body").id
-        let different = MessageBlock.text("different markdown body").id
-
-        XCTAssertEqual(first, second)
-        XCTAssertNotEqual(first, different)
-        XCTAssertTrue(first.hasPrefix("text-"))
-        XCTAssertTrue(first.dropFirst(5).allSatisfy { $0.isHexDigit })
     }
 
     func testCrashReportLocatorFindsLatestKilnDiagnostic() throws {

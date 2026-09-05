@@ -1,8 +1,7 @@
 import Foundation
 
 /// Agent slash commands exposed in the composer via `/` autocomplete.
-/// Includes built-ins shipped by the active CLI plus any user-defined agents
-/// discovered in `~/.claude/agents/`.
+/// Built-in actions and user prompt templates are handled locally.
 struct SlashCommand: Identifiable, Hashable, Sendable {
     let id: String        // e.g. "compact"
     let label: String     // "/compact"
@@ -131,40 +130,8 @@ enum SlashCommands {
     /// commands; everything is `/` now.
     static let kilnCommands: [SlashCommand] = []
 
-    /// Scan `~/.claude/agents/` for `.md` files — each is an agent.
-    /// Result is cached; the slash popup hits this on every keystroke so
-    /// hammering FileManager on each draw was wasteful. 5-second TTL —
-    /// long enough to avoid churn, short enough that new agent files
-    /// show up without restarting Kiln.
-    nonisolated(unsafe) private static var agentCache: (items: [SlashCommand], fetchedAt: Date)?
-    private static let agentCacheTTL: TimeInterval = 5
-
-    static func loadAgents() -> [SlashCommand] {
-        if let c = agentCache, Date().timeIntervalSince(c.fetchedAt) < agentCacheTTL {
-            return c.items
-        }
-        let dir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/agents")
-        let items: [SlashCommand] = {
-            guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
-            return files
-                .filter { $0.hasSuffix(".md") }
-                .map { String($0.dropLast(3)) }
-                .sorted()
-                .map { name in
-                    SlashCommand(
-                        id: "agent.\(name)",
-                        label: "/\(name)",
-                        description: "Agent from ~/.claude/agents/\(name).md",
-                        kind: .agent
-                    )
-                }
-        }()
-        agentCache = (items, Date())
-        return items
-    }
-
     @MainActor
     static func all() -> [SlashCommand] {
-        builtins + kilnCommands + promptTemplateCommands() + loadAgents()
+        builtins + kilnCommands + promptTemplateCommands()
     }
 }

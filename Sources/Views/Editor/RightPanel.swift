@@ -137,27 +137,27 @@ struct FileTreeView: View {
     @State private var activeIndex: Int?
     @State private var showTree: Bool = true
 
-    // Real-time sync with Claude's edits. We track:
+    // Real-time sync with Codex's edits. We track:
     //   - `syncedToolIds`: tool-use IDs we've already pulled into the
     //     editor, so we don't re-read the same file on every view update.
-    //   - `claudeEditing`: paths currently being edited by an in-flight
+    //   - `agentEditing`: paths currently being edited by an in-flight
     //     Edit/Write/MultiEdit — drives the pulse on matching tabs.
-    //   - `externalConflict`: paths where Claude wrote while the user had
+    //   - `externalConflict`: paths where Codex wrote while the user had
     //     unsaved edits. We don't clobber the buffer; we show a warning.
     @State private var syncedToolIds: Set<String> = []
-    @State private var claudeEditing: Set<String> = []
+    @State private var agentEditing: Set<String> = []
     @State private var externalConflict: Set<String> = []
-    // Pre-edit snapshot of each path Claude is about to touch. Captured on
+    // Pre-edit snapshot of each path Codex is about to touch. Captured on
     // the first in-flight Edit/Write/MultiEdit for that path, preserved
     // across subsequent edits, and cleared when the user Accepts or Reverts.
     @State private var preEditSnapshot: [String: String] = [:]
-    // Paths with a pending Accept/Revert decision after Claude's tool chain
+    // Paths with a pending Accept/Revert decision after Codex's tool chain
     // completed. Drives the banner in the editor header.
-    @State private var pendingClaudeEdit: Set<String> = []
+    @State private var pendingAgentEdit: Set<String> = []
     // Paths currently shown in diff-view mode. Toggled from the banner.
     @State private var diffViewing: Set<String> = []
     // Per-file git status map for the current workdir. Refreshed whenever
-    // the tree reloads or a Claude tool call finishes. Keyed by absolute
+    // the tree reloads or a Codex tool call finishes. Keyed by absolute
     // path so FileRow lookups are cheap.
     @State private var gitStatuses: [String: GitStatus.FileState] = [:]
     // Non-nil while a git-diff sheet is presented. The view reads both
@@ -194,7 +194,7 @@ struct FileTreeView: View {
                     openFiles: openFiles,
                     activeIndex: activeIndex,
                     showingTree: showTree,
-                    editingPaths: claudeEditing,
+                    editingPaths: agentEditing,
                     conflictPaths: externalConflict,
                     onSelect: { idx in
                         activeIndex = idx
@@ -251,13 +251,13 @@ struct FileTreeView: View {
                 .background(Color.kilnSurface)
                 .contextMenu { editorFileContextMenu(path: path) }
 
-                if pendingClaudeEdit.contains(path) {
-                    ClaudeEditBanner(
+                if pendingAgentEdit.contains(path) {
+                    AgentEditBanner(
                         path: path,
                         hasSnapshot: preEditSnapshot[path] != nil,
                         isDiffing: diffViewing.contains(path),
-                        onAccept: { acceptClaudeEdit(path: path) },
-                        onRevert: { revertClaudeEdit(path: path) },
+                        onAccept: { acceptAgentEdit(path: path) },
+                        onRevert: { revertAgentEdit(path: path) },
                         onToggleDiff: {
                             if diffViewing.contains(path) {
                                 diffViewing.remove(path)
@@ -479,7 +479,7 @@ struct FileTreeView: View {
             do {
                 try f.content.write(toFile: f.path, atomically: true, encoding: .utf8)
                 openFiles[i].originalContent = f.content
-                pendingClaudeEdit.remove(f.path)
+                pendingAgentEdit.remove(f.path)
                 preEditSnapshot.removeValue(forKey: f.path)
             } catch {
                 print("Failed to save \(f.path): \(error)")
@@ -553,12 +553,12 @@ struct FileTreeView: View {
             if syncedToolIds.contains(call.id) { continue }
             syncedToolIds.insert(call.id)
             anyCompleted = true
-            // Surface the Accept/Revert banner now that Claude committed
+            // Surface the Accept/Revert banner now that Codex committed
             // a change to this path.
-            pendingClaudeEdit.insert(path)
+            pendingAgentEdit.insert(path)
 
             // Auto-open the file if the user didn't already have it open — so
-            // the user sees what Claude just did without having to hunt for it.
+            // the user sees what Codex just did without having to hunt for it.
             if !openFiles.contains(where: { $0.path == path }) {
                 let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
                 openFiles.append(OpenFile(path: path, content: content))
@@ -570,7 +570,7 @@ struct FileTreeView: View {
             guard let idx = openFiles.firstIndex(where: { $0.path == path }) else { continue }
             if openFiles[idx].isDirty && openFiles[idx].content != openFiles[idx].originalContent {
                 // True conflict: the user has unsaved edits that diverge from
-                // both disk and Claude's stream. Flag it; don't clobber.
+                // both disk and Codex's stream. Flag it; don't clobber.
                 externalConflict.insert(path)
             } else if let fresh = try? String(contentsOfFile: path, encoding: .utf8) {
                 openFiles[idx].content = fresh
@@ -578,14 +578,14 @@ struct FileTreeView: View {
                 externalConflict.remove(path)
             }
         }
-        claudeEditing = nowEditing
+        agentEditing = nowEditing
         if anyCompleted {
             // Refresh the file tree so new files / renames / deletes show up.
             Task { await loadDirectory() }
         }
     }
 
-    /// Stream Write tool `content` directly into the editor buffer as Claude
+    /// Stream Write tool `content` directly into the editor buffer as Codex
     /// emits it — so the user literally watches the file fill in. Skipped
     /// when the user has unsaved edits (we'd be fighting their typing).
     private func syncLiveWriteContent() {
@@ -602,7 +602,7 @@ struct FileTreeView: View {
                 let initial = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
                 // Capture the pre-edit state NOW, before the stream below
                 // overwrites originalContent. Otherwise the diff viewer's
-                // before/after both end up pointing at Claude's post-write
+                // before/after both end up pointing at Codex's post-write
                 // content and render as identical. For a brand-new file
                 // `initial` is "" — exactly the "all additions" hunk we
                 // want the diff to show.
@@ -617,7 +617,7 @@ struct FileTreeView: View {
             // If the buffer is in the middle of user edits, don't touch it.
             if openFiles[idx].isDirty && openFiles[idx].originalContent != openFiles[idx].content {
                 // Only skip if the divergence is something we haven't streamed.
-                // In practice claudeEditing flagging catches this visually.
+                // In practice agentEditing flagging catches this visually.
                 continue
             }
             if let content = streamedField("content", from: call.input) {
@@ -768,23 +768,23 @@ struct FileTreeView: View {
         }
     }
 
-    /// Dismiss the Claude-edit banner for this path. No content changes —
+    /// Dismiss the Codex-edit banner for this path. No content changes —
     /// the user is happy with what's on disk.
-    private func acceptClaudeEdit(path: String) {
-        pendingClaudeEdit.remove(path)
+    private func acceptAgentEdit(path: String) {
+        pendingAgentEdit.remove(path)
         preEditSnapshot.removeValue(forKey: path)
     }
 
     /// Restore the pre-edit snapshot to both the buffer and disk. If the
-    /// file was empty-before (Claude created it), Revert deletes the file.
-    private func revertClaudeEdit(path: String) {
+    /// file was empty-before (Codex created it), Revert deletes the file.
+    private func revertAgentEdit(path: String) {
         guard let original = preEditSnapshot[path] else {
-            pendingClaudeEdit.remove(path)
+            pendingAgentEdit.remove(path)
             return
         }
-        // If the path didn't exist pre-edit (Claude created it from nothing)
+        // If the path didn't exist pre-edit (Codex created it from nothing)
         // the best revert is to remove it. We detect that by checking if the
-        // snapshot is empty AND the file existed only because Claude wrote
+        // snapshot is empty AND the file existed only because Codex wrote
         // it — but we can't reliably distinguish "empty file" from "no
         // file", so we just write the snapshot back unconditionally and
         // trust the user to delete if wanted. Simpler and predictable.
@@ -799,7 +799,7 @@ struct FileTreeView: View {
             openFiles[idx].originalContent = original
         }
         externalConflict.remove(path)
-        pendingClaudeEdit.remove(path)
+        pendingAgentEdit.remove(path)
         preEditSnapshot.removeValue(forKey: path)
         Task { await loadDirectory() }
     }
@@ -855,8 +855,8 @@ struct FileTreeView: View {
         do {
             try f.content.write(toFile: f.path, atomically: true, encoding: .utf8)
             openFiles[idx].originalContent = f.content    // clears isDirty
-            // A manual save is an implicit accept of whatever Claude did.
-            pendingClaudeEdit.remove(f.path)
+            // A manual save is an implicit accept of whatever Codex did.
+            pendingAgentEdit.remove(f.path)
             preEditSnapshot.removeValue(forKey: f.path)
         } catch {
             print("Failed to save: \(error)")
@@ -1599,14 +1599,14 @@ struct FileRow: View {
     }
 }
 
-// MARK: - Claude edit banner
+// MARK: - Codex edit banner
 //
-// Appears under the file header after Claude finishes an Edit/Write/
+// Appears under the file header after Codex finishes an Edit/Write/
 // MultiEdit. Accept dismisses it; Revert restores the pre-edit snapshot
 // to both the buffer and disk. Disappears automatically when the user
-// manually saves — handled by the caller clearing `pendingClaudeEdit`.
+// manually saves — handled by the caller clearing `pendingAgentEdit`.
 
-struct ClaudeEditBanner: View {
+struct AgentEditBanner: View {
     let path: String
     let hasSnapshot: Bool
     let isDiffing: Bool
@@ -1619,7 +1619,7 @@ struct ClaudeEditBanner: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Color.kilnAccent)
-            Text("Claude edited this file")
+            Text("Codex edited this file")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.kilnText)
             Spacer()
@@ -1684,7 +1684,7 @@ struct ClaudeEditBanner: View {
 // Line-level unified diff rendered as a scrollable list of colored rows.
 // LCS-based — simple, correct for the common cases, O(n·m) memory which
 // is fine for source files (hundreds of lines). For huge files this
-// would need Myers, but Claude's edits are typically small enough.
+// would need Myers, but Codex's edits are typically small enough.
 
 enum DiffLineKind { case context, add, remove }
 
@@ -2049,7 +2049,7 @@ struct EditorTabStrip: View {
                         EditorTab(
                             file: f,
                             active: !showingTree && activeIndex == idx,
-                            claudeEditing: editingPaths.contains(f.path),
+                            agentEditing: editingPaths.contains(f.path),
                             externalConflict: conflictPaths.contains(f.path),
                             onSelect: { onSelect(idx) },
                             onClose: { onClose(idx) }
@@ -2067,7 +2067,7 @@ struct EditorTabStrip: View {
 struct EditorTab: View {
     let file: OpenFile
     let active: Bool
-    var claudeEditing: Bool = false
+    var agentEditing: Bool = false
     var externalConflict: Bool = false
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -2085,13 +2085,13 @@ struct EditorTab: View {
                     .foregroundStyle(active ? Color.kilnText : Color.kilnTextSecondary)
                     .lineLimit(1)
                 if externalConflict {
-                    // Claude wrote while buffer was dirty — user needs to
+                    // Codex wrote while buffer was dirty — user needs to
                     // reconcile by saving or reverting.
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Color(hex: 0xF59E0B))
-                        .help("Claude edited this file while you had unsaved changes")
-                } else if claudeEditing {
+                        .help("Codex edited this file while you had unsaved changes")
+                } else if agentEditing {
                     // In-flight tool call touching this file — pulse the dot.
                     Circle()
                         .fill(Color.kilnAccent)
@@ -2103,7 +2103,7 @@ struct EditorTab: View {
                             }
                         }
                         .onDisappear { pulse = false }
-                        .help("Claude is editing this file")
+                        .help("Codex is editing this file")
                 } else if file.isDirty {
                     Circle().fill(Color.kilnAccent).frame(width: 5, height: 5)
                 }

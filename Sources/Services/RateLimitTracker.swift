@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// Tracks usage over time to give users a sense of how close they are to
-/// rate limits. Claude Code's CLI doesn't expose rate-limit headers through
+/// rate limits. Codex's CLI doesn't expose rate-limit headers through
 /// stream-json, so we do two things:
 ///
 /// 1. Record token usage as it streams in, bucketed into 5-min windows.
@@ -34,13 +34,13 @@ final class RateLimitTracker: ObservableObject {
 
     /// Soft cap — shown as 100% on the meter. User-configurable via
     /// settings, default 500k tokens/5min which tracks roughly with
-    /// Anthropic's TPM tiers for Pro/Max subscriptions.
+    /// OpenAI's TPM tiers for Pro/Max subscriptions.
     var softCapTokensPerFiveMin: Int {
         UserDefaults.standard.integer(forKey: "rateLimit.softCap").nonZeroOrDefault(500_000)
     }
 
     /// Cooldown window after a rate limit hit, in seconds. After this we
-    /// clear `isRateLimited`. Anthropic's real reset headers are ~60s for
+    /// clear `isRateLimited`. OpenAI's real reset headers are ~60s for
     /// RPM limits, up to 60min for daily; 5min is a reasonable middle.
     private let rateLimitCooldown: TimeInterval = 300
 

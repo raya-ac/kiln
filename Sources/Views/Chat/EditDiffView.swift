@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Parser
 //
-// Claude Code's Edit/Write/MultiEdit tools take JSON input with a known
+// Codex's Edit/Write/MultiEdit tools take JSON input with a known
 // shape. We parse that JSON to extract before/after text so we can render
 // a real diff instead of raw JSON. If anything fails, we return nil and
 // the caller falls back to the JSON view.

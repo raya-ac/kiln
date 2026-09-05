@@ -102,7 +102,7 @@ if [ -f "$ROOT/Sources/App/Resources/AppIcon.icns" ]; then
 fi
 # SPM generates a per-target resource bundle (Kiln_Kiln.bundle) at build
 # time that holds everything declared under `resources:` in Package.swift
-# — the Monaco editor tree, editor/index.html, ClaudeMark.png, etc.
+# — the Monaco editor tree, editor/index.html, agent resources, etc.
 # Bundle.module at runtime locates it next to the executable, so drop it
 # alongside the binary. Without this copy the .app ships with no editor
 # runtime, and Bundle.module falls back to whatever stale bundle lives
@@ -126,7 +126,7 @@ if [ -d "$SPM_RES_BUNDLE" ]; then
   # (url:) both handle deep-style bundles transparently.
   mkdir -p "$DEST_BUNDLE/Contents/Resources"
   # Use `.` + `cp -R` so dotfiles come along; we want the children of
-  # SPM_RES_BUNDLE (editor/, monaco/, ClaudeMark.png) mirrored directly
+  # SPM_RES_BUNDLE (editor/, monaco/, agent resources) mirrored directly
   # under Contents/Resources/.
   (cd "$SPM_RES_BUNDLE" && tar cf - .) | (cd "$DEST_BUNDLE/Contents/Resources" && tar xf -)
   cat > "$DEST_BUNDLE/Contents/Info.plist" <<EOF

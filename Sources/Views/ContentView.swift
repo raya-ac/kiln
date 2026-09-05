@@ -259,19 +259,6 @@ struct ContentView: View {
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
             }
         }
-        // PreToolUse approvals: while the queue is non-empty, block on the
-        // head of the queue. The hook that spawned the request is suspended
-        // on a CheckedContinuation until the user resolves it.
-        .sheet(isPresented: Binding(
-            get: { !store.pendingApprovals.isEmpty },
-            set: { _ in }
-        )) {
-            if let approval = store.pendingApprovals.first {
-                ApprovalDialog(approval: approval)
-                    .environmentObject(store)
-                    .preferredColorScheme(Color.kilnPreferredColorScheme)
-            }
-        }
         .overlay {
             if store.showCommandPalette {
                 ZStack {
@@ -752,7 +739,7 @@ struct EmptyStateView: View {
 struct NewSessionSheet: View {
     @EnvironmentObject var store: AppStore
     @State private var workDir = NSHomeDirectory()
-    @State private var model: ClaudeModel = .sonnet46
+    @State private var model: AgentModel = .defaultModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -824,57 +811,8 @@ struct NewSessionSheet: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.kilnTextTertiary)
                     .tracking(1)
-                VStack(spacing: 4) {
-                    VStack(spacing: 6) {
-                        ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 5) {
-                                    ModelProviderIcon(provider: group.provider, size: 9)
-                                    Text(group.provider.label)
-                                        .font(.system(size: 10, weight: .semibold))
-                                }
-                                .foregroundStyle(Color.kilnTextTertiary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 124), spacing: 6)], spacing: 6) {
-                                    ForEach(group.models) { m in
-                                        Button {
-                                            model = m
-                                        } label: {
-                                            HStack(spacing: 7) {
-                                                ModelBrandIcon(brand: m.brand, size: 8)
-                                                VStack(alignment: .leading, spacing: 1) {
-                                                    Text(m.label)
-                                                        .font(.system(size: 11, weight: .semibold))
-                                                        .lineLimit(1)
-                                                    Text(m.tier)
-                                                        .font(.system(size: 9, weight: .medium))
-                                                        .foregroundStyle(model == m ? Color.kilnBg.opacity(0.72) : Color.kilnTextTertiary)
-                                                }
-                                                Spacer(minLength: 0)
-                                            }
-                                            .foregroundStyle(model == m ? Color.kilnBg : Color.kilnTextSecondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 8)
-                                            .background(model == m ? m.tint : Color.kilnSurface)
-                                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help(m.fullId)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(3)
-                    .background(Color.kilnSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    Text(model.fullId)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color.kilnTextTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                ModelPickerButton(selection: $model)
+                    .padding(.vertical, 10)
             }
 
             // Actions
@@ -1221,7 +1159,7 @@ final class CompletionNotifier: @unchecked Sendable {
 // MARK: - Launch Recovery Banner
 //
 // Appears when one or more sessions still have `wasInterrupted = true` from
-// the previous app run (crash, force-quit, claude subprocess death). Lets
+// the previous app run (crash, force-quit, agent subprocess death). Lets
 // the user jump to each session to decide whether to resume or dismiss.
 
 struct LaunchRecoveryBanner: View {

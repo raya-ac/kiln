@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import AVFoundation
 
-/// Central app state — owns sessions, drives UI, relays Claude events.
+/// Central app state — owns sessions, drives UI, relays Codex events.
 @MainActor
 final class AppStore: ObservableObject {
     // MARK: - Published state
@@ -34,7 +34,7 @@ final class AppStore: ObservableObject {
     @Published var showSessionInfo = false
     @Published var showShortcutsOverlay = false
     /// First-run onboarding. Drives the OnboardingSheet overlay — walks
-    /// through the welcome, checks for Claude Code, and helps install it
+    /// through the welcome, checks for Codex, and helps install it
     /// if missing. Sticky: dismissing it writes `kiln.onboardingCompleted`
     /// to UserDefaults so it never pops up again.
     @Published var showOnboarding = false
@@ -206,30 +206,6 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Tool-approval requests awaiting the user. The ApprovalDialog sheet
-    /// renders the first entry; the HTTP hook handler is blocked on a
-    /// continuation stored in `approvalContinuations` until the user
-    /// resolves it via `respondToApproval`.
-    @Published var pendingApprovals: [PendingApproval] = []
-    private var approvalContinuations: [String: CheckedContinuation<HookDecision, Never>] = [:]
-
-    /// Called by RemoteControlServer when a PreToolUse hook fires.
-    /// Suspends until the user decides — the continuation is resumed by
-    /// `respondToApproval`.
-    func awaitApproval(_ approval: PendingApproval) async -> HookDecision {
-        await withCheckedContinuation { cont in
-            approvalContinuations[approval.id] = cont
-            pendingApprovals.append(approval)
-        }
-    }
-
-    /// Resolve a pending approval. Clears UI state and wakes the hook.
-    func respondToApproval(id: String, approve: Bool, reason: String? = nil) {
-        guard let cont = approvalContinuations.removeValue(forKey: id) else { return }
-        pendingApprovals.removeAll { $0.id == id }
-        cont.resume(returning: HookDecision(approve: approve, reason: reason))
-    }
-
     // When set, ChatView scrolls to this message and clears it
     @Published var pendingJumpMessageId: String?
 
@@ -384,8 +360,17 @@ final class AppStore: ObservableObject {
 
     // MARK: - Services
 
-    let claude = ClaudeService()
-    let codex = CodexService()
+    let codex = AgentService()
+    let opencode = AgentService(backend: .opencode)
+    func agent(for model: AgentModel) -> AgentService { model.provider == .codex ? codex : opencode }
+    @Published var modelCatalogRevision = 0
+    @Published var modelCatalogError: String?
+    func refreshModelCatalog() async {
+        ModelCatalog.shared.reload()
+        do { try await OpenCodeModels.shared.reload(); modelCatalogError = nil }
+        catch { modelCatalogError = "OpenCode model list unavailable. Check installation and configuration." }
+        modelCatalogRevision += 1
+    }
     let wardenTunnels = WardenTunnelService()
     lazy var remoteServer: RemoteControlServer = RemoteControlServer(store: self)
 
@@ -399,24 +384,6 @@ final class AppStore: ObservableObject {
 
         let stored = Persistence.loadSessions()
         sessions = stored.map { $0.toSession() }
-
-        // Sweep stale interruption flags. The flag is set pre-emptively on
-        // every send and cleared on clean completion — but if the app truly
-        // crashed, the flag survives on disk. We only want to surface "just
-        // crashed" sessions in the launch recovery banner, not anything the
-        // user clearly moved on from. If a flagged session hasn't had
-        // activity in the last 4 hours, assume the user closed the app
-        // cleanly since the crash and clear the flag quietly.
-        // Clear the interrupted flag on every launch. The flag was meant
-        // for crash recovery, but the false-positive rate from ordinary
-        // force-quits and pkill'd sessions made the banner more noisy
-        // than useful. If the user genuinely wants to resume, Retry
-        // Last Message (⌘⇧R) is one chord away — no need for a
-        // startup banner to remind them.
-        for i in sessions.indices where sessions[i].wasInterrupted {
-            sessions[i].wasInterrupted = false
-            Persistence.saveSession(sessions[i])
-        }
 
         // Restore the last-focused session if that id still exists.
         // Falls through to nil (sidebar renders "no selection") if the
@@ -444,8 +411,6 @@ final class AppStore: ObservableObject {
         } else if remoteServer.allowLAN {
             remoteServer.accessLevel = .lan
         }
-        // The remote server always runs on loopback so the PreToolUse hook
-        // script spawned by `claude` can POST approval requests back to us.
         // `accessLevel` controls whether we *also* bind LAN/Tailscale — if
         // the user didn't enable remote, we stay loopback-only and the
         // surface is invisible except to local processes.
@@ -518,7 +483,7 @@ final class AppStore: ObservableObject {
         case "new":
             let wd = query["dir"] ?? settings.defaultWorkDir
             let kind: SessionKind = (query["kind"] == "chat") ? .chat : .code
-            let model = query["model"].flatMap { ClaudeModel(rawValue: $0) }
+            let model = query["model"].flatMap { AgentModel(rawValue: $0) }
             createSession(workDir: wd, model: model, kind: kind)
         case "interrupt":
             interrupt()
@@ -606,7 +571,7 @@ final class AppStore: ObservableObject {
     /// win except for workdir which falls back to the template's value or
     /// the global default.
     func createSessionFromTemplate(_ t: SessionTemplate) {
-        let model = ClaudeModel(rawValue: t.model) ?? settings.defaultModel
+        let model = AgentModel(rawValue: t.model) ?? settings.defaultModel
         let kind = SessionKind(rawValue: t.kind) ?? .code
         let workDir = t.workDir?.isEmpty == false ? t.workDir! : settings.defaultWorkDir
 
@@ -641,11 +606,11 @@ final class AppStore: ObservableObject {
         SessionTemplateStore.shared.add(t)
     }
 
-    func createSession(workDir: String, model: ClaudeModel? = nil, kind: SessionKind = .code, readOnly: Bool = false, name: String = "New Session") {
+    func createSession(workDir: String, model: AgentModel? = nil, kind: SessionKind = .code, readOnly: Bool = false, name: String = "New Session") {
         // Workspace config — if the target dir has a .kiln/config.json, apply it.
         let ws = WorkspaceConfig.load(for: workDir)
         let resolvedModel = model
-            ?? ws?.model.flatMap(ClaudeModel.init(rawValue:))
+            ?? ws?.model.flatMap(AgentModel.init(rawValue:))
             ?? settings.defaultModel
         let sessionInstructions = ws?.systemPrompt ?? ""
         let session = Session(
@@ -671,13 +636,8 @@ final class AppStore: ObservableObject {
 
     func deleteSession(_ id: String) {
         if let session = sessions.first(where: { $0.id == id }) {
-            switch session.model.provider {
-            case .claude:
-                claude.kill(sessionId: id)
-            case .codex:
-                codex.kill(sessionId: id)
-                codex.forgetThread(for: id)
-            }
+            agent(for: session.model).kill(sessionId: id)
+            agent(for: session.model).forgetThread(for: id)
         }
         sessions.removeAll { $0.id == id }
         if activeSessionId == id {
@@ -783,25 +743,14 @@ final class AppStore: ObservableObject {
     }
 
     /// Change a session's working directory. Future sends start in the new
-    /// dir; any currently-running subprocess keeps its old cwd until it
-    /// exits — Claude Code doesn't support chdir mid-run.
+    /// directory. Changes are blocked until the current turn finishes.
     func setWorkDir(_ id: String, workDir: String) {
+        guard runtimeStates[id]?.isBusy != true else { return }
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         let old = sessions[idx]
         if old.workDir != workDir {
-            switch old.model.provider {
-            case .claude:
-                // Claude CLI stores sessions per-workdir-hash under
-                // ~/.claude/projects/, so move the transcript when the
-                // workdir changes.
-                claude.migrateCLISession(for: id, from: old.workDir, to: workDir)
-            case .codex:
-                // Codex resume threads are global, but resume doesn't offer
-                // an explicit --cd override. Drop the thread mapping when the
-                // workdir changes so the next send starts fresh in the new dir.
-                codex.kill(sessionId: id)
-                codex.forgetThread(for: id)
-            }
+            agent(for: old.model).kill(sessionId: id)
+            agent(for: old.model).forgetThread(for: id)
         }
         var fresh = Session(
             id: old.id,
@@ -959,8 +908,14 @@ final class AppStore: ObservableObject {
         return s
     }
 
-    func setModel(_ model: ClaudeModel) {
+    func setModel(_ model: AgentModel) {
         guard let idx = activeSessionIndex else { return }
+        guard !isSessionBusy(sessions[idx].id) else { return }
+        if sessions[idx].model.provider != model.provider {
+            codex.forgetThread(for: sessions[idx].id)
+            opencode.forgetThread(for: sessions[idx].id)
+        }
+        if !model.reasoningEfforts.contains(effortLevel.rawValue) { effortLevel = .medium }
         sessions[idx].model = model
         if !model.supportsOpenAIFastMode {
             sessions[idx].openAIFastMode = false
@@ -994,23 +949,27 @@ final class AppStore: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Retry the last user message in the active session
+    /// Retry preserves attached files and starts from the edited local transcript.
     func retryLastMessage() async {
-        guard let idx = activeSessionIndex else { return }
-        // Find last user message
-        guard let lastUserMsg = sessions[idx].messages.last(where: { $0.role == .user }),
-              case .text(let text) = lastUserMsg.blocks.first else { return }
-        // Remove messages from last user message onward
-        if let msgIdx = sessions[idx].messages.lastIndex(where: { $0.id == lastUserMsg.id }) {
-            sessions[idx].messages.removeSubrange(msgIdx...)
-        }
+        guard let idx = activeSessionIndex, !isSessionBusy(sessions[idx].id),
+              let last = sessions[idx].messages.last(where: { $0.role == .user }),
+              let messageIndex = sessions[idx].messages.firstIndex(where: { $0.id == last.id }) else { return }
+        let id = sessions[idx].id
+        let text = last.blocks.compactMap { if case .text(let text) = $0 { return text }; return nil }.joined(separator: "\n")
+        let files = last.blocks.compactMap { if case .attachment(let file) = $0 { return file }; return nil }
+        sessions[idx].messages.removeSubrange(messageIndex...)
+        agent(for: sessions[idx].model).forgetThread(for: id)
         Persistence.saveSession(sessions[idx])
-        await sendMessage(text)
+        await sendMessage(text, attachments: files, allowAutoCompact: false, targetSessionId: id)
     }
 
     /// Clear all messages in a session
     func clearSession(_ id: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        guard !isSessionBusy(id) else { return }
+        agent(for: sessions[idx].model).forgetThread(for: id)
+        runtimeStates[id] = SessionRuntimeState()
+        sessions[idx].wasInterrupted = false
         sessions[idx].messages.removeAll()
         Persistence.saveSession(sessions[idx])
     }
@@ -1022,6 +981,8 @@ final class AppStore: ObservableObject {
     func rewindSession(_ id: String, count: Int) {
         guard count > 0,
               let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        guard !isSessionBusy(id) else { return }
+        agent(for: sessions[idx].model).forgetThread(for: id)
         var msgs = sessions[idx].messages
         var dropped = 0
         while dropped < count, !msgs.isEmpty {
@@ -1220,7 +1181,7 @@ final class AppStore: ObservableObject {
     /// with a different model, then re-fire the most recent user message to
     /// both. Returns when the fan-out has started; streaming continues in
     /// both sessions concurrently so you can watch them side-by-side.
-    func compareWithModel(_ altModel: ClaudeModel) async {
+    func compareWithModel(_ altModel: AgentModel) async {
         guard let idx = activeSessionIndex else { return }
         let original = sessions[idx]
         // Pull the last user message text from the current session.
@@ -1258,77 +1219,42 @@ final class AppStore: ObservableObject {
         activeSessionId = prevActive
     }
 
-    /// Cycle the active session to the next ClaudeModel in the allCases
+    /// Cycle the active session to the next AgentModel in the allCases
     /// order. Used by `/model`.
     func cycleToNextModel() {
         guard let m = activeSession?.model else { return }
-        let all = ClaudeModel.allCases
+        let all = AgentModel.allCases
         guard let idx = all.firstIndex(of: m) else { return }
         let next = all[(idx + 1) % all.count]
         setModel(next)
     }
 
-    /// Real compaction: summarize the current session into a concise
-    /// briefing, reset history to that briefing, then optionally continue
-    /// with a pending user message.
-    func compactSession(
-        sessionId targetSessionId: String? = nil,
-        continueWith followUpText: String? = nil,
-        attachments followUpAttachments: [ComposerAttachment] = []
-    ) async {
-        let sessionId = targetSessionId ?? activeSessionId
-        guard let sessionId,
-              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+    @Published var compactingSessionIds: Set<String> = []
 
-        // Snapshot the transcript so we can fold it into the summary prompt
-        // for Claude even after we clear the history locally.
-        let transcript = sessions[idx].messages.map { msg -> String in
-            let body = msg.blocks.compactMap { block -> String? in
-                switch block {
-                case .text(let t): return t
-                case .thinking: return nil
-                case .trace: return nil
-                case .toolUse(let t): return "[tool: \(t.name)]"
-                case .toolResult: return nil
-                case .suggestions: return nil
-                case .attachment(let a): return "[attachment: \(a.name)]"
-                }
-            }.joined(separator: "\n")
-            return "\(msg.role.rawValue.uppercased()):\n\(body)"
-        }.joined(separator: "\n\n")
-
-        guard !transcript.isEmpty else { return }
-
-        // Replace history with a single compact marker so Claude has clean
-        // context, then ask it to produce a summary.
-        let marker = ChatMessage(role: .user, blocks: [.text("(session history compacted — see summary below)")])
-        sessions[idx].messages = [marker]
-        Persistence.saveSession(sessions[idx])
-
-        let prompt = """
-        Summarize the following Kiln session transcript into a compact briefing that captures decisions made, code changes, open threads, and any key context I'll need going forward. Keep it to 10–20 bullet points, terse. Do not address me directly — just the summary.
-
-        TRANSCRIPT:
-        \(transcript)
-        """
-        await sendMessage(prompt, allowAutoCompact: false)
-
-        // Hide the internal compaction prompt from the chat transcript — the
-        // summary itself is the durable thing the user needs.
-        if let refreshedIdx = sessions.firstIndex(where: { $0.id == sessionId }),
-           let promptIdx = sessions[refreshedIdx].messages.firstIndex(where: { msg in
-               guard msg.role == .user,
-                     msg.blocks.count == 1,
-                     case .text(let body) = msg.blocks[0]
-               else { return false }
-               return body == prompt
-           }) {
-            sessions[refreshedIdx].messages.remove(at: promptIdx)
-            Persistence.saveSession(sessions[refreshedIdx])
+    func compactSession(sessionId targetSessionId: String? = nil,
+                        continueWith followUpText: String? = nil,
+                        attachments followUpAttachments: [ComposerAttachment] = [],
+                        capturedOptions: SendOptions? = nil) async {
+        guard let id = targetSessionId ?? activeSessionId,
+              let session = sessions.first(where: { $0.id == id }),
+              !isSessionBusy(id), !compactingSessionIds.contains(id), !session.messages.isEmpty else { return }
+        compactingSessionIds.insert(id)
+        defer { compactingSessionIds.remove(id) }
+        let messageIds = session.messages.map(\.id)
+        let prompt = "Summarize this conversation into a briefing with decisions, changes, and remaining work.\n\n"
+            + TranscriptContext.text(from: session.messages, characterLimit: 160_000)
+        guard let summary = await Self.oneShotAsk(prompt: prompt, workDir: session.workDir, model: session.model),
+              let idx = sessions.firstIndex(where: { $0.id == id }),
+              sessions[idx].messages.map(\.id) == messageIds, !isSessionBusy(id) else {
+            ToastCenter.shared.show("Compaction failed or the conversation changed. History was retained.")
+            return
         }
-
-        if let followUpText, !followUpText.isEmpty || !followUpAttachments.isEmpty {
-            await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false)
+        sessions[idx].messages = [ChatMessage(role: .assistant, blocks: [.text(summary)])]
+        agent(for: session.model).forgetThread(for: id)
+        runtimeStates[id] = SessionRuntimeState()
+        Persistence.saveSession(sessions[idx])
+        if let followUpText {
+            await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions)
         }
     }
 
@@ -1357,7 +1283,7 @@ final class AppStore: ObservableObject {
             .joined(separator: "\n---\n")
         guard !excerpt.isEmpty else { return }
 
-        // Fire a side-process call to `claude --print` with a titling prompt.
+        // Fire a side-process call to `codex exec` with a titling prompt.
         // Doesn't touch the active session at all.
         let title = await Self.oneShotAsk(prompt: """
         Read this chat excerpt and reply with a terse 3–5 word title capturing the session's actual subject. No quotes, no punctuation at the end, no "Session about …" preamble. Just the title.
@@ -1368,68 +1294,22 @@ final class AppStore: ObservableObject {
         renameSession(sessionId, name: String(title.prefix(60)))
     }
 
-    /// Run `claude --print` once and return the full response text. Used
-    /// for short helper calls (titling, etc.) that shouldn't clutter a
-    /// real session.
-    nonisolated static func oneShotAsk(prompt: String, workDir: String, model: ClaudeModel) async -> String? {
-        await Task.detached { () -> String? in
-            switch model.provider {
-            case .claude:
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                proc.arguments = ["claude", "--print", "--output-format", "text"]
-                proc.currentDirectoryURL = URL(fileURLWithPath: workDir)
-                let stdin = Pipe()
-                let stdout = Pipe()
-                proc.standardInput = stdin
-                proc.standardOutput = stdout
-                proc.standardError = Pipe()
-                do {
-                    try proc.run()
-                    stdin.fileHandleForWriting.write(prompt.data(using: .utf8) ?? Data())
-                    try? stdin.fileHandleForWriting.close()
-                    let data = stdout.fileHandleForReading.readDataToEndOfFile()
-                    proc.waitUntilExit()
-                    return String(data: data, encoding: .utf8)
-                } catch {
-                    return nil
-                }
-            case .codex:
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                proc.arguments = [
-                    "codex", "exec", "--json", "--skip-git-repo-check",
-                    "--sandbox", "read-only", "--model", model.rawValue, "-",
-                ]
-                proc.currentDirectoryURL = URL(fileURLWithPath: workDir)
-                let stdin = Pipe()
-                let stdout = Pipe()
-                proc.standardInput = stdin
-                proc.standardOutput = stdout
-                proc.standardError = Pipe()
-                do {
-                    try proc.run()
-                    stdin.fileHandleForWriting.write(prompt.data(using: .utf8) ?? Data())
-                    try? stdin.fileHandleForWriting.close()
-                    let data = stdout.fileHandleForReading.readDataToEndOfFile()
-                    proc.waitUntilExit()
-                    guard let out = String(data: data, encoding: .utf8) else { return nil }
-                    let lines = out.split(separator: "\n")
-                    let texts = lines.compactMap { line -> String? in
-                        guard let data = line.data(using: .utf8),
-                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                              json["type"] as? String == "item.completed",
-                              let item = json["item"] as? [String: Any],
-                              item["type"] as? String == "agent_message"
-                        else { return nil }
-                        return item["text"] as? String
-                    }
-                    return texts.joined(separator: "\n\n")
-                } catch {
-                    return nil
-                }
-            }
-        }.value
+    /// Isolated helper runs share the same streaming transport and executable lookup.
+    static func oneShotAsk(prompt: String, workDir: String, model: AgentModel) async -> String? {
+        let helper = AgentService(backend: model.provider)
+        let helperId = UUID().uuidString
+        defer { helper.forgetThread(for: helperId) }
+        var options = SendOptions()
+        options.mode = .plan
+        options.permissions = .deny
+        var text = ""
+        var failed = false
+        await helper.sendMessage(sessionId: helperId, message: prompt, model: model,
+                                 workDir: workDir, options: options) { event in
+            if case .textDelta(let delta) = event { text += delta }
+            if case .error = event { failed = true }
+        }
+        return failed || text.isEmpty ? nil : text
     }
 
     /// Sessions that were interrupted before the app last closed. Used by
@@ -1459,38 +1339,75 @@ final class AppStore: ObservableObject {
         await compactSession()
     }
 
-    /// Clear the active session's conversation history via `/clear`. Claude
+    /// Clear the active session's conversation history via `/clear`. Codex
     /// Code treats this as a reset.
     func clearViaCommand() async {
         guard activeSessionId != nil else { return }
-        await sendMessage("/clear")
+        if let id = activeSessionId { clearSession(id) }
     }
 
     /// Entry point from the composer. Honors the undo-send window setting;
     /// pending sends can be cancelled for the configured duration.
     func queueSend(_ text: String, attachments: [ComposerAttachment] = []) {
-        guard let sid = activeSessionId else { return }
+        guard let session = activeSession else { return }
+        let sid = session.id
+        let options = makeSendOptions(for: session)
         pendingSendTask?.cancel()
         let window = settings.undoSendWindow
         if window <= 0 {
-            Task { await sendMessage(text, attachments: attachments) }
+            Task { await sendMessage(text, attachments: attachments, targetSessionId: sid, capturedOptions: options) }
             return
         }
         let pending = PendingSend(id: UUID().uuidString, sessionId: sid, text: text, attachments: attachments, sentAt: .now)
         pendingSend = pending
         pendingSendTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(window) * 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self, self.pendingSend?.id == pending.id else { return }
-                self.pendingSend = nil
-            }
-            await self?.sendMessage(text, attachments: attachments)
+            guard !Task.isCancelled, let self, self.pendingSend?.id == pending.id else { return }
+            self.pendingSend = nil
+            await self.sendMessage(text, attachments: attachments, targetSessionId: sid, capturedOptions: options)
         }
     }
 
-    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true) async {
-        guard let idx = activeSessionIndex else { return }
+    private func makeSendOptions(for session: Session) -> SendOptions {
+        // Build options from current state
+        var options = SendOptions()
+        options.mode = sessionMode
+        options.permissions = permissionMode
+        options.extendedContext = extendedContext
+        options.maxTurns = maxTurns
+        options.chatMode = session.kind == .chat
+        options.thinkingEnabled = thinkingEnabled
+        options.effortLevel = thinkingEnabled ? effortLevel : nil
+        options.openAIFastMode = session.openAIFastMode && session.model.supportsOpenAIFastMode
+
+        // Build system prompt from session override (if any) + settings + language
+        var systemPrompt = ""
+        if settings.useEngram && !settings.systemPrompt.isEmpty {
+            systemPrompt = settings.systemPrompt
+        }
+        let langInstruction = settings.language.assistantInstruction
+        if !langInstruction.isEmpty {
+            systemPrompt = systemPrompt.isEmpty ? langInstruction : "\(systemPrompt)\n\n\(langInstruction)"
+        }
+        let sessionOverride = session.sessionInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sessionOverride.isEmpty {
+            // Session-level instructions take precedence — prepended.
+            systemPrompt = systemPrompt.isEmpty ? sessionOverride : "\(sessionOverride)\n\n\(systemPrompt)"
+        }
+        if !systemPrompt.isEmpty {
+            options.systemPrompt = systemPrompt
+        }
+
+        return options
+    }
+
+    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil) async {
+        guard let target = targetSessionId ?? activeSessionId,
+              let idx = sessions.firstIndex(where: { $0.id == target }),
+              !isSessionBusy(target), !sessions[idx].readOnly,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        else { return }
+        let options = capturedOptions ?? makeSendOptions(for: sessions[idx])
         let sessionId = sessions[idx].id
         let model = sessions[idx].model
         let workDir = sessions[idx].workDir
@@ -1506,7 +1423,8 @@ final class AppStore: ObservableObject {
             await compactSession(
                 sessionId: sessionId,
                 continueWith: expandedText,
-                attachments: attachments
+                attachments: attachments,
+                capturedOptions: options
             )
             return
         }
@@ -1519,9 +1437,9 @@ final class AppStore: ObservableObject {
         let userMessage = ChatMessage(role: .user, blocks: displayBlocks)
         sessions[idx].messages.append(userMessage)
 
-        // Build the TRANSMISSION text for Claude — still includes paths so
-        // Claude can Read them. The display in the UI uses the blocks above.
-        let expanded: String
+        // Build the TRANSMISSION text for Codex — still includes paths so
+        // Codex can Read them. The display in the UI uses the blocks above.
+        var expanded: String
         if attachments.isEmpty {
             expanded = expandedText
         } else {
@@ -1529,58 +1447,19 @@ final class AppStore: ObservableObject {
             expanded = "Attached files:\n\(lines)\n\n" + expandedText
         }
 
-        // Build options from current state
-        var options = SendOptions()
-        options.mode = sessionMode
-        options.permissions = permissionMode
-        options.extendedContext = extendedContext
-        options.maxTurns = maxTurns
-        options.chatMode = sessions[idx].kind == .chat
-        options.thinkingEnabled = thinkingEnabled
-        options.effortLevel = thinkingEnabled ? effortLevel : nil
-        options.openAIFastMode = sessions[idx].openAIFastMode && sessions[idx].model.supportsOpenAIFastMode
-
-        // Build system prompt from session override (if any) + settings + language
-        var systemPrompt = ""
-        if settings.useEngram && !settings.systemPrompt.isEmpty {
-            systemPrompt = settings.systemPrompt
+        if !agent(for: model).hasThread(for: sessionId) {
+            let context = TranscriptContext.text(from: Array(sessions[idx].messages.dropLast()), characterLimit: 80_000)
+            if !context.isEmpty { expanded = "Previous conversation (context):\n\(context)\n\nCurrent request:\n" + expanded }
         }
-        let langInstruction = settings.language.claudeInstruction
-        if !langInstruction.isEmpty {
-            systemPrompt = systemPrompt.isEmpty ? langInstruction : "\(systemPrompt)\n\n\(langInstruction)"
-        }
-        let sessionOverride = sessions[idx].sessionInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !sessionOverride.isEmpty {
-            // Session-level instructions take precedence — prepended.
-            systemPrompt = systemPrompt.isEmpty ? sessionOverride : "\(sessionOverride)\n\n\(systemPrompt)"
-        }
-        if !systemPrompt.isEmpty {
-            options.systemPrompt = systemPrompt
-        }
-
-        // Wire up the PreToolUse hook transport. The hook script we install
-        // into the CLI's settings will POST approval requests to this port
-        // with the shared secret — loopback-only, per-process rotation.
-        options.hookPort = remoteServer.port
-        options.hookSecret = remoteServer.hookSecret
+        sessions[idx].wasInterrupted = true
+        Persistence.saveSession(sessions[idx])
 
         // Initialize THIS session's runtime — leaves any other concurrently
         // running sessions' runtimes untouched.
         runtimeStates[sessionId] = SessionRuntimeState(isBusy: true)
         generatingSessionId = sessionId
 
-        // (Previously we set wasInterrupted=true pre-emptively here so a
-        // hard crash mid-stream would be surfaced on next launch. In
-        // practice the false-positive rate from tool-approval pauses,
-        // stream cancellations, and ordinary force-quits swamped the
-        // signal — the banner fired constantly for sessions that had
-        // never actually crashed. We now set the flag only in the
-        // explicit interrupt path, and rely on the launch-time sweep to
-        // keep the UI quiet.)
-
-        switch model.provider {
-        case .claude:
-            await claude.sendMessage(
+        await agent(for: model).sendMessage(
                 sessionId: sessionId,
                 message: expanded,
                 model: model,
@@ -1588,20 +1467,8 @@ final class AppStore: ObservableObject {
                 options: options
             ) { [weak self] event in
                 guard let self else { return }
-                self.handleClaudeEvent(event, sessionId: sessionId)
+                self.handleAgentEvent(event, sessionId: sessionId)
             }
-        case .codex:
-            await codex.sendMessage(
-                sessionId: sessionId,
-                message: expanded,
-                model: model,
-                workDir: workDir,
-                options: options
-            ) { [weak self] event in
-                guard let self else { return }
-                self.handleClaudeEvent(event, sessionId: sessionId)
-            }
-        }
     }
 
     private func shouldAutoCompact(sessionId: String) -> Bool {
@@ -1703,13 +1570,11 @@ final class AppStore: ObservableObject {
     func cycleActiveSessionModel() {
         guard let id = activeSessionId,
               let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let models = ClaudeModel.allCases
+        let models = AgentModel.allCases
         let cur = sessions[idx].model
         let curIdx = models.firstIndex(of: cur) ?? 0
         let next = models[(curIdx + 1) % models.count]
-        sessions[idx].model = next
-        Persistence.saveSession(sessions[idx])
-        objectWillChange.send()
+        setModel(next)
     }
 
     /// Switch to the next / previous session (in the current sidebar tab,
@@ -1761,6 +1626,8 @@ final class AppStore: ObservableObject {
         guard let sIdx = sessions.firstIndex(where: { $0.id == sessionId }),
               let mIdx = sessions[sIdx].messages.firstIndex(where: { $0.id == messageId })
         else { return }
+        guard !isSessionBusy(sessionId) else { return }
+        agent(for: sessions[sIdx].model).forgetThread(for: sessionId)
         sessions[sIdx].messages.removeSubrange(mIdx...)
         Persistence.saveSession(sessions[sIdx])
     }
@@ -1772,6 +1639,8 @@ final class AppStore: ObservableObject {
         guard let sIdx = sessions.firstIndex(where: { $0.id == sessionId }),
               let mIdx = sessions[sIdx].messages.firstIndex(where: { $0.id == messageId })
         else { return }
+        guard !isSessionBusy(sessionId) else { return }
+        agent(for: sessions[sIdx].model).forgetThread(for: sessionId)
         sessions[sIdx].messages.remove(at: mIdx)
         Persistence.saveSession(sessions[sIdx])
     }
@@ -1807,17 +1676,13 @@ final class AppStore: ObservableObject {
     func interrupt() {
         // Prefer the session that's actually generating; fall back to active.
         let id = generatingSessionId ?? activeSessionId
-        guard let id = id else { return }
+        guard let id = activeSessionId ?? id else { return }
         guard let session = sessions.first(where: { $0.id == id }) else { return }
-        switch session.model.provider {
-        case .claude:
-            claude.interrupt(sessionId: id)
-        case .codex:
-            codex.interrupt(sessionId: id)
-        }
+        agent(for: session.model).interrupt(sessionId: id)
     }
 
-    private func handleClaudeEvent(_ event: ClaudeEvent, sessionId: String) {
+    private func handleAgentEvent(_ event: AgentEvent, sessionId: String) {
+        guard sessions.contains(where: { $0.id == sessionId }) else { return }
         mutateRuntime(sessionId) { state in
             switch event {
             case .messageStart:
@@ -1927,7 +1792,7 @@ final class AppStore: ObservableObject {
                 recentlyCompleted[sessionId] = Date()
             }
             // Fire the on-complete shell hook if configured.
-            runCompletionHook(sessionId: sessionId)
+            if runtimeStates[sessionId]?.lastError == nil { runCompletionHook(sessionId: sessionId) }
         default:
             break
         }
@@ -2003,12 +1868,12 @@ final class AppStore: ObservableObject {
 
         // Clean completion — clear the interrupted marker so the UI stops
         // showing a "resume" banner on next launch / re-visit.
-        sessions[idx].wasInterrupted = false
+        sessions[idx].wasInterrupted = runtime.lastError != nil
 
         // Auto-name session from first assistant response.
         // Strategy: drop a cheap first-line heuristic in immediately so the
         // sidebar isn't stuck on "New Session," then kick off a side call to
-        // Claude asking for a 3-5 word title and replace when it returns.
+        // Codex asking for a 3-5 word title and replace when it returns.
         if sessions[idx].messages.count <= 2, sessions[idx].name == "New Session" {
             let preview = runtime.streamingText.prefix(50)
             if !preview.isEmpty {
@@ -2016,7 +1881,7 @@ final class AppStore: ObservableObject {
                 sessions[idx].name = name.count > 40 ? String(name.prefix(40)) + "…" : name
             }
             // Fire real AI-titled rename off to the side. Doesn't touch
-            // the running session; uses its own `claude --print` call.
+            // the running session; uses its own `codex exec` call.
             let sid = sessionId
             Task { [weak self] in
                 // Small delay so the session has at least one user + one

@@ -41,8 +41,8 @@ extension Color {
 
     // Text
     static let kilnText = kilnDyn(0x09090B, 0xE4E4E7)
-    static let kilnTextSecondary = kilnDyn(0x52525B, 0x8B8B8E)
-    static let kilnTextTertiary = kilnDyn(0x71717A, 0x56565A)
+    static let kilnTextSecondary = kilnDyn(0x52525B, 0xA1A1AA)
+    static let kilnTextTertiary = kilnDyn(0x71717A, 0x85858D)
 
     // Accent
     /// User-configurable accent color. Reads the current setting from
@@ -52,10 +52,10 @@ extension Color {
     /// user's chosen brand color per appearance.
     static var kilnAccent: Color {
         let hex = (UserDefaults.standard.string(forKey: "kiln.accentHex") ?? "").trimmingCharacters(in: .whitespaces)
-        if hex.isEmpty { return Color(hex: 0xF59E0B) }
+        if hex.isEmpty { return Color(hex: 0x10B981) }
         return Color(hexString: hex)
     }
-    static var kilnAccentHover: Color { Color(hex: 0xFBBF24) }
+    static var kilnAccentHover: Color { Color(hex: 0x34D399) }
     static var kilnAccentMuted: Color {
         let hex = (UserDefaults.standard.string(forKey: "kiln.accentHex") ?? "").trimmingCharacters(in: .whitespaces)
         // Slightly stronger tint in light mode — 15% alpha on orange against
@@ -63,7 +63,7 @@ extension Color {
         // mode rather than NSApp.effectiveAppearance to avoid main-actor
         // isolation requirements at color-lookup time.
         let alpha: Double = (Self.kilnThemeMode == .light) ? 0.22 : 0.15
-        if hex.isEmpty { return Color(hex: 0xF59E0B).opacity(alpha) }
+        if hex.isEmpty { return Color(hex: 0x10B981).opacity(alpha) }
         return Color(hexString: hex).opacity(alpha)
     }
 
@@ -99,9 +99,9 @@ extension Color {
     /// Accent color environment key — views that want the user-chosen accent
     /// read `@Environment(\.kilnAccent)`; views that use `Color.kilnAccent`
     /// directly stay with the default orange.
-    static var kilnAccentDefault: Color { Color(hex: 0xF59E0B) }
+    static var kilnAccentDefault: Color { Color(hex: 0x10B981) }
 
-    /// Accepts "F59E0B", "#F59E0B", or "0xF59E0B". Falls back to kilnAccent.
+    /// Accepts "F59E0B", "#F59E0B", or "0x10B981". Falls back to kilnAccent.
     init(hexString: String) {
         var s = hexString.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s = String(s.dropFirst()) }
@@ -109,7 +109,7 @@ extension Color {
         if let v = UInt(s, radix: 16) {
             self.init(hex: v)
         } else {
-            self.init(hex: 0xF59E0B)
+            self.init(hex: 0x10B981)
         }
     }
 }
@@ -117,7 +117,7 @@ extension Color {
 // MARK: - Environment Keys (for customizable theme values)
 
 private struct KilnAccentKey: EnvironmentKey {
-    static let defaultValue: Color = Color(hex: 0xF59E0B)
+    static let defaultValue: Color = Color(hex: 0x10B981)
 }
 
 private struct KilnFontScaleKey: EnvironmentKey {

@@ -6,7 +6,7 @@ import SwiftUI
 // files from the active session's workdir. Typing further filters the
 // list fuzzy-style, arrow keys navigate, Return / Tab accepts, Esc
 // dismisses. Selecting a file replaces the `@query` token with
-// `@relative/path/to/file` — the leading `@` is preserved because Claude
+// `@relative/path/to/file` — the leading `@` is preserved because Codex
 // Code recognizes it as a file reference.
 //
 // Filesystem walk is cached per workdir. We re-walk if the cache is

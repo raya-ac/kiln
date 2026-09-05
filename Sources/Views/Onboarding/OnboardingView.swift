@@ -5,7 +5,7 @@ import AppKit
 //
 // Four-step first-run flow:
 //   1. Welcome — what Kiln is.
-//   2. CLI check — detect `claude` and `codex` in common paths; if missing
+//   2. CLI check — detect `codex` in common paths; if missing
 //      show install commands with one-click copy.
 //   3. Login — nudge the user to run the CLI once to authenticate. We
 //      don't drive it ourselves; the CLI handles its own auth.
@@ -17,12 +17,10 @@ import AppKit
 struct OnboardingView: View {
     @EnvironmentObject var store: AppStore
     @State private var step: Step = .welcome
-    @State private var claudeStatus: ClaudeStatus = .checking
-    @State private var claudePath: String?
-    @State private var claudeVersion: String?
-    @State private var codexStatus: ClaudeStatus = .checking
+    @State private var codexStatus: CLIStatus = .checking
     @State private var codexPath: String?
     @State private var codexVersion: String?
+    @State private var openCodeVersion: String?
     @State private var pickedWorkDir: String?
     @State private var engramStatus: EngramStatus = .checking
     @State private var engramPath: String?
@@ -35,7 +33,7 @@ struct OnboardingView: View {
         case missing     // not installed
     }
 
-    enum ClaudeStatus {
+    enum CLIStatus {
         case checking
         case installed   // found and responds to --version
         case missing     // not on disk
@@ -138,7 +136,7 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Kiln can drive `claude` and `codex` from a native macOS shell around them.")
+            Text("Codex and OpenCode, in one native workspace.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
 
@@ -186,12 +184,13 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Claude and Codex each handle their own authentication. Run the CLI you want once in Terminal, complete login there, and Kiln will inherit that session.")
+            Text("Codex handles authentication. Sign in through Terminal to connect your account.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            CopyableCommand(command: "claude   # or codex login")
+            CopyableCommand(command: "codex login")
+            CopyableCommand(command: "opencode auth login")
 
             Button("Open Terminal") { openTerminal() }
                 .buttonStyle(.plain)
@@ -266,11 +265,11 @@ struct OnboardingView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.kilnTextSecondary)
                     CopyableCommand(command: engramInstallCommand)
-                    Text("Then register it with Claude Code:")
+                    Text("Register it with Codex:")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.kilnTextSecondary)
                         .padding(.top, 4)
-                    CopyableCommand(command: "claude mcp add engram engram --scope user -- mcp")
+                    CopyableCommand(command: "codex mcp add engram -- engram serve --mcp")
                 }
                 .padding(12)
                 .background(Color.kilnSurface)
@@ -457,9 +456,9 @@ struct OnboardingView: View {
     @ViewBuilder
     private var statusBadge: some View {
         VStack(spacing: 8) {
-            backendStatusRow(name: "Claude Code", command: "claude", status: claudeStatus, version: claudeVersion)
             Rectangle().fill(Color.kilnBorderSubtle).frame(height: 1)
             backendStatusRow(name: "Codex", command: "codex", status: codexStatus, version: codexVersion)
+            backendStatusRow(name: "OpenCode", command: "opencode", status: openCodeVersion == nil ? .missing : .installed, version: openCodeVersion)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
@@ -469,7 +468,7 @@ struct OnboardingView: View {
     }
 
     @ViewBuilder
-    private func backendStatusRow(name: String, command: String, status: ClaudeStatus, version: String?) -> some View {
+    private func backendStatusRow(name: String, command: String, status: CLIStatus, version: String?) -> some View {
         HStack(spacing: 8) {
             switch status {
             case .checking:
@@ -521,7 +520,7 @@ struct OnboardingView: View {
 
     private var primaryEnabled: Bool {
         switch step {
-        case .install: return claudeStatus != .checking && codexStatus != .checking
+        case .install: return codexStatus != .checking
         default: return true
         }
     }
@@ -543,7 +542,7 @@ struct OnboardingView: View {
         let next = step.rawValue + direction
         if let s = Step(rawValue: next) {
             step = s
-            if s == .install && (claudeStatus == .checking || codexStatus == .checking) {
+            if s == .install && codexStatus == .checking {
                 Task { await probeCLIs() }
             }
             if s == .engram {
@@ -569,13 +568,11 @@ struct OnboardingView: View {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
-    // MARK: - Claude probe
+    // MARK: - Codex probe
 
     private var installCommand: String {
         var commands: [String] = []
-        if claudeStatus == .missing || claudeStatus == .broken {
-            commands.append("npm install -g @anthropic-ai/claude-code")
-        }
+
         if codexStatus == .missing || codexStatus == .broken {
             commands.append("brew install --cask codex")
         }
@@ -583,36 +580,13 @@ struct OnboardingView: View {
     }
 
     private var needsCLIInstall: Bool {
-        claudeStatus == .missing || claudeStatus == .broken || codexStatus == .missing || codexStatus == .broken
+        codexStatus == .missing || codexStatus == .broken
     }
 
     private func probeCLIs() async {
-        await probeClaude()
         await probeCodex()
-    }
-
-    private func probeClaude() async {
-        claudeStatus = .checking
-        let candidates = [
-            "\(NSHomeDirectory())/.local/bin/claude",
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-        ]
-        let found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-        guard let path = found else {
-            claudeStatus = .missing
-            claudePath = nil
-            claudeVersion = nil
-            return
-        }
-        claudePath = path
-        // Run `claude --version` to confirm it's actually functional.
-        let version = await runForOutput(path, args: ["--version"])
-        if let v = version, !v.isEmpty {
-            claudeStatus = .installed
-            claudeVersion = v.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            claudeStatus = .broken
+        if let data = try? await CodexCLI.output(["--version"], executable: OpenCodeProtocol.executablePath, command: "opencode") {
+            openCodeVersion = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 

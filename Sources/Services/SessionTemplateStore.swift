@@ -7,7 +7,7 @@ struct SessionTemplate: Identifiable, Codable, Hashable, Sendable {
     let id: String
     var name: String
     var icon: String   // SF Symbol name
-    var model: String  // ClaudeModel rawValue
+    var model: String  // AgentModel rawValue
     var kind: String   // SessionKind rawValue
     var mode: String?  // SessionMode rawValue
     var permissions: String? // PermissionMode rawValue
@@ -88,13 +88,13 @@ final class SessionTemplateStore: ObservableObject {
         SessionTemplate(
             name: "Quick question",
             icon: "bubble.left",
-            model: ClaudeModel.gpt54Mini.rawValue,
+            model: AgentModel.gpt54Mini.rawValue,
             kind: "chat"
         ),
         SessionTemplate(
             name: "Code review",
             icon: "checkmark.shield",
-            model: ClaudeModel.gpt55.rawValue,
+            model: AgentModel.gpt55.rawValue,
             kind: "code",
             mode: "plan",
             permissions: "ask",
@@ -103,7 +103,7 @@ final class SessionTemplateStore: ObservableObject {
         SessionTemplate(
             name: "Deep build",
             icon: "hammer",
-            model: ClaudeModel.gpt53Codex.rawValue,
+            model: AgentModel.gpt53Codex.rawValue,
             kind: "code",
             mode: "build",
             permissions: "bypass"

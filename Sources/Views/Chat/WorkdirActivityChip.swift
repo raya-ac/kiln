@@ -48,7 +48,7 @@ struct WorkdirActivityChip: View {
 
                 Spacer()
 
-                // Quick "refresh now" in case Claude ran something outside
+                // Quick "refresh now" in case Codex ran something outside
                 // our event stream (e.g. user ran a git op in Terminal).
                 Button {
                     if let id = store.activeSessionId {

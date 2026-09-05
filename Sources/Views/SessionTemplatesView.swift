@@ -238,17 +238,10 @@ private struct TemplateEditor: View {
             }
 
             labelled("Model") {
-                Picker("", selection: $template.model) {
-                    ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
-                        Section(group.provider.label) {
-                            ForEach(group.models) { m in
-                                Text(m.label).tag(m.rawValue)
-                            }
-                        }
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
+                ModelPickerButton(selection: Binding(
+                    get: { AgentModel(rawValue: template.model) ?? .defaultModel },
+                    set: { template.model = $0.rawValue }
+                ))
             }
 
             HStack(spacing: 10) {

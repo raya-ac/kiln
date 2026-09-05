@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Status bar
 //
 // Persistent one-line strip at the bottom of the window. Shows the
-// active session's model, the workdir basename, whether Claude is
+// active session's model, the workdir basename, whether Codex is
 // busy, the engram toggle, and the last-turn token totals.
 // Kept deliberately terse — it's peripheral, not content.
 
@@ -92,7 +92,7 @@ struct StatusBar: View {
     }
 
     @ViewBuilder
-    private func brandPill(model: ClaudeModel) -> some View {
+    private func brandPill(model: AgentModel) -> some View {
         HStack(spacing: 5) {
             ModelBrandIcon(brand: model.brand, size: 10)
                 .foregroundStyle(model.tint)

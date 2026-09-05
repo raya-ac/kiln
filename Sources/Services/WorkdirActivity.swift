@@ -2,7 +2,7 @@ import Foundation
 
 /// Tracks what's changed in a session's workdir relative to HEAD. Powers
 /// the activity chip above the composer — click, see a list of files
-/// Claude touched, click one for a diff.
+/// Codex touched, click one for a diff.
 ///
 /// We snapshot `git status --porcelain` on two events:
 ///   1. When a session first becomes active (baseline).
@@ -11,7 +11,7 @@ import Foundation
 /// No polling — git status on a large repo is cheap (tens of ms) but
 /// not free, and polling while the user is just reading chat would be
 /// wasteful. Event-driven refresh is accurate enough: files only change
-/// when Claude's tools run, which ends with `.done`.
+/// when Codex's tools run, which ends with `.done`.
 struct ChangedFile: Identifiable, Hashable, Sendable {
     let path: String
     let status: String   // "M", "A", "D", "??", "R" etc.

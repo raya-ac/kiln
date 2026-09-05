@@ -79,7 +79,7 @@ enum GitStatus {
 
     /// Per-file status map keyed by absolute path. Used by the file tree
     /// to draw per-row status markers. Cached with a separate, shorter
-    /// TTL than `info` — status churns fast while Claude edits, and the
+    /// TTL than `info` — status churns fast while Codex edits, and the
     /// tree wants to feel live.
     private static let fileTTL: TimeInterval = 3
     nonisolated(unsafe) private static var fileCache: [String: ([String: FileState], Date)] = [:]
@@ -99,7 +99,7 @@ enum GitStatus {
     }
 
     /// Force the next call to `fileStatuses` to refetch. Call after tool
-    /// calls complete so the tree reflects Claude's edits immediately.
+    /// calls complete so the tree reflects Codex's edits immediately.
     static func invalidate(workDir: String) {
         lock.lock()
         fileCache.removeValue(forKey: workDir)

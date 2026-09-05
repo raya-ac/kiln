@@ -98,52 +98,7 @@ struct SettingsView: View {
                     SettingsSection(title: store.settings.language.ui.defaults) {
                         // Default model
                         SettingsRow(label: store.settings.language.ui.modelLabel) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(ClaudeModel.groupedByProvider, id: \.provider.rawValue) { group in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack(spacing: 5) {
-                                                ModelProviderIcon(provider: group.provider, size: 9)
-                                                Text(group.provider.label)
-                                                    .font(.system(size: 10, weight: .semibold))
-                                            }
-                                            .foregroundStyle(Color.kilnTextTertiary)
-                                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 6)], spacing: 6) {
-                                                ForEach(group.models) { model in
-                                                    let selected = store.settings.defaultModel == model
-                                                    Button {
-                                                        store.settings.defaultModel = model
-                                                        store.saveSettings()
-                                                    } label: {
-                                                        HStack(spacing: 7) {
-                                                            ModelBrandIcon(brand: model.brand, size: 8)
-                                                            VStack(alignment: .leading, spacing: 1) {
-                                                                Text(model.label)
-                                                                    .font(.system(size: 11, weight: .semibold))
-                                                                    .lineLimit(1)
-                                                                Text(model.tier)
-                                                                    .font(.system(size: 9, weight: .medium))
-                                                                    .foregroundStyle(selected ? Color.kilnBg.opacity(0.72) : Color.kilnTextTertiary)
-                                                            }
-                                                            Spacer(minLength: 0)
-                                                        }
-                                                        .foregroundStyle(selected ? Color.kilnBg : Color.kilnTextSecondary)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 8)
-                                                        .background(selected ? model.tint : Color.kilnSurface)
-                                                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                                                    }
-                                                    .buttonStyle(.plain)
-                                                    .help(model.fullId)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Text(store.settings.defaultModel.fullId)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(Color.kilnTextTertiary)
-                            }
+                            ModelPickerButton(selection: $store.settings.defaultModel)
                         }
 
                         // Default mode
@@ -743,18 +698,25 @@ struct SettingsView: View {
     // MARK: - MCP Servers
 
     @State private var mcpServers: [MCPServerInfo] = []
+    @State private var mcpError: String?
+
+    private func reloadMCP() async {
+        do { mcpServers = try await MCPServerReader.loadAll(); mcpError = nil }
+        catch { mcpError = "Could not load Codex MCP configuration." }
+    }
 
     @ViewBuilder
     private var mcpSection: some View {
         SettingsSection(title: "MCP SERVERS") {
+            if let mcpError { Text(mcpError).foregroundStyle(Color.kilnError) }
             if mcpServers.isEmpty {
                 HStack {
-                    Text("No MCP servers found in \(MCPServerReader.claudeSettingsPath)")
+                    Text("No MCP servers found in \(MCPServerReader.settingsPath)")
                         .font(.system(size: 10))
                         .foregroundStyle(Color.kilnTextTertiary)
                     Spacer()
                     Button("Reload") {
-                        mcpServers = MCPServerReader.loadAll()
+                        Task { await reloadMCP() }
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .semibold))
@@ -807,16 +769,16 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: MCPServerReader.claudeSettingsPath))
+                        NSWorkspace.shared.open(URL(fileURLWithPath: MCPServerReader.settingsPath))
                     } label: {
-                        Text("Edit ~/.claude.json")
+                        Text("Edit Codex config")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Color.kilnAccent)
                     }
                     .buttonStyle(.plain)
                     Spacer()
                     Button("Reload") {
-                        mcpServers = MCPServerReader.loadAll()
+                        Task { await reloadMCP() }
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .semibold))
@@ -825,7 +787,7 @@ struct SettingsView: View {
                 .padding(.top, 4)
             }
         }
-        .onAppear { mcpServers = MCPServerReader.loadAll() }
+        .onAppear { Task { await reloadMCP() } }
     }
 
     // MARK: - Advanced

@@ -486,7 +486,7 @@ struct ComposerView: View {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
 
-        // All slash commands are handled client-side. Claude Code's native
+        // All slash commands are handled client-side. Codex's native
         // slash commands only work in interactive mode; we run --print.
         if text.hasPrefix("/") && !text.hasPrefix("//") && isRecognizedSlashCommand(text) {
             handleSlashCommand(text)
@@ -540,9 +540,9 @@ struct ComposerView: View {
         case "/compare":
             // Pick a model different from the current one — cycle forward by
             // one in allCases. User can re-run /compare to try more models.
-            let current = store.activeSession?.model ?? .sonnet46
-            let all = ClaudeModel.allCases
-            let alt: ClaudeModel = {
+            let current = store.activeSession?.model ?? .defaultModel
+            let all = AgentModel.allCases
+            let alt: AgentModel = {
                 guard let i = all.firstIndex(of: current) else { return all.first ?? current }
                 return all[(i + 1) % all.count]
             }()
@@ -632,9 +632,9 @@ struct ComposerView: View {
                 ToastCenter.shared.show("Cloned session", kind: .success)
             }
         case "/status":
-            // Inject current git status as a plain user message so Claude
+            // Inject current git status as a plain user message so Codex
             // sees the working-tree state. Dead cheap, avoids asking
-            // Claude to shell out.
+            // Codex to shell out.
             if let dir = store.activeSession?.workDir,
                let info = GitStatus.info(for: dir) {
                 let note = "Current git status — branch `\(info.branch)`, \(info.dirtyCount) uncommitted change\(info.dirtyCount == 1 ? "" : "s")."
@@ -693,7 +693,7 @@ struct ComposerView: View {
 
         // --- git wrappers ---
         case "/log":
-            // Inject the last 5 commits as a user message — gives Claude
+            // Inject the last 5 commits as a user message — gives Codex
             // cheap orientation without having to shell out itself. Off
             // main: big histories in a heavy repo can take 100+ ms to
             // walk, which beachballs the composer.
@@ -889,7 +889,7 @@ struct ComposerView: View {
             }
         case "/quote":
             if let text = SlashHelpers.lastAssistantText(in: store.activeSession) {
-                // Prefix each line with "> " so Claude sees it as a quote.
+                // Prefix each line with "> " so Codex sees it as a quote.
                 // Keeps the composer editable so the user can add their
                 // follow-up question underneath.
                 let quoted = text.split(separator: "\n", omittingEmptySubsequences: false)
@@ -927,7 +927,7 @@ struct ComposerView: View {
         case "/resend":
             Task { await store.retryLastMessage() }
         case "/summary":
-            // Reuse the title generator — it already asks Claude for a
+            // Reuse the title generator — it already asks Codex for a
             // short, dense phrase. Saves adding a parallel path.
             Task { await store.generateSessionTitle() }
         case "/todo":
@@ -1019,7 +1019,7 @@ struct ComposerView: View {
             guard let text = try? String(contentsOfFile: target, encoding: .utf8) else {
                 ToastCenter.shared.show("Can't read \(rel)", kind: .error); break
             }
-            // Cap at 400 lines — anything longer is better read via Claude's
+            // Cap at 400 lines — anything longer is better read via Codex's
             // file-read tool than jammed into the prompt.
             let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             let clipped = lines.prefix(400).joined(separator: "\n")
@@ -1227,7 +1227,7 @@ struct ComposerView: View {
                     return
                 }
             }
-            // Unknown command — send as plain text so Claude can respond to it.
+            // Unknown command — send as plain text so Codex can respond to it.
             Task { await store.sendMessage(raw) }
         }
     }
@@ -1407,53 +1407,28 @@ struct ComposerToolbar: View {
                     }
                     .help(store.permissionMode.description)
 
-                    // Max turns — code sessions only
-                    ToolbarPill(
-                        icon: "arrow.trianglehead.2.counterclockwise",
-                        label: store.maxTurns.map { "\($0) \(store.settings.language.ui.turnsSuffix)" } ?? "∞ \(store.settings.language.ui.turnsSuffix)",
-                        color: Color.kilnTextSecondary,
-                        active: store.maxTurns != nil
-                    ) {
-                        cycleMaxTurns()
-                    }
-                    .help("Limit agentic turns")
+
                 }
 
                 // Thinking toggle
                 ToolbarPill(
                     icon: "brain",
-                    label: store.thinkingEnabled ? store.settings.language.ui.think : store.settings.language.ui.noThink,
-                    color: store.thinkingEnabled ? .purple : Color.kilnTextSecondary,
+                    label: store.thinkingEnabled ? "Reasoning" : "Default reasoning",
+                    color: store.thinkingEnabled ? Color.kilnAccent : Color.kilnTextSecondary,
                     active: store.thinkingEnabled
                 ) {
                     store.thinkingEnabled.toggle()
                 }
-                .help("Extended thinking — lets the active assistant reason before responding")
+                .help("Show reasoning summaries and choose effort")
 
-                // Effort level — only meaningful with thinking on
-                if store.thinkingEnabled {
-                    ToolbarPill(
-                        icon: "gauge.with.dots.needle.67percent",
-                        label: localizedEffortLabel,
-                        color: effortColor,
-                        active: true
-                    ) {
-                        cycleEffort()
+                if store.thinkingEnabled && !(store.activeSession?.model.reasoningEfforts.isEmpty ?? true) {
+                    Picker("Reasoning", selection: $store.effortLevel) {
+                        ForEach(EffortLevel.allCases.filter { store.activeSession?.model.reasoningEfforts.contains($0.rawValue) ?? false }) { effort in
+                            Text(effort.label).tag(effort)
+                        }
                     }
-                    .help("Thinking effort: low / med / high / max")
-                }
-
-                // Extended context (only for Opus)
-                if store.activeSession?.model.supportsExtendedContext == true {
-                    ToolbarPill(
-                        icon: "arrow.up.left.and.arrow.down.right",
-                        label: store.extendedContext ? "1M ctx" : "200K ctx",
-                        color: store.extendedContext ? .purple : Color.kilnTextSecondary,
-                        active: store.extendedContext
-                    ) {
-                        store.extendedContext.toggle()
-                    }
-                    .help(store.extendedContext ? "1 million token context window" : "Standard 200K context window")
+                    .pickerStyle(.menu).fixedSize()
+                    .help("Reasoning effort")
                 }
 
                 // Model picker lives in the chat header strip now —
@@ -1485,49 +1460,13 @@ struct ComposerToolbar: View {
         }
     }
 
-    private var effortColor: Color {
-        switch store.effortLevel {
-        case .low: Color.kilnTextSecondary
-        case .medium: .blue
-        case .high: .purple
-        case .max: Color(hex: 0xD97706)
-        }
-    }
 
-    private var localizedEffortLabel: String {
-        let ui = store.settings.language.ui
-        switch store.effortLevel {
-        case .low: return ui.effortLow
-        case .medium: return ui.effortMed
-        case .high: return ui.effortHigh
-        case .max: return ui.effortMax
-        }
-    }
-
-    private func cycleEffort() {
-        switch store.effortLevel {
-        case .low: store.effortLevel = .medium
-        case .medium: store.effortLevel = .high
-        case .high: store.effortLevel = .max
-        case .max: store.effortLevel = .low
-        }
-    }
-
-    private func cycleMaxTurns() {
-        switch store.maxTurns {
-        case nil: store.maxTurns = 5
-        case 5: store.maxTurns = 10
-        case 10: store.maxTurns = 25
-        case 25: store.maxTurns = 50
-        default: store.maxTurns = nil
-        }
-    }
 }
 
 // MARK: - Model Pill with Provider Icon
 
 struct ModelPill: View {
-    let model: ClaudeModel
+    let model: AgentModel
     @EnvironmentObject var store: AppStore
     @State private var hovering = false
 
@@ -1571,90 +1510,10 @@ struct ModelProviderIcon: View {
 
     var body: some View {
         switch provider {
-        case .claude:
-            Image(systemName: "sparkle")
-                .font(.system(size: size, weight: .semibold))
-        case .codex:
+        case .codex, .opencode:
             Image(systemName: "terminal")
                 .font(.system(size: size, weight: .semibold))
         }
-    }
-}
-
-struct ModelBrandIcon: View {
-    let brand: ModelBrand
-    let size: CGFloat
-
-    var body: some View {
-        switch brand {
-        case .claude:
-            ClaudeMark()
-                .frame(width: size, height: size)
-        case .chatgpt:
-            OpenAIKnotMark()
-                .frame(width: size, height: size)
-        case .codex:
-            CodexMark()
-                .frame(width: size, height: size)
-        }
-    }
-}
-
-struct CodexMark: View {
-    var body: some View {
-        GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let stroke = max(side * 0.1, 1)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: side * 0.14)
-                    .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
-
-                Path { path in
-                    path.move(to: CGPoint(x: side * 0.36, y: side * 0.28))
-                    path.addLine(to: CGPoint(x: side * 0.18, y: side * 0.5))
-                    path.addLine(to: CGPoint(x: side * 0.36, y: side * 0.72))
-                }
-                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
-
-                Path { path in
-                    path.move(to: CGPoint(x: side * 0.64, y: side * 0.28))
-                    path.addLine(to: CGPoint(x: side * 0.82, y: side * 0.5))
-                    path.addLine(to: CGPoint(x: side * 0.64, y: side * 0.72))
-                }
-                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
-
-                Path { path in
-                    path.move(to: CGPoint(x: side * 0.44, y: side * 0.74))
-                    path.addLine(to: CGPoint(x: side * 0.56, y: side * 0.74))
-                }
-                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-            }
-            .frame(width: side, height: side)
-        }
-        .aspectRatio(1, contentMode: .fit)
-    }
-}
-
-struct OpenAIKnotMark: View {
-    var body: some View {
-        GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let stroke = max(side * 0.12, 1)
-            let yOffset = side * 0.2
-
-            ZStack {
-                ForEach(0..<6, id: \.self) { idx in
-                    Capsule()
-                        .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
-                        .frame(width: side * 0.58, height: side * 0.3)
-                        .offset(y: -yOffset)
-                        .rotationEffect(.degrees(Double(idx) * 60))
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-        .aspectRatio(1, contentMode: .fit)
     }
 }
 
@@ -2131,7 +1990,7 @@ struct RateLimitMeter: View {
 
     private var helpText: String {
         if tracker.isRateLimited {
-            return "Claude returned a rate-limit error recently. Click to dismiss."
+            return "Codex returned a rate-limit error recently. Click to dismiss."
         }
         let used = tracker.tokensLastFiveMin
         let cap = tracker.softCapTokensPerFiveMin
