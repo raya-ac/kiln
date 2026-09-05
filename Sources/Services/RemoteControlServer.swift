@@ -128,6 +128,16 @@ final class RemoteControlServer: ObservableObject {
     }
 
     nonisolated private func send(_ response: HTTPResponse, on conn: NWConnection) {
+        if let file = response.file {
+            guard let transfer = try? HTTPFileTransfer(body: file, connection: conn) else {
+                send(.notFound, on: conn)
+                return
+            }
+            conn.send(content: response.serialize(), completion: .contentProcessed { error in
+                if error != nil { conn.cancel() } else { transfer.sendNext() }
+            })
+            return
+        }
         conn.send(content: response.serialize(), completion: .contentProcessed { _ in
             conn.cancel()
         })
@@ -169,6 +179,23 @@ final class RemoteControlServer: ObservableObject {
 
         case ("GET", "/api/state"):
             return .json(Self.fullState(store: store))
+
+        case ("GET", "/api/media"), ("HEAD", "/api/media"):
+            guard let sid = req.query["session"], let mediaID = req.query["id"],
+                  let session = store.sessions.first(where: { $0.id == sid }) else { return .notFound }
+            let media = session.messages.flatMap { message in
+                message.blocks.flatMap { block -> [MediaReference] in
+                    if case .text(let text) = block { return MediaMarkdown.references(text) }
+                    if case .attachment(let file) = block {
+                        return MediaReference.make(source: file.path, label: file.name).map { [$0] } ?? []
+                    }
+                    return []
+                }
+            }
+            guard let reference = media.first(where: { $0.id == mediaID }),
+                  let file = reference.permittedURL(workDir: session.workDir), file.isFileURL else { return .notFound }
+            return (try? MediaHTTP.response(file: file, rangeHeader: req.headers["range"],
+                download: req.query["download"] == "1", head: req.method == "HEAD")) ?? .notFound
 
         case ("GET", "/api/status"):
             return .json([
@@ -635,7 +662,7 @@ final class RemoteControlServer: ObservableObject {
 
     private static func blockJSON(_ b: MessageBlock) -> [String: Any] {
         switch b {
-        case .text(let s): return ["type": "text", "text": s]
+        case .text(let s): return ["type": "text", "text": s, "media": MediaMarkdown.references(s).map(mediaJSON)]
         case .thinking(let s): return ["type": "thinking", "text": s]
         case .trace(let entries):
             return ["type": "trace", "entries": entries.map { entry in
@@ -655,8 +682,13 @@ final class RemoteControlServer: ObservableObject {
         case .suggestions(let s):
             return ["type": "suggestions", "prompts": s.map { ["id": $0.id, "label": $0.label, "prompt": $0.prompt, "icon": $0.icon] }]
         case .attachment(let a):
-            return ["type": "attachment", "name": a.name, "path": a.path]
+            return ["type": "attachment", "name": a.name, "path": a.path,
+                    "media": MediaReference.make(source: a.path, label: a.name).map { [mediaJSON($0)] } ?? []]
         }
+    }
+
+    private static func mediaJSON(_ media: MediaReference) -> [String: Any] {
+        ["id": media.id, "source": media.source, "label": media.label, "kind": media.kind.rawValue]
     }
 
     private static func toolUseJSON(_ t: ToolUseBlock) -> [String: Any] {
@@ -864,6 +896,7 @@ struct HTTPResponse {
     var status: Int = 200
     var headers: [String: String] = ["Content-Type": "text/plain; charset=utf-8"]
     var body: Data = Data()
+    var file: HTTPFileBody?
 
     static func text(_ s: String, status: Int = 200) -> HTTPResponse {
         HTTPResponse(status: status, headers: ["Content-Type": "text/plain; charset=utf-8"], body: Data(s.utf8))
@@ -893,7 +926,7 @@ struct HTTPResponse {
     func serialize() -> Data {
         var out = "HTTP/1.1 \(status) \(statusPhrase(status))\r\n"
         var hs = headers
-        hs["Content-Length"] = String(body.count)
+        if hs["Content-Length"] == nil { hs["Content-Length"] = String(file?.range.count ?? UInt64(body.count)) }
         hs["Connection"] = "close"
         for (k, v) in hs { out += "\(k): \(v)\r\n" }
         out += "\r\n"
@@ -905,9 +938,13 @@ struct HTTPResponse {
     private func statusPhrase(_ code: Int) -> String {
         switch code {
         case 200: "OK"
+        case 206: "Partial Content"
         case 400: "Bad Request"
         case 401: "Unauthorized"
         case 404: "Not Found"
+        case 409: "Conflict"
+        case 413: "Payload Too Large"
+        case 416: "Range Not Satisfiable"
         case 500: "Internal Server Error"
         default: "OK"
         }

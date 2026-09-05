@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "Kiln", targets: ["Kiln"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-cmark", exact: "0.7.1"),
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.5"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
@@ -17,6 +18,8 @@ let package = Package(
         .executableTarget(
             name: "Kiln",
             dependencies: [
+                .product(name: "cmark-gfm", package: "swift-cmark"),
+                .product(name: "cmark-gfm-extensions", package: "swift-cmark"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Sparkle", package: "Sparkle"),

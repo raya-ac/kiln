@@ -100,9 +100,8 @@ struct MessageRow: View {
                     ForEach(message.transcriptBlocks) { row in
                         switch row.block {
                         case .text(let text):
-                            Markdown(text)
-                                .markdownTheme(.kilnScaled(store.settings.fontScale.factor))
-                                .textSelection(.enabled)
+                            MediaMarkdownView(text: text, workDir: store.activeSession?.workDir ?? NSHomeDirectory(),
+                                              scale: store.settings.fontScale.factor)
 
                             // If the assistant embedded a unified diff in a
                             // ```diff / ```patch block, surface an Apply bar

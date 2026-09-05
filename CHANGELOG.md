@@ -4,6 +4,21 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.16.0] — 2026-09-05
+
+### Added
+- Inline images, animated images, video, audio, and PDFs from Markdown embeds and direct media links in replies.
+- Native image expansion and playback controls, with open/reveal actions for unsupported formats. No video or audio autoplay.
+- Matching web media players, image expansion, download links, and visible preview failures.
+- Authenticated local media delivery restricted to files referenced by the conversation inside its workspace or attachment directory. Bounded file streaming and byte ranges support video seeking.
+
+### Fixed
+- Preserve web player elements across chat updates so playback and seek positions are not reset by polling.
+- Cache parsed media references and cap native image/PDF loading to avoid blocking chat scrolling with repeated downloads.
+
+### Changed
+- Rewrite the README around actual workflows, limits, storage, and build instructions.
+
 ## [1.15.0] — 2026-09-05
 
 ### Changed

@@ -200,8 +200,44 @@ function renderChatHeader() {
  updateSendState(); hydrateIcons();
 }
 
+function renderMedia(media){
+ let url;
+ try{
+  const candidate=new URL(media.source);
+  if(['http:','https:'].includes(candidate.protocol)&&!candidate.username&&!candidate.password)url=candidate.href;
+ }catch{}
+ const local=!url;
+ if(local){
+  if(!state.activeId||!media.id)return '';
+  url='/api/media?session='+encodeURIComponent(state.activeId)+'&id='+encodeURIComponent(media.id)+(token?'&t='+encodeURIComponent(token):'');
+ }
+ const id=escHTML(media.id),label=escHTML(media.label||media.kind),src=escHTML(url);
+ const download=escHTML(local?url+'&download=1':url);
+ let body='';
+ if(media.kind==='image')body=`<img class="media-image" src="${src}" alt="${label}" loading="lazy" referrerpolicy="no-referrer">`;
+ else if(media.kind==='video')body=`<video controls playsinline preload="none" aria-label="${label}" src="${src}"></video>`;
+ else if(media.kind==='audio')body=`<audio controls preload="none" aria-label="${label}" src="${src}"></audio>`;
+ else if(media.kind==='document')body=`<iframe class="media-document" src="${src}" title="${label}" loading="lazy" sandbox></iframe>`;
+ return `<figure class="inline-media ${escHTML(media.kind)}" data-media="${id}">${body}<figcaption><span>${label}</span><span class="media-error" hidden>Preview unavailable</span><a href="${src}" target="_blank" rel="noopener noreferrer" title="Open media" aria-label="Open media">${icon('external-link')}</a><a href="${download}" ${local?'download':''} target="_blank" rel="noopener noreferrer" title="Download media" aria-label="Download media">${icon('download')}</a></figcaption></figure>`;
+}
+
+function hydrateMedia(root=document){
+ root.querySelectorAll('.inline-media img,.inline-media video,.inline-media audio').forEach(el=>{
+  if(el.dataset.mediaWired)return;el.dataset.mediaWired='true';
+  el.addEventListener('error',()=>{el.closest('figure').querySelector('.media-error').hidden=false;if(el.tagName==='IMG')el.hidden=true;});
+  if(el.tagName==='IMG')el.addEventListener('click',()=>{
+   const modal=document.getElementById('modalContent');modal.replaceChildren();
+   const title=document.createElement('h2');title.textContent=el.alt;
+   const expanded=el.cloneNode(false);expanded.className='expanded-media-image';expanded.hidden=false;
+   const row=document.createElement('div');row.className='row';
+   const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=closeModal;
+   row.appendChild(close);modal.append(title,expanded,row);showModal();
+  });
+ });
+}
+
 function renderBlock(block, key='') {
- if(block.type==='text') return '<div class="block-text">'+DOMPurify.sanitize(marked.parse(block.text||''),{USE_PROFILES:{html:true},FORBID_TAGS:['img','form','input','button','style','video','audio','iframe'],FORBID_ATTR:['style','id','name']})+'</div>';
+ if(block.type==='text') return '<div class="block-text">'+DOMPurify.sanitize(marked.parse(block.text||''),{USE_PROFILES:{html:true},FORBID_TAGS:['img','form','input','button','style','video','audio','iframe'],FORBID_ATTR:['style','id','name']})+'</div>'+(block.media||[]).map(renderMedia).join('');
  if(block.type==='thinking') return `<details data-disclosure="${escHTML(key)}"><summary>Reasoning</summary><div class="block-thinking">${escHTML(block.text||'')}</div></details>`;
  if(block.type==='trace') return `<details class="trace-block" data-disclosure="${escHTML(key)}"><summary>Run log · ${(block.entries||[]).length}</summary>${(block.entries||[]).map(e=>`<div class="trace-entry"><span class="lvl">${escHTML(e.level)}</span> ${escHTML(e.title)}\n${escHTML(e.detail)}</div>`).join('')}</details>`;
  if(block.type==='toolUse'){
@@ -209,6 +245,7 @@ function renderBlock(block, key='') {
   return `<details class="tool-block" data-disclosure="${escHTML(key)}"><summary class="tool-head"><span class="tdot ${t.isError?'error':t.isDone?'done':''}"></span><span>${escHTML(t.name)}</span></summary>${t.input?`<div class="tool-body">${escHTML(t.input)}</div>`:''}${t.result?`<div class="tool-result ${t.isError?'error':''}">${escHTML(t.result)}</div>`:''}</details>`;
  }
  if(block.type==='toolResult') return '';
+ if(block.type==='attachment' && block.media?.length) return block.media.map(renderMedia).join('');
  if(block.type==='attachment') return `<div class="chip">${icon('paperclip')}<span class="chip-name" title="${escHTML(block.path)}">${escHTML(block.name)}</span></div>`;
  return '';
 }
@@ -235,11 +272,21 @@ function renderMessages() {
  }
  if(live.lastError)html+='<div class="err-row">'+escHTML(live.lastError)+'</div>';
  if(!html)html='<div class="empty">'+escHTML(state.activeSession?.name||'Select a conversation')+'</div>';
- box.innerHTML=html;
+ const template=document.createElement('template');template.innerHTML=html;
+ const previous=new Map([...box.children].filter(n=>n.dataset.message).map(n=>[n.dataset.message,n]));
+ const content=new Map(state.messages.map(m=>[m.id,state.activeId+JSON.stringify(m)]));
+ const incoming=[...template.content.children];
+ for(let i=0;i<incoming.length;i++){
+  let node=incoming[i];const id=node.dataset.message,old=previous.get(id);
+  if(old&&old._sourceSignature===content.get(id))node=old;
+  else if(id)node._sourceSignature=content.get(id);
+  if(box.children[i]!==node)box.insertBefore(node,box.children[i]||null);
+ }
+ while(box.children.length>incoming.length)box.lastElementChild.remove();
  messageSignature=signature;
  box.querySelectorAll('details').forEach(d=>d.open=openDisclosures.has(d.dataset.disclosure));
  box.querySelectorAll('.copy-message').forEach(b=>b.onclick=async()=>{const m=state.messages.find(m=>m.id===b.dataset.copy);try{await navigator.clipboard.writeText((m?.blocks||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n\n'));flash('Copied');}catch{flash('Clipboard unavailable');}});
- hydrateIcons();
+ hydrateIcons();hydrateMedia(box);
  if(followsOutput&&atBottom)box.scrollTop=box.scrollHeight;else box.scrollTop=scrollTop;
 }
 

@@ -186,3 +186,15 @@ summary { cursor:pointer; padding:6px 0; min-height:28px; }
   #contextInfo { display:none; }
 }
 @media(prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; scroll-behavior:auto !important; } }
+
+.inline-media { margin:12px 0; width:100%; max-width:720px; min-width:0; }
+.inline-media img { display:block; width:auto; max-width:100%; height:auto; max-height:360px; object-fit:contain; cursor:zoom-in; background:var(--surface); }
+.inline-media video { display:block; width:100%; aspect-ratio:16 / 9; max-height:360px; background:#090909; border-radius:6px; }
+.inline-media audio { display:block; width:100%; margin:10px 0; }
+.inline-media iframe { width:100%; height:360px; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+.inline-media figcaption { display:flex; align-items:center; gap:10px; font-size:11px; color:var(--text-secondary); margin-top:8px; }
+.inline-media figcaption>span:first-child { flex:1; min-width:0; overflow-wrap:anywhere; }
+.inline-media figcaption a { display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0; color:var(--text-secondary); border-radius:5px; }
+.inline-media figcaption a:hover { background:var(--surface-elevated); }
+.media-error { color:var(--amber); }
+.expanded-media-image { display:block; max-width:100%; max-height:65dvh; object-fit:contain; margin:auto; }

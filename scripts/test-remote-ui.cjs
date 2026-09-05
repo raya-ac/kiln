@@ -28,9 +28,23 @@ const data = {
   models:[model,{...model,id:'gpt-5.5',label:'GPT-5.5'},{...model,id:'gpt-5.3-codex',label:'GPT-5.3-Codex',older:true,supportsFast:false}]
 };
 let failSend = true;
+const mediaFiles = {
+  picture: {mime:'image/png', data:fs.readFileSync(path.join(root,'Sources/App/Resources/brands/OpenAI-white-monoblossom.png'))},
+  sound: {mime:'audio/wav', data:fs.existsSync(path.join(root,'.tmp/media-fixture.wav')) ? fs.readFileSync(path.join(root,'.tmp/media-fixture.wav')) : null},
+  clip: {mime:'video/mp4', data:fs.existsSync(path.join(root,'.tmp/media-fixture.mp4')) ? fs.readFileSync(path.join(root,'.tmp/media-fixture.mp4')) : null}
+};
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if(url.pathname === '/') { res.setHeader('Content-Type','text/html'); res.end(html); return; }
+  if(url.pathname === '/api/media') {
+    const file=mediaFiles[url.searchParams.get('id')];
+    if(!file?.data){res.statusCode=404;res.end();return;}
+    res.setHeader('Content-Type',file.mime);res.setHeader('Accept-Ranges','bytes');
+    let start=0,end=file.data.length-1;
+    const match=req.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
+    if(match){start=Number(match[1]);if(match[2])end=Math.min(end,Number(match[2]));res.statusCode=206;res.setHeader('Content-Range',`bytes ${start}-${end}/${file.data.length}`);}
+    res.setHeader('Content-Length',end-start+1);res.end(file.data.subarray(start,end+1));return;
+  }
   let raw=''; for await(const c of req) raw+=c;
   const body=raw?JSON.parse(raw):{};
   res.setHeader('Content-Type','application/json');
@@ -96,11 +110,39 @@ const server = http.createServer(async (req, res) => {
     await page.screenshot({path:path.join(output,'redesign-web-mobile.png')});
     data.settings.themeMode='light';await page.evaluate(()=>refreshAll());
     await page.screenshot({path:path.join(output,'redesign-web-light.png')});
+    data.messages.push({id:'media-message',role:'assistant',assistantName:model.label,model:model.id,blocks:[{type:'text',text:'Media preview check',media:[
+      {id:'picture',source:'/tmp/picture.png',kind:'image',label:'Image preview'},
+      {id:'sound',source:'/tmp/sound.wav',kind:'audio',label:'Audio preview'},
+      {id:'clip',source:'/tmp/clip.mp4',kind:'video',label:'Video preview'},
+      {id:'missing',source:'/tmp/missing.png',kind:'image',label:'Unavailable image'}
+    ]}]});
+    await page.evaluate(()=>refreshAll());
+    await page.locator('[data-media="picture"]').scrollIntoViewIfNeeded();
+    await page.waitForFunction(()=>document.querySelector('[data-media="picture"] img')?.naturalWidth>0);
+    await page.locator('[data-media="picture"] img').click();
+    await page.locator('.expanded-media-image').waitFor();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
+    await page.locator('[data-media="missing"]').scrollIntoViewIfNeeded();
+    await page.locator('[data-media="missing"] .media-error').waitFor({state:'visible'});
+    assert.equal(await page.locator('video[autoplay],audio[autoplay]').count(),0);
+    for(const [id,tag] of [['sound','audio'],['clip','video']]) {
+      if(!mediaFiles[id].data)continue;
+      await page.locator('[data-media="'+id+'"] '+tag).evaluate(el=>el.play());
+      await page.waitForFunction(tag=>document.querySelector(tag).currentTime>0.1,tag);
+      await page.evaluate(tag=>{window.playingElement=document.querySelector(tag);window.playingElement.currentTime=1;},tag);
+      data.live.isBusy=true;data.live.streamingText='A new reply while media plays';
+      await page.evaluate(()=>refreshAll());
+      assert(await page.evaluate(tag=>window.playingElement===document.querySelector(tag),tag),'Player node survives chat updates');
+      assert(await page.evaluate(tag=>document.querySelector(tag).currentTime>=1,tag),'Seeking survives updates');
+      await page.locator(tag).evaluate(el=>el.pause());
+      data.live.isBusy=false;data.live.streamingText='';
+    }
+    await page.screenshot({path:path.join(output,'media-web-mobile.png')});
     await page.evaluate(()=>{window.xssRan=false;document.getElementById('messages').innerHTML=renderBlock({type:'text',text:'<img src=x onerror="window.xssRan=true"><script>window.xssRan=true</script>'});});
     assert.equal(await page.evaluate(()=>window.xssRan),false);
     assert.equal(await page.locator('#messages script,#messages img').count(),0);
     assert.deepEqual(errors,[]);
-    console.log('PASS: controls, models, settings, disclosures, failed-send recovery, reload drafts, desktop/mobile/light layout, Markdown sanitization.');
+    console.log('PASS: controls, models, settings, disclosures, draft recovery, responsive layout, media previews/errors, playback/seek continuity when fixtures are present, Markdown sanitization.');
   } catch (error) {
     await page.screenshot({path:path.join(output,'redesign-web-failure.png')});
     console.error('Page:',(await page.locator('body').innerText()).slice(0,1800));
