@@ -129,6 +129,11 @@ done
 if [ -f "$ROOT/CHANGELOG.md" ]; then
   cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"
 fi
+for NOTICE in LICENSE THIRD_PARTY_NOTICES.md; do
+  if [ -f "$ROOT/$NOTICE" ]; then
+    cp "$ROOT/$NOTICE" "$APP/Contents/Resources/$NOTICE"
+  fi
+done
 
 # 5. Info.plist. LSMinimumSystemVersion stays 14.0 — both arches support
 # the same floor; Sparkle uses sparkle:machineArchitectures to pick.

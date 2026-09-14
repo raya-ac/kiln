@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Kiln account expiry cleanup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

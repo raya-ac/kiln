@@ -1,0 +1,8 @@
+argon2-cffi==25.1.0
+gunicorn==26.2.0
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+pycparser==3.0
+psycopg[binary]==3.3.5
+psycopg-binary==3.3.5
+typing-extensions==4.16.0; python_version < "3.13"

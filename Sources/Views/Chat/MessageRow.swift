@@ -97,8 +97,12 @@ struct MessageRow: View {
                     }
                     .frame(height: 28)
 
-                    ForEach(message.transcriptBlocks) { row in
-                        switch row.block {
+                    ForEach(ToolTranscriptRow.rows(for: message)) { row in
+                        switch row.content {
+                        case .tools(let tools):
+                            ToolActivityGroup(tools: tools, namespace: message.id)
+                        case .block(let block):
+                        switch block {
                         case .text(let text):
                             MediaMarkdownView(text: text, workDir: store.activeSession?.workDir ?? NSHomeDirectory(),
                                               scale: store.settings.fontScale.factor)
@@ -119,7 +123,7 @@ struct MessageRow: View {
                             AgentTraceRow(entries: entries)
 
                         case .toolUse(let tool):
-                            ToolCallCard(tool: tool)
+                            ToolActivityGroup(tools: [tool], namespace: message.id)
 
                         case .toolResult:
                             EmptyView()
@@ -129,6 +133,7 @@ struct MessageRow: View {
 
                         case .attachment(let a):
                             AttachmentPreview(attachment: a)
+                        }
                         }
                     }
                 }

@@ -14,7 +14,7 @@ each chat keeps its own model, reasoning level, permissions, and fast-mode choic
 
 codex models come from the CLI kiln is actually running, including the reasoning levels and fast mode it advertises. older models live in their own group. opencode keeps its provider/model IDs. being in the list doesn't mean your account has access to a model.
 
-you sign in through the backend:
+you sign in to the model provider through its CLI. this is separate from a kiln account:
 
 ```sh
 codex login
@@ -49,17 +49,43 @@ permissions matter. bypass skips the normal prompts; guarded and read-only use t
 
 opencode runs with external plugins disabled and automatic sharing off. kiln doesn't rewrite your global backend configuration to make a session work.
 
+## memory and decisions
+
+memory now has a native home in kiln. settings > local memory connects to your installed engram and mythic runtimes over local JSONL pipes. no browser dashboard or MCP hop is required between them. the executable, config, working directory, and mythic store are visible settings; connecting doesn't install or replace either service.
+
+project context only includes explicitly scoped active memories and checkpoints. whole-store search is a separate action and uses normal engram retrieval, including its access accounting. adding a result to a draft is explicit. nothing gets pasted into every turn automatically.
+
+dormant review starts with evaluation metadata. opening a candidate and recording used, irrelevant, or dismissed feedback are separate actions. silence isn't feedback, and old memories aren't automatically true. forgotten or inactive candidates stay unavailable.
+
+mythic keeps assumptions, observations, and revised decisions across restarts. checks are registered read-only operations: a file exists inside the project, engram responds, or an engram operation is advertised. the checked claim and evidence are distinct from whatever someone wrote in the assumption. storing an observation in engram doesn't turn it into engram-verified truth.
+
+choose a decision with "use for next request" to check its dependencies before sending. missing, unknown, or expired evidence holds that request. ordinary chat stays usable, including asking how to fix the problem. these checks don't grant tool permissions or execute the proposed action themselves.
+
+## accounts and usage
+
+kiln accounts live at [kiln.raya.ac](https://kiln.raya.ac). account settings handles registration, sign-in, sign-out, password changes, and recovery. keep the recovery code shown at registration: there is no email recovery service. provider login still belongs to codex or opencode, not this server.
+
+the hosted account service uses PostgreSQL for accounts, sessions, profiles, consent, usage, and rate limits. the private outbox on your mac is local state, not a substitute server database.
+
+public profiles contain the handle, display name, and bio. token history is private. usage sharing is off until explicitly enabled on this device and account. it sends measured token counts, provider/model identifiers, an opaque session ID, and timestamps, not messages, memories, folder paths, attachments, or provider credentials.
+
+the account is captured when a turn starts. signing out, changing accounts, or revoking sharing invalidates that turn's reporting permission. accepted events have stable identities; reconnects retry the same snapshot instead of adding the tokens twice. counts that the provider didn't report stay unknown. cached and reasoning counts are kept separate, and this is usage reporting, not billing or a guessed dollar total.
+
+the backend and its operating instructions are in [account-service](account-service/). deployment status belongs in its deployment receipt, not in a build-success claim. local chat works without a kiln account.
+
 ## from another device
 
 open the authenticated remote link from settings. keep that link private: its token grants access to kiln. use a trusted network or an authenticated HTTPS tunnel, not a bare port exposed to the internet.
 
 the web client matches the native chat layout and core controls: models, reasoning, permissions, fast mode, media, search, and draft recovery. the phone layout puts sessions and activity in drawers. the auto-compact toggle changes the same setting on the host.
 
-it isn't the entire desktop app in a browser. file editing, git, the terminal, and full archive management are still native-only. remote uploads currently have a 4 MB browser limit.
+it isn't the entire desktop app in a browser. file editing, git, the terminal, local cognitive services, account credentials, and full archive management are still native-only. remote uploads currently have a 4 MB browser limit.
 
 local media is only served when the conversation references it and it resolves inside that conversation's workspace or kiln's attachment folder. video supports range requests for seeking. unsupported files remain downloads.
 
 the web assets ship with the app, including icons, Markdown parsing, and sanitization. the interface doesn't load CDN scripts. optional embedded players load the provider's page in an isolated frame, without access to the chat or its token. refresh the web page after updating kiln.
+
+the tool timeline borrows closely from [T3 Code](https://github.com/pingdotgg/t3code): grouped adjacent work, expandable output, a visible active call, and a distinction between following a run and reading earlier output. [the parity notes](docs/t3-parity.md) record the pinned source and remaining differences. [MIT attribution](THIRD_PARTY_NOTICES.md) ships with the app.
 
 ## building it
 

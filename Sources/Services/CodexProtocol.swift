@@ -158,6 +158,7 @@ enum CodexProtocol {
         case "turn.completed":
             var events: [AgentEvent] = []
             if let usage = json["usage"] as? [String: Any] {
+                events.append(.measuredUsage(.codex(usage, sourceID: json["turn_id"] as? String)))
                 let input = usage["input_tokens"] as? Int ?? 0
                 let output = usage["output_tokens"] as? Int ?? 0
                 events.append(.usage(inputTokens: input, outputTokens: output))

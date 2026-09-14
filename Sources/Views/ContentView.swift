@@ -256,6 +256,12 @@ struct ContentView: View {
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
             }
         }
+        .sheet(isPresented: $store.showMemory) {
+            VStack(spacing: 0) {
+                HStack { Spacer(); Button("Done") { store.showMemory = false } }.padding(12)
+                CognitiveView()
+            }.frame(width: 720, height: 720).environmentObject(store)
+        }
         .sheet(isPresented: $store.showWhatsNew) {
             if let version = WhatsNew.currentVersion,
                let changelog = WhatsNew.loadChangelog(),

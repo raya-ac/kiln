@@ -4,6 +4,7 @@ import AppKit
 
 struct ComposerView: View {
     @EnvironmentObject var store: AppStore
+    @ObservedObject private var cognition = CognitiveStore.shared
     private var input: String {
         get { store.drafts.draft(for: store.activeSessionId).text }
         nonmutating set { if let id = store.activeSessionId { store.drafts.setText(newValue, for: id) } }
@@ -74,6 +75,23 @@ struct ComposerView: View {
             // Workdir activity chip — visible only when there are uncommitted
             // changes in the session's workdir. Click to see which files.
             WorkdirActivityChip()
+
+            if let session = store.activeSession,
+               let action = cognition.checkedAction(project: session.workDir, session: session.id) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("Check: \(action)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextSecondary)
+                        .lineLimit(2).help(action)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        cognition.clearCheckedAction(project: session.workDir, session: session.id)
+                    } label: { Image(systemName: "xmark.circle") }
+                    .buttonStyle(.plain).foregroundStyle(Color.kilnTextTertiary)
+                    .help("Clear checked action").accessibilityLabel("Clear checked action")
+                }
+                .padding(.horizontal, 24).padding(.top, 8)
+            }
 
             if importingAttachments > 0 {
                 ProgressView("Adding attachments...").controlSize(.small).padding(.top, 6)
@@ -1291,18 +1309,34 @@ struct ComposerToolbar: View {
         store.activeSession?.kind == .chat
     }
 
+    private var supportedEfforts: [EffortLevel] {
+        EffortLevel.allCases.filter { store.activeSession?.model.reasoningEfforts.contains($0.rawValue) ?? false }
+    }
+
+    private var effortLabel: String {
+        guard store.thinkingEnabled else { return "Default effort" }
+        guard supportedEfforts.contains(store.effortLevel) else { return "Effort unavailable" }
+        return store.effortLevel.rawValue.capitalized
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                if let session = store.activeSession {
+                    ModelPickerButton(selection: Binding(get: { session.model }, set: { store.setModel($0) }))
+                        .frame(maxWidth: 200)
+                        .accessibilityLabel("Model")
+                    Divider().frame(height: 16)
+                }
                 if !isChatSession {
-                    Menu {
-                        Picker("Mode", selection: $store.sessionMode) {
-                            ForEach(SessionMode.allCases) { mode in
-                                Label(mode.label, systemImage: mode.icon).tag(mode)
-                            }
+                    Picker("Mode", selection: $store.sessionMode) {
+                        ForEach(SessionMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
                         }
-                    } label: { Label(store.sessionMode.label, systemImage: store.sessionMode.icon) }
-                    .help("Session mode")
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 112)
+                    .help("Session mode: \(store.sessionMode.label)")
+                    .accessibilityLabel("Session mode")
 
                     Menu {
                         Picker("Permissions", selection: $store.permissionMode) {
@@ -1310,30 +1344,34 @@ struct ComposerToolbar: View {
                                 Label(mode.label, systemImage: mode.icon).tag(mode)
                             }
                         }
-                    } label: { Label(store.permissionMode.label, systemImage: "lock.shield") }
-                    .help("Tool permissions")
+                    } label: { Label(store.permissionMode.label, systemImage: store.permissionMode.icon) }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .help(store.permissionMode.description)
+                    .accessibilityLabel("Tool permissions: \(store.permissionMode.label)")
                 }
 
                 Menu {
                     Button {
                         store.thinkingEnabled = false
                     } label: {
-                        Label("Default", systemImage: store.thinkingEnabled ? "circle" : "checkmark")
+                        Label("Model default", systemImage: store.thinkingEnabled ? "circle" : "checkmark")
                     }
                     Divider()
-                    ForEach(EffortLevel.allCases.filter { store.activeSession?.model.reasoningEfforts.contains($0.rawValue) ?? false }) { effort in
+                    ForEach(supportedEfforts) { effort in
                         Button {
                             store.thinkingEnabled = true
                             store.effortLevel = effort
                         } label: {
-                            Label(effort.label, systemImage: store.thinkingEnabled && store.effortLevel == effort ? "checkmark" : "circle")
+                            Label(effort.rawValue.capitalized, systemImage: store.thinkingEnabled && store.effortLevel == effort ? "checkmark" : "circle")
                         }
                     }
                 } label: {
-                    Label(store.thinkingEnabled ? store.effortLevel.label : "Reasoning", systemImage: "brain")
+                    Label(effortLabel, systemImage: "brain")
                 }
-                .help("Reasoning effort")
-                .disabled(store.activeSession?.model.reasoningEfforts.isEmpty ?? true)
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("Reasoning effort for the selected model. Model default omits the effort override.")
+                .accessibilityLabel("Reasoning effort: \(effortLabel)")
+                .disabled(supportedEfforts.isEmpty && !store.thinkingEnabled)
 
                 if let session = store.activeSession, session.model.supportsOpenAIFastMode {
                     Toggle(isOn: Binding(get: { session.openAIFastMode }, set: { store.setOpenAIFastMode($0) })) {
@@ -1344,9 +1382,6 @@ struct ComposerToolbar: View {
                     .accessibilityLabel("Fast mode")
                     .disabled(store.isSessionBusy(session.id))
                 }
-
-                // Model picker lives in the chat header strip now —
-                // duplicating it here made the composer toolbar noisy.
 
                 Spacer()
 

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import AVFoundation
 import Combine
+import CryptoKit
 
 /// Central app state — owns sessions, drives UI, relays Codex events.
 @MainActor
@@ -144,6 +145,7 @@ final class AppStore: ObservableObject {
         sessions = fresh
     }
     @Published var showSettings = false
+    @Published var showMemory = false
     @Published var showCLIUpdates = false
     @Published var selectedSidebarTab: SessionKind = .code
 
@@ -493,6 +495,7 @@ final class AppStore: ObservableObject {
     // MARK: - Init
 
     init() {
+        Task { await KilnAccountService.shared.start() }
         draftSubscription = drafts.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         Persistence.ensureDirectories()
         settings = Persistence.loadSettings()
@@ -1607,6 +1610,16 @@ final class AppStore: ObservableObject {
         let model = sessions[idx].model
         let workDir = sessions[idx].workDir
 
+        let checkedAction = CognitiveStore.shared.checkedAction(project: workDir, session: sessionId)
+        if let reason = await CognitiveStore.shared.preflight(project: workDir, session: sessionId, action: checkedAction) {
+            ToastCenter.shared.show(reason, kind: .error)
+            showMemory = true
+            return
+        }
+        guard let checkedIndex = sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir }),
+              !isSessionBusy(sessionId), !sessions[checkedIndex].readOnly else { return }
+        idx = checkedIndex
+
         // Expand {{var}} tokens (clipboard, date, file contents, etc.)
         let expandedText = PromptExpander.expand(text, context: PromptExpander.Context(
             workdir: workDir,
@@ -1668,6 +1681,10 @@ final class AppStore: ObservableObject {
         runtimeStates[sessionId] = SessionRuntimeState(isBusy: true, contextUsage: currentContext, contextChecked: true)
         generatingSessionId = sessionId
 
+        let captureOwner = KilnAccountService.shared.usageCaptureOwner()
+        if checkedAction != nil { CognitiveStore.shared.clearCheckedAction(project: workDir, session: sessionId) }
+        let requestID = UUID().uuidString
+        var recordedUsage = Set<String>()
         await agent(for: model).sendMessage(
                 sessionId: sessionId,
                 message: expanded,
@@ -1677,6 +1694,18 @@ final class AppStore: ObservableObject {
                 attachments: attachments
             ) { [weak self] event in
                 guard let self else { return }
+                if case .measuredUsage(let usage) = event, usage.hasMeasurement {
+                    let sourceID = usage.sourceID ?? requestID
+                    let key = "\(model.provider.rawValue):\(sessionId):\(sourceID)"
+                    if recordedUsage.insert(key).inserted {
+                        let eventID = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+                        let opaqueSession = SHA256.hash(data: Data(sessionId.utf8)).map { String(format: "%02x", $0) }.joined()
+                        let measured = KilnUsageEvent(eventID: eventID, provider: model.provider.rawValue, model: model.cliModel,
+                            occurredAt: Date(), inputTokens: usage.input, outputTokens: usage.output,
+                            cachedTokens: usage.cached, reasoningTokens: usage.reasoning, sessionID: opaqueSession)
+                        _ = KilnAccountService.shared.record(measured, owner: captureOwner)
+                    }
+                }
                 self.handleAgentEvent(event, sessionId: sessionId)
             }
         if model.provider == .codex { await refreshCodexModelCatalog() }
@@ -1963,7 +1992,7 @@ final class AppStore: ObservableObject {
                 // reflects real usage velocity.
                 RateLimitTracker.shared.recordUsage(inputTokens: input, outputTokens: output)
 
-        case .cost, .error, .sessionId, .done:
+        case .cost, .error, .sessionId, .done, .measuredUsage:
                 break // handled below (outside the mutate closure)
             }
         }
@@ -2072,7 +2101,9 @@ final class AppStore: ObservableObject {
         }
 
         if !blocks.isEmpty {
-            let msg = ChatMessage(role: .assistant, blocks: blocks, model: sessions[idx].model)
+            let responseID = sessions[idx].messages.last(where: { $0.role == .user })
+                .map { ToolPresentation.assistantMessageID(userID: $0.id) } ?? UUID().uuidString
+            let msg = ChatMessage(id: responseID, role: .assistant, blocks: blocks, model: sessions[idx].model)
             sessions[idx].messages.append(msg)
         }
 

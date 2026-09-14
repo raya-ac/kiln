@@ -1,0 +1,44 @@
+name: Account PostgreSQL
+
+on:
+  push:
+    branches: [main]
+    paths: ["account-service/**", ".github/workflows/accounts.yml"]
+  pull_request:
+    paths: ["account-service/**", ".github/workflows/accounts.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kiln_test
+          POSTGRES_PASSWORD: kiln_ci_fixture
+          POSTGRES_DB: kiln_accounts_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kiln_test -d kiln_accounts_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      KILN_TEST_DATABASE_URL: postgresql://kiln_test:kiln_ci_fixture@127.0.0.1:5432/kiln_accounts_test
+      KILN_POSTGRES_ACCEPT_DISPOSABLE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    defaults:
+      run:
+        working-directory: account-service
+    steps:
+      - uses: actions/checkout@v7
+      - name: Isolated Python dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
+          .venv/bin/python -m pip check
+          pg_dump --version
+      - name: PostgreSQL API and multi-worker regressions
+        run: .venv/bin/python -m unittest discover -s tests -v

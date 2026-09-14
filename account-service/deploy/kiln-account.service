@@ -1,0 +1,40 @@
+[Unit]
+Description=Kiln private account and measured usage service
+After=network.target postgresql@16-main.service
+
+[Service]
+Type=simple
+User=kiln-account
+Group=kiln-account
+WorkingDirectory=/opt/kiln-account/current
+Environment="KILN_DATABASE_URL=host=/var/run/postgresql dbname=kiln_account user=kiln-account"
+Environment=KILN_BIND=127.0.0.1:27480
+Environment=KILN_DATABASE_MAX_BYTES=1073741824
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/kiln-account/current/.venv/bin/gunicorn --config /opt/kiln-account/current/gunicorn.conf.py service:create_app()
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=kiln-account
+StateDirectoryMode=0700
+RuntimeDirectory=kiln-account
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

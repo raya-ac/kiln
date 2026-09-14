@@ -6,6 +6,7 @@ struct ChatTranscriptView: View {
     @Binding var jumpTarget: String?
     @State private var visibleCount = 40
     @State private var followsOutput = true
+    @State private var toolDisclosures = ToolDisclosureState()
 
     private var messages: [ChatMessage] { store.activeSession?.messages ?? [] }
     private var window: ArraySlice<ChatMessage> { messages.suffix(visibleCount) }
@@ -76,8 +77,9 @@ struct ChatTranscriptView: View {
                         ForEach(window) { message in
                             MessageRow(message: message).id(message.id)
                         }
-                        if store.isBusy || !store.streamingText.isEmpty || !store.traceEntries.isEmpty {
-                            LiveAssistantRow()
+                        if store.isBusy || !store.streamingText.isEmpty || !store.thinkingText.isEmpty
+                            || !store.traceEntries.isEmpty || !store.activeToolCalls.isEmpty {
+                            ToolTranscriptLiveRow().id(store.activeSessionId)
                         }
                         if let error = store.lastError {
                             VStack(alignment: .leading, spacing: 8) {
@@ -109,13 +111,24 @@ struct ChatTranscriptView: View {
                     .frame(maxWidth: 920)
                     .frame(maxWidth: .infinity)
                     .background(TranscriptScrollObserver { nearBottom in followsOutput = nearBottom })
+                    .environment(\.transcriptDisclosureAction, { followsOutput = false })
+                    .environment(\.toolDisclosureState, toolDisclosures)
                     .padding(.vertical, 8)
                 }
                 .onAppear { scrollToBottom(proxy) }
                 .onChange(of: store.streamingText) { scrollIfFollowing(proxy) }
                 .onChange(of: store.thinkingText) { scrollIfFollowing(proxy) }
                 .onChange(of: store.activeToolCalls.count) { scrollIfFollowing(proxy) }
+                .onChange(of: store.activeToolCalls.map { ToolPresentation(tool: $0, live: store.isBusy).status }) {
+                    scrollIfFollowing(proxy)
+                }
                 .onChange(of: messages.count) { scrollIfFollowing(proxy) }
+                .onChange(of: store.activeSessionId) {
+                    visibleCount = 40
+                    toolDisclosures = ToolDisclosureState()
+                    followsOutput = true
+                    scrollToBottom(proxy)
+                }
                 .onChange(of: jumpTarget) { _, id in
                     guard let id else { return }
                     jump(id, proxy: proxy)
@@ -151,6 +164,49 @@ struct ChatTranscriptView: View {
             await Task.yield()
             proxy.scrollTo("transcript-bottom", anchor: .bottom)
         }
+    }
+}
+
+/// Keep the legacy row available to other surfaces; this transcript owns its grouped presentation.
+private struct ToolTranscriptLiveRow: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if store.settings.showAvatars {
+                AssistantAvatar(brand: store.activeSession?.model.brand ?? .codex)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(store.activeSession?.model.assistantName ?? "Assistant")
+                        .font(.system(size: 12, weight: .semibold))
+                    if store.isBusy {
+                        ProgressView().controlSize(.mini)
+                        Text("Working").font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                    Spacer()
+                }.frame(height: 28)
+                if !store.thinkingText.isEmpty {
+                    ThinkingRow(text: store.thinkingText, isStreaming: store.isBusy && store.streamingText.isEmpty)
+                }
+                if !store.traceEntries.isEmpty {
+                    AgentTraceRow(entries: store.traceEntries, live: store.isBusy)
+                }
+                ToolActivityGroup(tools: store.activeToolCalls, live: store.isBusy,
+                    namespace: ToolPresentation.assistantMessageID(userID: store.activeSession?.messages.last(where: { $0.role == .user })?.id ?? "live"))
+                if !store.streamingText.isEmpty {
+                    // Finalized messages use the existing media-aware Markdown renderer.
+                    Text(store.streamingText)
+                        .font(.system(size: 14 * store.settings.fontScale.factor))
+                        .foregroundStyle(Color.kilnText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18 * store.settings.density.padding)
     }
 }
 

@@ -59,6 +59,8 @@ struct RightPanel: View {
                 ActivityPanelView()
             case .tunnel:
                 SessionTunnelPanel()
+            case .memory:
+                CognitiveView()
             }
         }
         .background(Color.kilnBg)
@@ -71,6 +73,7 @@ enum RightTab: String, CaseIterable, Identifiable {
     case terminal
     case activity
     case tunnel
+    case memory
 
     var id: String { rawValue }
 
@@ -81,6 +84,7 @@ enum RightTab: String, CaseIterable, Identifiable {
         case .terminal: return "Terminal"
         case .activity: return "Activity"
         case .tunnel: return "Tunnel"
+        case .memory: return "Memory"
         }
     }
 
@@ -92,6 +96,7 @@ enum RightTab: String, CaseIterable, Identifiable {
         case .activity: return ui.activity
         // No localized string yet — fall back to the English label.
         case .tunnel: return "Tunnel"
+        case .memory: return "Memory"
         }
     }
 
@@ -102,6 +107,7 @@ enum RightTab: String, CaseIterable, Identifiable {
         case .terminal: "terminal.fill"
         case .activity: "sparkles"
         case .tunnel: "network"
+        case .memory: "brain"
         }
     }
 }

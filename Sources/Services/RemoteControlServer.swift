@@ -243,12 +243,7 @@ final class RemoteControlServer: ObservableObject {
             return .json([
                 "messages": msgs,
                 "session": Self.sessionJSON(session),
-                "live": [
-                    "isBusy": store.isBusy,
-                    "streamingText": store.streamingText,
-                    "thinkingText": store.thinkingText,
-                    "activeToolCalls": store.activeToolCalls.map(Self.toolUseJSON),
-                ],
+                "live": Self.liveJSON(store: store, sessionId: sid),
             ])
 
         case ("GET", "/api/toolbar"):
@@ -266,6 +261,7 @@ final class RemoteControlServer: ObservableObject {
                 "themeMode": store.settings.themeMode.rawValue,
                 "accentHex": store.settings.accentHex,
                 "autoCompactEnabled": store.settings.autoCompactEnabled,
+                "thinkingCollapsedByDefault": store.settings.thinkingCollapsedByDefault,
                 "sendKey": store.settings.sendKey.rawValue,
                 "userDisplayName": store.settings.userDisplayName,
             ])
@@ -608,13 +604,7 @@ final class RemoteControlServer: ObservableObject {
             "sessions": sessions,
             "activeSessionId": store.activeSessionId as Any,
             "messages": messages,
-            "live": [
-                "isBusy": store.isBusy,
-                "streamingText": store.streamingText,
-                "thinkingText": store.thinkingText,
-                "activeToolCalls": store.activeToolCalls.map(toolUseJSON),
-                "lastError": store.lastError as Any,
-            ],
+            "live": liveJSON(store: store, sessionId: store.activeSessionId ?? ""),
             "toolbar": toolbarJSON(store: store),
             "usage": [
                 "inputTokens": store.inputTokens,
@@ -628,6 +618,7 @@ final class RemoteControlServer: ObservableObject {
                 "themeMode": store.settings.themeMode.rawValue,
                 "accentHex": store.settings.accentHex,
                 "autoCompactEnabled": store.settings.autoCompactEnabled,
+                "thinkingCollapsedByDefault": store.settings.thinkingCollapsedByDefault,
                 "sendKey": store.settings.sendKey.rawValue,
                 "userDisplayName": store.settings.userDisplayName,
             ],
@@ -684,18 +675,7 @@ final class RemoteControlServer: ObservableObject {
         case .text(let s): return ["type": "text", "text": s, "media": MediaMarkdown.references(s).map(mediaJSON)]
         case .thinking(let s): return ["type": "thinking", "text": s]
         case .trace(let entries):
-            return ["type": "trace", "entries": entries.map { entry in
-                [
-                    "id": entry.id,
-                    "timestamp": entry.timestamp.timeIntervalSince1970,
-                    "source": entry.source,
-                    "level": entry.level.rawValue,
-                    "phase": entry.phase,
-                    "title": entry.title,
-                    "detail": entry.detail,
-                    "metadata": entry.metadata,
-                ] as [String: Any]
-            }]
+            return ["type": "trace", "entries": traceJSON(entries)]
         case .toolUse(let t): return ["type": "toolUse", "tool": toolUseJSON(t)]
         case .toolResult(let r): return ["type": "toolResult", "toolUseId": r.toolUseId, "content": r.content, "isError": r.isError]
         case .suggestions(let s):
@@ -713,14 +693,33 @@ final class RemoteControlServer: ObservableObject {
     }
 
     private static func toolUseJSON(_ t: ToolUseBlock) -> [String: Any] {
-        [
+        var value: [String: Any] = [
             "id": t.id,
             "name": t.name,
             "input": t.input,
             "isDone": t.isDone,
-            "result": t.result as Any,
+            "result": t.result as Any? ?? NSNull(),
             "isError": t.isError,
         ]
+        if let startedAt = t.startedAt { value["startedAt"] = startedAt.timeIntervalSince1970 }
+        if let completedAt = t.completedAt { value["completedAt"] = completedAt.timeIntervalSince1970 }
+        return value
+    }
+
+    @MainActor
+    private static func liveJSON(store: AppStore, sessionId: String) -> [String: Any] {
+        let runtime = store.runtime(sessionId)
+        return ["isBusy": runtime.isBusy, "streamingText": runtime.streamingText,
+                "thinkingText": runtime.thinkingText, "activeToolCalls": runtime.activeToolCalls.map(toolUseJSON),
+                "traceEntries": traceJSON(runtime.traceEntries), "lastError": runtime.lastError as Any? ?? NSNull()]
+    }
+
+    private static func traceJSON(_ entries: [AgentTraceEntry]) -> [[String: Any]] {
+        entries.map { entry in
+            ["id": entry.id, "timestamp": entry.timestamp.timeIntervalSince1970,
+             "source": entry.source, "level": entry.level.rawValue, "phase": entry.phase,
+             "title": entry.title, "detail": entry.detail, "metadata": entry.metadata]
+        }
     }
 
     @MainActor

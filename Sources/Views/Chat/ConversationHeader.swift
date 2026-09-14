@@ -38,8 +38,11 @@ struct ConversationHeader: View {
                     if session.forkedFrom != nil {
                         Image(systemName: "arrow.triangle.branch").foregroundStyle(Color.kilnTextTertiary).help("Forked conversation")
                     }
-                    ModelPickerButton(selection: Binding(get: { session.model }, set: { store.setModel($0) }))
-                        .disabled(store.isSessionBusy(session.id))
+                    Label(session.model.label, systemImage: session.kind.icon)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.kilnTextTertiary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(session.model.fullId)
                         .frame(maxWidth: 200, alignment: .trailing)
                 }
                 .font(.system(size: 12))

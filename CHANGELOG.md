@@ -4,6 +4,21 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.19.0] - 2026-09-14
+
+### Added
+- Native Engram and Mythic connections over a versioned local JSONL interface, without requiring MCP between the services.
+- Project-scoped memory and checkpoints, explicit whole-store search, and metadata-first dormant review with separate inspection and feedback.
+- Durable assumptions with bounded read-only checks, observed evidence and provenance, expiry, and explicit checked-action requests. Ordinary and corrective chat remains available.
+- Account settings for sign-in, registration, recovery, public profiles, and private opt-in token reporting to kiln.raya.ac. Provider authentication remains separate.
+- Account-bound durable usage delivery with turn-start consent, immutable event identities, unknown token fields, and no conversation or memory upload.
+- PostgreSQL account service source, migrations, security tests, and deployment instructions.
+
+### Changed
+- Adapt T3 Code's adjacent-work grouping, collapsed tool output, active-call summaries, and reading/following behavior to native and remote chats. Upstream provenance and MIT notices are included.
+- Show pending, running, complete, failed, and unconfirmed tool outcomes without treating a stopped content block as successful execution.
+- Preserve existing Codex thread continuity, media playback, and current-context compaction behavior.
+
 ## [1.18.0] — 2026-09-05
 
 ### Fixed

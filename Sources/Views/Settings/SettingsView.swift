@@ -19,7 +19,7 @@ struct SettingsView: View {
     @FocusState private var portFocused: Bool
 
     enum SettingsTab: String, CaseIterable, Identifiable {
-        case settings, appearance, chat, integrations, remote, advanced, stats, cliUpdates, about
+        case settings, appearance, chat, integrations, cognitive, account, remote, advanced, stats, cliUpdates, about
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -27,6 +27,8 @@ struct SettingsView: View {
             case .appearance: "Appearance"
             case .chat: "Chat & Composer"
             case .integrations: "Integrations"
+            case .cognitive: "Local Memory"
+            case .account: "Account"
             case .remote: "Remote Access"
             case .advanced: "Advanced"
             case .stats: "Usage"
@@ -40,6 +42,8 @@ struct SettingsView: View {
             case .appearance: "paintpalette"
             case .chat: "text.bubble"
             case .integrations: "puzzlepiece.extension"
+            case .cognitive: "brain"
+            case .account: "person.crop.circle"
             case .remote: "network"
             case .advanced: "slider.horizontal.3"
             case .stats: "chart.bar"
@@ -87,6 +91,8 @@ struct SettingsView: View {
                 Divider()
                 if tab == .stats { StatsView() }
                 else if tab == .cliUpdates { CLIUpdatesView() }
+                else if tab == .cognitive { CognitiveConnectionView() }
+                else if tab == .account { AccountSettingsView(account: KilnAccountService.shared) }
                 else { settingsScroll }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,7 +141,7 @@ struct SettingsView: View {
                     advancedSection
                     miscSection
                 case .about: aboutSection
-                case .stats, .cliUpdates: EmptyView()
+                case .stats, .cliUpdates, .cognitive, .account: EmptyView()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

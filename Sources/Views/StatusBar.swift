@@ -8,6 +8,7 @@ import SwiftUI
 // Kept deliberately terse — it's peripheral, not content.
 
 struct StatusBar: View {
+    @ObservedObject private var cognition = CognitiveStore.shared
     @EnvironmentObject var store: AppStore
 
     private var session: Session? { store.activeSession }
@@ -55,18 +56,18 @@ struct StatusBar: View {
             // Right side: engram indicator + session count. Click the
             // engram pill to jump straight into the setting.
             Button {
-                store.showSettings = true
+                store.showMemory = true
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: store.settings.useEngram ? "brain.head.profile" : "brain")
+                    Image(systemName: cognition.connected ? "brain.head.profile" : "brain")
                         .font(.system(size: 10))
-                    Text(store.settings.useEngram ? "engram on" : "engram off")
+                    Text(cognition.connected ? "memory connected" : "memory")
                         .font(.system(size: 10))
                 }
-                .foregroundStyle(store.settings.useEngram ? Color.kilnAccent : Color.kilnTextTertiary)
+                .foregroundStyle(cognition.connected ? Color.kilnAccent : Color.kilnTextTertiary)
             }
             .buttonStyle(.plain)
-            .help("Engram memory — click to open Settings")
+            .help("Open local memory and assumptions")
 
             Text("\(store.sessions.count) sessions")
                 .font(.system(size: 10))

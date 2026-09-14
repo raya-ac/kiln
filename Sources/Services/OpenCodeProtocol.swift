@@ -60,6 +60,9 @@ enum OpenCodeProtocol {
         case "step_finish":
             if let cost = part["cost"] as? Double { events.append(.cost(cost)) }
             if let tokens = part["tokens"] as? [String: Any] {
+                if let id = part["id"] as? String, !id.isEmpty {
+                    events.append(.measuredUsage(.openCode(tokens, sourceID: id)))
+                }
                 let input = tokens["input"] as? Int ?? 0
                 let output = tokens["output"] as? Int ?? 0
                 events.append(.trace(AgentTraceEntry(source: "opencode", phase: "usage", title: "Token usage",
