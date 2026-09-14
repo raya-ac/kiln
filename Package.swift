@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "Kiln", targets: ["Kiln"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-cmark", exact: "0.7.1"),
+        .package(url: "https://github.com/swiftlang/swift-cmark", exact: "0.8.0"),
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.5"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
