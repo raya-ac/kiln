@@ -10,8 +10,14 @@ struct KilnAccount: Codable, Equatable, Sendable, Identifiable {
     let handle: String
     let displayName: String
     let bio: String
+    let location: String?
+    let website: String?
+    let accent: String?
+    let avatarURL: String?
     let profileURL: String
     let usageSharingEnabled: Bool
+    let publicUsageEnabled: Bool?
+    let chatSharingDefault: Bool?
     let createdAt: String
 
     // Never open an arbitrary URL supplied in an account response.
@@ -113,6 +119,23 @@ struct KilnUsageAggregate: Decodable, Sendable {
     }
     let eventCount: Int
     let counts: Counts
+    let estimatedSpend: Double?
+    let cachedSpend: Double?
+    let noncachedSpend: Double?
+    let unpricedModels: Int?
+}
+
+/// A public, revocable README generated from a chat. Sharing grants access for training.
+struct KilnSharedReadme: Codable, Equatable, Sendable, Identifiable {
+    let id: String
+    let slug: String
+    let title: String
+    let url: String
+    let enabled: Bool
+    let trainingConsent: Bool
+    let sourceChatId: String?
+    let createdAt: String
+    let updatedAt: String?
 }
 
 enum KilnAccountError: Error, LocalizedError, Equatable {

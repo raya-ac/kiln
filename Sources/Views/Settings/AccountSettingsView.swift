@@ -1,17 +1,24 @@
+import AppKit
 import SwiftUI
 
 struct AccountSettingsView: View {
     @ObservedObject var account: KilnAccountService = .shared
+    @EnvironmentObject private var store: AppStore
+    @ObservedObject private var avatars: AvatarStore = .shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var mode: AuthMode = .signIn
     @State private var handle = ""
     @State private var displayName = ""
     @State private var bio = ""
+    @State private var location = ""
+    @State private var website = ""
+    @State private var accent = ""
     @State private var password = ""
     @State private var newPassword = ""
     @State private var passwordConfirmation = ""
     @State private var recoveryCode = ""
     @State private var confirmSharing = false
+    @State private var confirmPublicUsage = false
     @State private var confirmSignOut = false
     @State private var savedMessage: String?
 
@@ -61,6 +68,12 @@ struct AccountSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only future measured token counts, provider and model identifiers, opaque event/session IDs, and timestamps are sent. No conversations, names, file paths, or API keys. Usage stays private to your account. Turning this off discards unsent events; already shared history remains private.")
+        }
+        .confirmationDialog("Show measured usage on your public profile?", isPresented: $confirmPublicUsage) {
+            Button("Show usage publicly") { Task { await account.setPublicUsage(true) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Aggregate token counts and model names become visible at kiln.raya.ac/u/\(account.account?.handle ?? ""). No conversations, file paths, or credentials are shown. You can turn this off at any time.")
         }
         .confirmationDialog("Sign out of Kiln?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) {
@@ -129,9 +142,13 @@ struct AccountSettingsView: View {
 
     private func profile(_ identity: KilnAccount) -> some View {
         section("Public profile") {
+            field("Photo") { profilePhoto(identity) }
             field("Handle") { Text("@\(identity.handle)").textSelection(.enabled) }
             field("Display name") { TextField("Display name", text: $displayName) }
             field("Bio") { TextField("Bio", text: $bio, axis: .vertical).lineLimit(2...5) }
+            field("Location") { TextField("Optional", text: $location) }
+            field("Website") { TextField("https://", text: $website) }
+            field("Accent") { accentPicker }
             HStack {
                 if let url = identity.publicProfileURL {
                     Link(destination: url) { Label("kiln.raya.ac/u/\(identity.handle)", systemImage: "arrow.up.right") }
@@ -140,18 +157,122 @@ struct AccountSettingsView: View {
                 Spacer(minLength: 8)
                 Button("Save profile") {
                     Task {
-                        if await account.updateProfile(displayName: displayName, bio: bio) {
+                        if await account.updateProfile(displayName: displayName, bio: bio, location: location,
+                                                       website: website, accent: accent) {
                             savedMessage = "Profile saved."
                         }
                     }
                 }
-                .disabled(account.isLoading || displayName.isEmpty || displayName.count > 80 || bio.count > 500)
+                .disabled(account.isLoading || !validProfile)
             }
         }
     }
 
+    @ViewBuilder private func profilePhoto(_ identity: KilnAccount) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7).fill(Color.kilnSurfaceElevated).frame(width: 44, height: 44)
+                if let url = identity.avatarURL.flatMap(URL.init(string:)) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        ProgressView().controlSize(.small)
+                    }
+                    .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 7))
+                } else if let img = avatars.avatar {
+                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 7))
+                } else {
+                    Image(systemName: "person.fill").foregroundStyle(Color.kilnTextSecondary)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.kilnBorder, lineWidth: 1))
+            VStack(alignment: .leading, spacing: 4) {
+                Button("Upload my Kiln photo") { Task { await uploadAppAvatar() } }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.kilnAccent)
+                    .disabled(account.isLoading || avatars.avatar == nil)
+                if identity.avatarURL != nil {
+                    Button("Remove photo", role: .destructive) {
+                        Task { if await account.clearAvatar() { savedMessage = "Profile photo removed." } }
+                    }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.kilnError).disabled(account.isLoading)
+                }
+            }
+            Spacer(minLength: 8)
+        }
+    }
+
+    private var accentPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(Self.profileAccents, id: \.0) { hex, name in
+                Button {
+                    applyAccent(hex)
+                } label: {
+                    Circle().fill(Color(hexString: hex)).frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(accent.lowercased() == "#" + hex.lowercased() ? Color.kilnText : Color.kilnBorder, lineWidth: 2))
+                }
+                .buttonStyle(.plain).help(name)
+            }
+            Button("Match app accent") { applyAccent(store.settings.accentHex) }
+                .buttonStyle(.plain).font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.kilnAccent)
+            Spacer(minLength: 4)
+        }
+    }
+
+    private static let profileAccents: [(String, String)] = [
+        ("f97316", "Orange"), ("ef4444", "Red"), ("eab308", "Yellow"), ("22c55e", "Green"),
+        ("3b82f6", "Blue"), ("a855f7", "Purple"), ("ec4899", "Pink"), ("14b8a6", "Teal"), ("64748b", "Slate"),
+    ]
+
+    private func applyAccent(_ hex: String) {
+        let clean = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        accent = "#" + clean.lowercased()
+        Task {
+            if await account.updateProfile(displayName: displayName, bio: bio, location: location,
+                                           website: website, accent: accent) {
+                savedMessage = "Accent updated."
+            }
+        }
+    }
+
+    private func uploadAppAvatar() async {
+        guard let image = avatars.avatar, let (data, mediaType) = Self.encodedAvatar(image) else {
+            savedMessage = "Choose a Kiln photo in Appearance first."
+            return
+        }
+        if await account.uploadAvatar(data, mediaType: mediaType) {
+            savedMessage = "Profile photo updated."
+        }
+    }
+
+    private static func encodedAvatar(_ image: NSImage) -> (Data, String)? {
+        let maxSide: CGFloat = 512
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let scale = min(1, maxSide / max(size.width, size.height))
+        let target = NSSize(width: max(1, (size.width * scale).rounded()), height: max(1, (size.height * scale).rounded()))
+        let scaled = NSImage(size: target)
+        scaled.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: target))
+        scaled.unlockFocus()
+        guard let tiff = scaled.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        if let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]), jpeg.count <= 524_288 {
+            return (jpeg, "image/jpeg")
+        }
+        if let png = rep.representation(using: .png, properties: [:]), png.count <= 524_288 {
+            return (png, "image/png")
+        }
+        if let small = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.5]) {
+            return (small, "image/jpeg")
+        }
+        return nil
+    }
+
     private var sharing: some View {
-        section("Private usage") {
+        section("Usage") {
             Toggle("Share usage with this account", isOn: Binding(
                 get: { account.shareUsageEnabled },
                 set: { enabled in
@@ -160,8 +281,18 @@ struct AccountSettingsView: View {
                 }
             ))
             .toggleStyle(.switch).controlSize(.small).disabled(account.isLoading)
+            Toggle("Show my usage publicly on my profile", isOn: Binding(
+                get: { account.account?.publicUsageEnabled == true },
+                set: { enabled in
+                    if enabled { confirmPublicUsage = true }
+                    else { Task { await account.setPublicUsage(false) } }
+                }
+            ))
+            .toggleStyle(.switch).controlSize(.small).disabled(account.isLoading)
+            Text("Private reporting and public display are separate choices. Turning off display never deletes history.")
+                .foregroundStyle(Color.kilnTextTertiary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Label(account.shareUsageEnabled ? "Sharing enabled" : "Sharing off", systemImage: "lock")
+                Label(account.shareUsageEnabled ? "Reporting enabled" : "Reporting off", systemImage: "lock")
                 Spacer()
                 if account.isSyncing { ProgressView().controlSize(.small).accessibilityLabel("Syncing usage") }
                 Text("\(account.pendingCount) pending").monospacedDigit()
@@ -176,6 +307,30 @@ struct AccountSettingsView: View {
                 ProgressView("Loading usage...").controlSize(.small)
             } else if let totals = account.aggregate {
                 Text("\(totals.eventCount.formatted()) measured events").foregroundStyle(Color.kilnTextSecondary)
+                if let spend = totals.estimatedSpend {
+                    HStack {
+                        Text("Est. spend").frame(minWidth: 105, alignment: .leading)
+                        Text(spend, format: .currency(code: "USD")).monospacedDigit()
+                        Spacer(minLength: 8)
+                        if let unpriced = totals.unpricedModels, unpriced > 0 {
+                            Text("\(unpriced) unpriced").foregroundStyle(Color.kilnTextTertiary)
+                        }
+                    }
+                }
+                if let noncached = totals.noncachedSpend {
+                    HStack {
+                        Text("Non-cached").frame(minWidth: 105, alignment: .leading)
+                        Text(noncached, format: .currency(code: "USD")).monospacedDigit()
+                        Spacer(minLength: 8)
+                    }
+                }
+                if let cached = totals.cachedSpend {
+                    HStack {
+                        Text("Cached").frame(minWidth: 105, alignment: .leading)
+                        Text(cached, format: .currency(code: "USD")).monospacedDigit()
+                        Spacer(minLength: 8)
+                    }
+                }
                 aggregateRow("Input", totals.counts.inputTokens)
                 aggregateRow("Output", totals.counts.outputTokens)
                 aggregateRow("Cached input", totals.counts.cachedInputTokens)
@@ -315,9 +470,18 @@ struct AccountSettingsView: View {
             handle = identity.handle
             displayName = identity.displayName
             bio = identity.bio
+            location = identity.location ?? ""
+            website = identity.website ?? ""
+            accent = identity.accent ?? ""
         } else {
-            handle = ""; displayName = ""; bio = ""; savedMessage = nil
+            handle = ""; displayName = ""; bio = ""; location = ""; website = ""; accent = ""; savedMessage = nil
         }
+    }
+
+    private var validProfile: Bool {
+        !displayName.isEmpty && displayName.count <= 80 && bio.count <= 500
+            && location.count <= 80 && website.count <= 200
+            && (website.isEmpty || website.lowercased().hasPrefix("http://") || website.lowercased().hasPrefix("https://"))
     }
 
     private func clearSecrets() { password = ""; newPassword = ""; passwordConfirmation = ""; recoveryCode = "" }

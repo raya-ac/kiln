@@ -63,11 +63,13 @@ choose a decision with "use for next request" to check its dependencies before s
 
 ## accounts and usage
 
-kiln accounts live at [kiln.raya.ac](https://kiln.raya.ac). account settings handles registration, sign-in, sign-out, password changes, and recovery. keep the recovery code shown at registration: there is no email recovery service. provider login still belongs to codex or opencode, not this server.
+kiln accounts live at [kiln.raya.ac](https://kiln.raya.ac). you can register and sign in from account settings in the app, or in a browser at `/signin`. account settings handles registration, sign-in, sign-out, password changes, and recovery. keep the recovery code shown at registration: there is no email recovery service. provider login still belongs to codex or opencode, not this server.
 
 the hosted account service uses PostgreSQL for accounts, sessions, profiles, consent, usage, and rate limits. the private outbox on your mac is local state, not a substitute server database.
 
-public profiles contain the handle, display name, and bio. token history is private. usage sharing is off until explicitly enabled on this device and account. it sends measured token counts, provider/model identifiers, an opaque session ID, and timestamps, not messages, memories, folder paths, attachments, or provider credentials.
+public profiles show the handle, display name, bio, location, website, and join month. there's a directory at [/explore](https://kiln.raya.ac/explore). token history is private. showing your measured usage on your public profile is a separate switch, off by default, and it renders totals and per-model counts only. neither switch is implied by the other, and turning display off never deletes history.
+
+usage sharing is off until explicitly enabled on this device and account. it sends measured token counts, provider/model identifiers, an opaque session ID, and timestamps, not messages, memories, folder paths, attachments, or provider credentials.
 
 the account is captured when a turn starts. signing out, changing accounts, or revoking sharing invalidates that turn's reporting permission. accepted events have stable identities; reconnects retry the same snapshot instead of adding the tokens twice. counts that the provider didn't report stay unknown. cached and reasoning counts are kept separate, and this is usage reporting, not billing or a guessed dollar total.
 

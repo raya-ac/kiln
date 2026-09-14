@@ -4,6 +4,41 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.22.0] - 2026-09-14
+
+### Added
+- Estimated API spend (total, non-cached, cached) computed from published list pricing for the models in measured usage, shown on the public profile, the dashboard, and account settings.
+- Token-activity graph now stretches to cover the full history instead of a fixed window.
+- Historical CLI usage backfill: `tools/import_cli_usage.py` aggregates Codex, OpenCode and Claude Code local usage, and `tools/load_usage.py` loads it into an account idempotently.
+
+### Fixed
+- Browser sign-in: accept same-site (including `*\u200b.raya.ac`) and opaque origins, since authenticated forms are already protected by the SameSite=Strict cookie; stop suppressing the referrer so browsers send a real Origin.
+
+## [1.21.0] - 2026-09-14
+
+### Added
+- Public profile photos uploaded from the app's own Kiln avatar, and per-profile accents chosen in app settings (presets or a custom colour), served as a per-profile stylesheet so the strict CSP stays intact.
+- Codex-style measured usage: five stat tiles (lifetime/peak tokens, longest chat, current and longest streak), a contribution-style daily token-activity heatmap, activity insights, and most-used-model rows.
+- Post/Redirect/Get for browser sign-in so a refresh cannot resubmit the password.
+
+### Changed
+- Public site restyled to the kai.ovh design language (near-black `#09090a`, bone `#ece8e6`, pink `#ed83b6`, monospace body, sans headings, 64px header, stat grids, surface hovers).
+- Account API adds `accent` and `avatarURL`; `avatar_media_type`/`avatar_data` store a ≤512 KB PNG/JPEG; posted schema version is 3.
+
+## [1.20.0] - 2026-09-14
+
+### Added
+- Public account site: redesigned home, a browsable `/explore` directory, and richer `/u/<handle>` profiles with avatar, location, website, and join month.
+- Browser sign-in and account dashboard served as forms with a SameSite=Strict cookie session; no client JavaScript or bearer token in HTML.
+- Separate opt-in for showing measured usage on a public profile, rendering aggregate and per-model counts only. It is independent of private usage reporting and defaults off.
+- `GET /api/v1/usage/aggregate` now includes a bounded per-`provider/model` breakdown.
+
+### Changed
+- Account API adds `location`, `website`, and `publicUsageEnabled`; `PATCH /profile` and `PATCH /settings` accept the new fields. Posted schema version is 2.
+
+### Fixed
+- opencode is usable again: Homebrew's from-source build ships a broken Effect layer graph that crashes every run. Kiln now resolves the official release binary first.
+
 ## [1.19.0] - 2026-09-14
 
 ### Added

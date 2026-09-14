@@ -376,11 +376,39 @@ final class AccountTests: XCTestCase {
         let registration = try XCTUnwrap(http.requests.first?.httpBody)
         let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: registration) as? [String: Any])
         XCTAssertNil(fields["displayName"])
-        let saved = await service.updateProfile(displayName: "Updated", bio: "Public bio")
+        let saved = await service.updateProfile(displayName: "Updated", bio: "Public bio",
+                                                location: "Berlin", website: "https://example.com")
         XCTAssertTrue(saved)
         let profile = try XCTUnwrap(http.requests.last?.httpBody)
         let profileFields = try XCTUnwrap(JSONSerialization.jsonObject(with: profile) as? [String: Any])
-        XCTAssertEqual(Set(profileFields.keys), ["displayName", "bio"])
+        XCTAssertEqual(Set(profileFields.keys), ["displayName", "bio", "location", "website", "accent"])
+        XCTAssertEqual(profileFields["location"] as? String, "Berlin")
+        XCTAssertEqual(profileFields["website"] as? String, "https://example.com")
+    }
+
+    @MainActor func testAvatarUploadAndClearUseRawImageRequests() async throws {
+        let (service, http, _, _) = try fixture()
+        _ = await service.register(handle: "test_handle", password: "test-password-only")
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + Array(repeating: 0, count: 32))
+        let uploaded = await service.uploadAvatar(png, mediaType: "image/png")
+        XCTAssertTrue(uploaded)
+        XCTAssertEqual(http.requests.last?.url?.path, "/avatar")
+        XCTAssertEqual(http.requests.last?.value(forHTTPHeaderField: "Content-Type"), "image/png")
+        let cleared = await service.clearAvatar()
+        XCTAssertTrue(cleared)
+        XCTAssertEqual(http.requests.last?.url?.path, "/avatar/clear")
+        let rejected = await service.uploadAvatar(Data(repeating: 1, count: 600_000), mediaType: "image/png")
+        XCTAssertFalse(rejected)
+    }
+
+    @MainActor func testPublicUsageToggleSendsSetting() async throws {
+        let (service, http, _, _) = try fixture()
+        _ = await service.register(handle: "test_handle", password: "test-password-only")
+        let enabled = await service.setPublicUsage(true)
+        XCTAssertTrue(enabled)
+        let body = try XCTUnwrap(http.requests.last?.httpBody)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(fields["publicUsageEnabled"] as? Bool, true)
     }
 
     @MainActor func testRevocationDiskFailureRemovesCredentialAndStillRevokesServer() async throws {

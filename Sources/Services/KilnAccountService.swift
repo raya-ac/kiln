@@ -174,6 +174,8 @@ struct KilnAccountOutbox: Codable, Sendable {
     @Published private(set) var nextHistoryCursor: Int?
     @Published private(set) var pendingCount = 0
     @Published private(set) var shareUsageEnabled = false
+    @Published private(set) var chatSharingDefault = false
+    @Published private(set) var readmes: [KilnSharedReadme] = []
     @Published private(set) var hasStoredSession = false
 
     private let baseURL: URL
@@ -279,8 +281,49 @@ struct KilnAccountOutbox: Codable, Sendable {
         } catch { if epoch == generation { report(error) } }
     }
 
-    @discardableResult func updateProfile(displayName: String, bio: String) async -> Bool {
-        await updateAccount("/profile", body: ["displayName": displayName, "bio": bio])
+    @discardableResult func updateProfile(displayName: String, bio: String, location: String = "", website: String = "", accent: String = "") async -> Bool {
+        await updateAccount("/profile", body: ["displayName": displayName, "bio": bio, "location": location,
+                                               "website": website, "accent": accent])
+    }
+
+    /// Uploads the app's current profile picture to the account so the public
+    /// profile shows it. PNG/JPEG, 512 KB cap (server enforced too).
+    @discardableResult func uploadAvatar(_ data: Data, mediaType: String) async -> Bool {
+        guard let credential, !isLoading, data.count <= 524_288,
+              ["image/png", "image/jpeg"].contains(mediaType) else { return false }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let response: AccountResponse = try await rawRequest("/avatar", method: "POST", data: data,
+                                                                 contentType: mediaType, token: credential.token)
+            guard epoch == generation else { return false }
+            try accept(response.account, expectedID: credential.accountID)
+            return true
+        } catch { report(error); return false }
+    }
+
+    @discardableResult func clearAvatar() async -> Bool {
+        guard let credential, !isLoading else { return false }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let response: AccountResponse = try await rawRequest("/avatar/clear", method: "POST",
+                                                                 data: Data("{}".utf8), contentType: "application/json",
+                                                                 token: credential.token)
+            guard epoch == generation else { return false }
+            try accept(response.account, expectedID: credential.accountID)
+            return true
+        } catch { report(error); return false }
+    }
+
+    /// Publishes measured usage on the public profile. This is separate from
+    /// private usage reporting: enabling it does not require upload consent.
+    @discardableResult func setPublicUsage(_ enabled: Bool) async -> Bool {
+        await updateAccount("/settings", body: ["publicUsageEnabled": enabled])
     }
 
     @discardableResult func setShareUsage(_ enabled: Bool) async -> Bool {
@@ -550,6 +593,26 @@ struct KilnAccountOutbox: Codable, Sendable {
             request.httpBody = try KilnAccountJSON.encoder().encode(body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        return try await perform(request, url: url)
+    }
+
+    /// Sends a raw (non-JSON-body) request to a site path such as `/avatar`.
+    private func rawRequest<R: Decodable>(_ path: String, method: String, data: Data?, contentType: String?, token: String) async throws -> R {
+        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+              Self.sameOrigin(url, baseURL) else { throw KilnAccountError.invalidOrigin }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        if let data {
+            request.httpBody = data
+            request.setValue(contentType ?? "application/octet-stream", forHTTPHeaderField: "Content-Type")
+        }
+        return try await perform(request, url: url)
+    }
+
+    private func perform<R: Decodable>(_ request: URLRequest, url: URL) async throws -> R {
         let (data, response) = try await transport.send(request)
         guard let finalURL = response.url, Self.sameOrigin(finalURL, baseURL), finalURL == url,
               !(300...399).contains(response.statusCode) else { throw KilnAccountError.invalidOrigin }
