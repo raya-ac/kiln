@@ -4,6 +4,7 @@ struct ConversationHeader: View {
     @EnvironmentObject private var store: AppStore
     @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
     @AppStorage("rightPanelCollapsed") private var toolsCollapsed = false
+    @State private var sharingReadme = false
     let showInstructions: () -> Void
 
     var body: some View {
@@ -20,6 +21,9 @@ struct ConversationHeader: View {
                         Button("Session details") { store.showSessionInfo = true }
                         Button("Instructions", action: showInstructions)
                         Button("Tool timeline") { store.showToolTimeline = true }
+                        Divider()
+                        Button("Share as README…") { sharingReadme = true }
+                            .disabled(session.messages.isEmpty)
                         Divider()
                         Button("Compact conversation") { Task { await store.compact() } }
                             .disabled(store.isSessionBusy(session.id) || session.messages.isEmpty || store.compactingSessionIds.contains(session.id))
@@ -49,6 +53,11 @@ struct ConversationHeader: View {
             }
             .padding(.horizontal, 24).padding(.vertical, 14)
             .background(Color.kilnBg)
+            .sheet(isPresented: $sharingReadme) {
+                if let session = store.activeSession {
+                    ShareReadmeSheet(session: session)
+                }
+            }
         }
     }
 }

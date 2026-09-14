@@ -326,6 +326,75 @@ struct KilnAccountOutbox: Codable, Sendable {
         await updateAccount("/settings", body: ["publicUsageEnabled": enabled])
     }
 
+    /// Preference: default the "share this chat" choice on. Never auto-publishes.
+    @discardableResult func setChatSharingDefault(_ enabled: Bool) async -> Bool {
+        guard await updateAccount("/settings", body: ["chatSharingDefault": enabled]) else { return false }
+        chatSharingDefault = enabled
+        return true
+    }
+
+    /// Publishes a chat as a public README. Requires explicit training consent;
+    /// the server rejects the call without it.
+    @discardableResult func createReadme(title: String, body: String, sourceChatId: String? = nil) async -> KilnSharedReadme? {
+        guard let credential, !isLoading else { return nil }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let payload = ReadmeBody(title: title, body: body, trainingConsent: true, sourceChatId: sourceChatId)
+            let response: ReadmeResponse = try await request("/readmes", method: "POST", body: payload, token: credential.token)
+            guard epoch == generation else { return nil }
+            readmes.removeAll { $0.id == response.readme.id }
+            readmes.insert(response.readme, at: 0)
+            return response.readme
+        } catch { report(error); return nil }
+    }
+
+    @discardableResult func refreshReadmes() async -> Bool {
+        guard let credential, !isLoading else { return false }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let response: ReadmeList = try await request("/readmes", token: credential.token)
+            guard epoch == generation else { return false }
+            readmes = response.readmes
+            return true
+        } catch { report(error); return false }
+    }
+
+    @discardableResult func setReadme(_ id: String, enabled: Bool) async -> Bool {
+        guard let credential, !isLoading else { return false }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let response: ReadmeResponse = try await request("/readmes/" + id, method: "PATCH",
+                                                             body: ["enabled": enabled], token: credential.token)
+            guard epoch == generation else { return false }
+            if let index = readmes.firstIndex(where: { $0.id == id }) { readmes[index] = response.readme }
+            return true
+        } catch { report(error); return false }
+    }
+
+    @discardableResult func deleteReadme(_ id: String) async -> Bool {
+        guard let credential, !isLoading else { return false }
+        isLoading = true
+        errorMessage = nil
+        let epoch = generation
+        defer { isLoading = false }
+        do {
+            let _: DeletedResponse = try await request("/readmes/" + id, method: "DELETE",
+                                                       body: Optional<EmptyBody>.none, token: credential.token)
+            guard epoch == generation else { return false }
+            readmes.removeAll { $0.id == id }
+            return true
+        } catch { report(error); return false }
+    }
+
     @discardableResult func setShareUsage(_ enabled: Bool) async -> Bool {
         guard let credential, !isLoading, account?.id == credential.accountID else { return false }
         var localRevocationSaved = true
@@ -513,6 +582,7 @@ struct KilnAccountOutbox: Codable, Sendable {
               KilnAccount.validHandle(account.handle) else { throw KilnAccountError.invalidResponse }
         self.account = account
         if !account.usageSharingEnabled { state.discardPending(); _ = persist() }
+        chatSharingDefault = account.chatSharingDefault == true
         updateSharingState()
     }
 
@@ -523,6 +593,8 @@ struct KilnAccountOutbox: Codable, Sendable {
         account = nil
         history = []
         aggregate = nil
+        readmes = []
+        chatSharingDefault = false
         nextHistoryCursor = nil
         recoveryCodes = []
         state.discardPending()
@@ -638,6 +710,10 @@ struct KilnAccountOutbox: Codable, Sendable {
     }
 
     private struct EmptyBody: Encodable {}
+    private struct ReadmeBody: Encodable { let title: String; let body: String; let trainingConsent: Bool; let sourceChatId: String? }
+    private struct ReadmeResponse: Decodable { let readme: KilnSharedReadme }
+    private struct ReadmeList: Decodable { let readmes: [KilnSharedReadme] }
+    private struct DeletedResponse: Decodable { let deleted: Bool }
     private struct AccountResponse: Decodable { let account: KilnAccount }
     private struct AuthResponse: Decodable {
         struct Session: Decodable { let token: String; let expiresAt: String }

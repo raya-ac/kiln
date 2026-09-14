@@ -4,6 +4,13 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.23.0] - 2026-09-14
+
+### Added
+- Share a conversation as a public README from the chat's actions menu: full user/assistant transcript rendered as markdown, with tool calls, reasoning, attachments and file paths stripped.
+- Explicit consent before sharing ("you grant Kiln access to this chat data for Ash's training"), plus a per-readme enable/disable toggle, copy link, and delete in account settings.
+- "Share chats from the start" preference. It only defaults the share choice on; every chat still needs an explicit share.
+
 ## [1.22.0] - 2026-09-14
 
 ### Added

@@ -19,6 +19,7 @@ struct AccountSettingsView: View {
     @State private var recoveryCode = ""
     @State private var confirmSharing = false
     @State private var confirmPublicUsage = false
+    @State private var confirmChatSharing = false
     @State private var confirmSignOut = false
     @State private var savedMessage: String?
 
@@ -35,6 +36,7 @@ struct AccountSettingsView: View {
                 if let identity = account.account {
                     profile(identity)
                     sharing
+                    readmes
                     usage
                     security
                 } else if account.hasStoredSession {
@@ -54,12 +56,18 @@ struct AccountSettingsView: View {
         .task {
             syncProfile()
             await account.refreshHistory()
+            await account.refreshReadmes()
         }
         .onChange(of: account.account) { _, _ in syncProfile() }
         .onChange(of: mode) { _, _ in clearSecrets(); account.clearError(); savedMessage = nil }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await account.refresh(); await account.flushOutbox(); await account.refreshHistory() }
+                Task {
+                    await account.refresh()
+                    await account.flushOutbox()
+                    await account.refreshHistory()
+                    await account.refreshReadmes()
+                }
             }
         }
         .onDisappear { clearSecrets() }
@@ -74,6 +82,12 @@ struct AccountSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Aggregate token counts and model names become visible at kiln.raya.ac/u/\(account.account?.handle ?? ""). No conversations, file paths, or credentials are shown. You can turn this off at any time.")
+        }
+        .confirmationDialog("Share chats from the start?", isPresented: $confirmChatSharing) {
+            Button("Enable") { Task { await account.setChatSharingDefault(true) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This only defaults the share choice on; every chat still needs an explicit share. Sharing uploads the chat to kiln.raya.ac and grants Kiln access to it for Ash's training.")
         }
         .confirmationDialog("Sign out of Kiln?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) {
@@ -298,6 +312,54 @@ struct AccountSettingsView: View {
                 Text("\(account.pendingCount) pending").monospacedDigit()
             }
             .foregroundStyle(Color.kilnTextSecondary)
+        }
+    }
+
+    private var readmes: some View {
+        section("Shared READMEs") {
+            Toggle("Share chats from the start", isOn: Binding(
+                get: { account.chatSharingDefault },
+                set: { enabled in
+                    if enabled { confirmChatSharing = true }
+                    else { Task { await account.setChatSharingDefault(false) } }
+                }
+            ))
+            .toggleStyle(.switch).controlSize(.small).disabled(account.isLoading)
+            Text("A default only — every chat still needs an explicit share. Sharing uploads the chat to kiln.raya.ac and grants Kiln access to it for Ash's training.")
+                .foregroundStyle(Color.kilnTextTertiary).fixedSize(horizontal: false, vertical: true)
+            if account.readmes.isEmpty {
+                Text("No shared chats.").foregroundStyle(Color.kilnTextSecondary)
+            }
+            ForEach(account.readmes) { readme in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(readme.title).fontWeight(.medium).lineLimit(1).help(readme.title)
+                        Spacer(minLength: 8)
+                        Toggle("", isOn: Binding(
+                            get: { readme.enabled },
+                            set: { value in Task { await account.setReadme(readme.id, enabled: value) } }
+                        ))
+                        .toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(account.isLoading)
+                    }
+                    HStack(spacing: 12) {
+                        Button("Copy link") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(readme.url, forType: .string)
+                        }
+                        .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.kilnAccent)
+                        if let url = URL(string: readme.url) {
+                            Link("Open", destination: url).font(.system(size: 10, weight: .medium))
+                        }
+                        Button("Delete", role: .destructive) { Task { await account.deleteReadme(readme.id) } }
+                            .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.kilnError)
+                        Spacer()
+                        Text(readme.enabled ? "public" : "disabled")
+                            .font(.system(size: 10)).foregroundStyle(Color.kilnTextTertiary)
+                    }
+                }
+                .padding(.vertical, 6)
+                Divider()
+            }
         }
     }
 
