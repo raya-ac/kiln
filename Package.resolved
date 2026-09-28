@@ -1,5 +1,5 @@
 {
-  "originHash" : "54a36fdbc15ec9e13796a5b2c2628cf5191349d62e35e0ff4b44fb85bff85054",
+  "originHash" : "850598cb1d4abfdd5813df83a86143c27cbcf7e080182f251ef38444fadcc931",
   "pins" : [
     {
       "identity" : "networkimage",
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-cmark",
       "state" : {
-        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6",
-        "version" : "0.8.0"
+        "revision" : "08ddb528923cc1a6527e02b7a1aee9e516ca749a",
+        "version" : "0.9.0"
       }
     },
     {
