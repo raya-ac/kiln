@@ -42,6 +42,53 @@ struct TunnelFrame: Codable {
 
 // MARK: - Config
 
+/// Revocation crosses the UI/client actors synchronously, before a listener
+/// can release its port. No task may begin after this lifetime is revoked.
+final class TunnelLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+    private var tasks: [UUID: URLSessionTask] = [:]
+
+    var isActive: Bool { lock.withLock { active } }
+
+    func resumeIfActive(_ task: URLSessionTask) -> Bool {
+        lock.withLock {
+            guard active else { task.cancel(); return false }
+            tasks[UUID()] = task
+            task.resume()
+            return true
+        }
+    }
+
+    func data(for request: URLRequest, session: URLSession) async throws -> (Data, URLResponse) {
+        let id = UUID()
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.withLock {
+                guard active else { continuation.resume(throwing: CancellationError()); return }
+                let task = session.dataTask(with: request) { [self] data, response, error in
+                    _ = lock.withLock { tasks.removeValue(forKey: id) }
+                    if let error { continuation.resume(throwing: error) }
+                    else if let data, let response { continuation.resume(returning: (data, response)) }
+                    else { continuation.resume(throwing: URLError(.badServerResponse)) }
+                }
+                tasks[id] = task
+                task.resume()
+            }
+        }
+    }
+
+    func revoke() {
+        lock.withLock {
+            active = false
+            let pending = Array(tasks.values)
+            tasks.removeAll()
+            // cancel() does not wait for completion. Keep cancellation
+            // issuance inside the barrier so every revoker observes it.
+            pending.forEach { $0.cancel() }
+        }
+    }
+}
+
 struct TunnelConfig: Sendable {
     /// Tunnel server hostname, e.g. "tunnel.example.com". No scheme.
     var server: String
@@ -59,6 +106,15 @@ struct TunnelConfig: Sendable {
     var bearerToken: String?
     /// Allow self-signed TLS (dev only).
     var insecure: Bool = false
+    var lifetime = TunnelLifetime()
+}
+
+private final class TunnelRedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
 }
 
 // MARK: - Events
@@ -79,19 +135,34 @@ enum TunnelEvent: Sendable {
 ///
 /// Swift's `URLSessionWebSocketTask` gives us text-frame JSON natively;
 /// we serialize writes behind an actor.
-actor TunnelClient {
+protocol WardenTunnelConnection: Actor {
+    func start(_ config: TunnelConfig, onEvent: @escaping @Sendable @MainActor (TunnelEvent) -> Void) async
+    func stop() async
+}
+
+actor TunnelClient: WardenTunnelConnection {
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var onEvent: (@Sendable @MainActor (TunnelEvent) -> Void)?
     private var config: TunnelConfig?
     private var running = false
+    private let localSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieStorage = nil
+        config.urlCredentialStorage = nil
+        config.connectionProxyDictionary = [:]
+        return URLSession(configuration: config, delegate: TunnelRedirectGuard(), delegateQueue: nil)
+    }()
 
     func start(_ config: TunnelConfig, onEvent: @escaping @Sendable @MainActor (TunnelEvent) -> Void) async {
+        guard config.lifetime.isActive, !Task.isCancelled else { return }
         self.config = config
         self.onEvent = onEvent
         self.running = true
 
         await emit(.connecting)
+        guard running, config.lifetime.isActive, !Task.isCancelled else { return }
 
         let scheme = config.scheme.isEmpty ? "wss" : config.scheme
         guard let url = URL(string: "\(scheme)://\(config.server)/ws") else {
@@ -121,7 +192,7 @@ actor TunnelClient {
 
         let task = session.webSocketTask(with: req)
         self.task = task
-        task.resume()
+        guard config.lifetime.resumeIfActive(task) else { await close(reason: nil); return }
 
         // Register.
         let reg = TunnelFrame(type: "register", sub: config.sub)
@@ -155,7 +226,7 @@ actor TunnelClient {
         }
 
         // Read loop. Any fatal error closes the tunnel.
-        while running {
+        while running && config.lifetime.isActive {
             let frame: TunnelFrame
             do {
                 frame = try await receiveFrame()
@@ -181,6 +252,8 @@ actor TunnelClient {
 
     func stop() async {
         running = false
+        config?.lifetime.revoke()
+        localSession.invalidateAndCancel()
         task?.cancel(with: .goingAway, reason: nil)
     }
 
@@ -188,7 +261,7 @@ actor TunnelClient {
 
     private func handleRequest(_ fr: TunnelFrame) async {
         let start = Date()
-        guard let cfg = config, let reqId = fr.reqId else { return }
+        guard running, let cfg = config, cfg.lifetime.isActive, let reqId = fr.reqId else { return }
 
         let method = fr.method ?? "GET"
         let path = fr.path ?? "/"
@@ -214,11 +287,11 @@ actor TunnelClient {
             urlReq.httpBody = data
         }
 
-        // Hit the local target. Use the shared ephemeral session — we're
-        // calling loopback or localhost, not going through the proxied
-        // URLSession the tunnel uses.
+        // The lifetime atomically admits and registers the request so a
+        // synchronous stop also cancels already-admitted local requests.
         do {
-            let (data, resp) = try await URLSession.shared.data(for: urlReq)
+            let (data, resp) = try await cfg.lifetime.data(for: urlReq, session: localSession)
+            guard running, cfg.lifetime.isActive else { return }
             let httpResp = resp as? HTTPURLResponse
             let status = httpResp?.statusCode ?? 0
 
@@ -262,7 +335,7 @@ actor TunnelClient {
     // MARK: - WS I/O
 
     private func send(_ frame: TunnelFrame) async throws {
-        guard let task = task else { throw TunnelError.notConnected }
+        guard running, config?.lifetime.isActive == true, let task = task else { throw TunnelError.notConnected }
         let data = try JSONEncoder().encode(frame)
         guard let text = String(data: data, encoding: .utf8) else {
             throw TunnelError.encoding
@@ -271,7 +344,7 @@ actor TunnelClient {
     }
 
     private func receiveFrame() async throws -> TunnelFrame {
-        guard let task = task else { throw TunnelError.notConnected }
+        guard running, config?.lifetime.isActive == true, let task = task else { throw TunnelError.notConnected }
         let msg = try await task.receive()
         switch msg {
         case .string(let s):
@@ -288,6 +361,8 @@ actor TunnelClient {
 
     private func close(reason: String?) async {
         running = false
+        config?.lifetime.revoke()
+        localSession.invalidateAndCancel()
         task?.cancel(with: .normalClosure, reason: nil)
         session?.invalidateAndCancel()
         task = nil

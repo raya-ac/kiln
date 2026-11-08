@@ -4,6 +4,42 @@ All notable changes to Kiln land here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are
 YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
+## [1.25.0] - 2026-11-08
+
+### Added
+- Studio workspace with a permanent navigation rail, conversation-first layout, on-demand inspector, and composer controls inside the writing surface. Native Classic layout remains available from the Workspace menu.
+- Refined native and web workspace styling: neutral surfaces, clearer active navigation, accented composer focus, consistent icon controls, and compact tool tabs with direct accessible buttons.
+- A small local-only flame easter egg.
+- Window-scoped computer tools for Codex: observe, click, type, keys, and scrolling. Access is off by default and every input action needs a one-time native approval, even in Bypass mode. Other backends remain disabled for computer input pending plugin isolation.
+- Searchable tools drawer with pinned workspace shortcuts, recent calls, failure filtering, output copying, and direct command-palette navigation. The web client has a matching call drawer without computer approvals.
+- Per-turn computer grants, expiring single-use captures, model-bound consent, stop controls, and tests for revocation, replay, remote-origin isolation, and log redaction.
+- Grok CLI backend in the native and web model pickers, with live model discovery, isolated session resume, streamed replies and tool results, per-turn token counts, and native CLI update checks.
+- Grok permission modes enforce chat-only or read-only tool restrictions and workspace sandboxing without changing global CLI settings. Unknown context limits remain unavailable rather than triggering guessed auto-compaction.
+
+### Fixed
+- Return submits valid account sign-in, registration, recovery, and password-change forms. Escape closes settings, model selection, session details, memory, release notes, and the expanded editor without discarding the draft. Studio avoids repeated tool/computer shortcuts when the navigation rail is visible.
+- Computer permissions refresh when Kiln becomes active. The panel identifies the running app copy and lists each missing permission, unsupported backend, mode, or sharing requirement instead of one generic disabled-button warning.
+- Concurrent computer turns share listener readiness. Stopping one chat cannot cancel another chat's pending start. Approval prompts show the originating chat name and stable identifier, including background requests.
+- Computer startup has a deadline, late permission changes fail closed before input, and a rejected old action cannot erase a newer observation. Stopping during setup reports cancellation rather than an error.
+- Remote Stop and Retry target the displayed chat explicitly. Escape closes only the top dialog before its parent drawer, and tool-output copying works with the HTTP clipboard fallback.
+- Pointer actions validate both the topmost window and the accessibility hit before dispatch, rejecting overlapping panels. Computer previews and action history stay scoped to their chat. Grok attachments are rejected before a draft or transcript is committed.
+- Command-palette results keep stable identities as the query changes and expose real accessible buttons. A direct Compact context action is available for idle supported chats. Navigation and composer shortcuts have distinct accessibility identifiers.
+- The GUI starts from a synchronous entry point so AppKit's event loop does not hold an async main-actor job. Queued sends and background UI tasks can resume normally.
+- Startup no longer waits on a Keychain prompt before showing a window. Unavailable remote credentials leave access stopped without rotating the saved token; interactive unlocking is an explicit Settings action.
+- Account credential reads, saves, and cleanup are serialized away from the UI thread, including an expired session rejected during startup.
+- Remote API access requires a nonempty bearer even on loopback. Token changes publish only after saving; pending listener edits rebind, tunnels use the bound port, stale callbacks and claims are ignored, and terminal listener states stop forwarding.
+- Tunnel generations have synchronously revoked connection lifetimes. Old clients cannot resume forwarding after Stop; in-flight requests are cancelled and local redirects are returned without being followed.
+- Retry leaves the transcript and backend thread untouched until preflight and a checked save succeed. Concurrent transcript edits invalidate the retry rather than replacing newer messages.
+- Stopping during backend startup cancels the launch and suppresses success hooks.
+- Interrupted compaction retains ownership of the session until its helper exits, preventing a new turn from racing the compactor.
+- Remote Markdown cannot create authenticated media controls. Credentialed media and export fetches are same-origin, endpoint-limited, and reject redirects.
+- Remote request buffers enforce actual byte limits and reject ambiguous framing, including duplicate lengths and transfer encoding.
+- OpenCode 2 launches use the current CLI flags, private servers, temporary config files, and version-specific permission schemas rather than obsolete `--dir`, `--pure`, and inline configuration. Read-only policies include the earlier V2 shape. Its ID-only model list does not invent reasoning capabilities.
+
+### Limitations
+- Computer input still needs a real macOS permission and approved-action acceptance check. It is not a sandbox or a replacement for reviewing what an action will do. Remote computer control is not supported.
+- Grok attachments are not yet supported by Kiln; unsupported sends report an explicit error. Reasoning levels are not guessed when the CLI catalog does not advertise them.
+
 ## [1.23.0] - 2026-09-14
 
 ### Added

@@ -6,12 +6,21 @@ import XCTest
     var value: KilnAccountCredential?
     var failSave = false
     var failDelete = false
+    var holdDelete = false
+    var deleteStarted: XCTestExpectation?
+    var deleteGate: CheckedContinuation<Void, Never>?
     func load() throws -> KilnAccountCredential? { value }
     func save(_ credential: KilnAccountCredential) throws {
         if failSave { throw KilnAccountError.keychain }
         value = credential
     }
-    func delete() throws {
+    func delete() async throws {
+        if holdDelete {
+            await withCheckedContinuation {
+                deleteGate = $0
+                deleteStarted?.fulfill()
+            }
+        }
         if failDelete { throw KilnAccountError.keychain }
         value = nil
     }
@@ -258,6 +267,58 @@ final class AccountTests: XCTestCase {
         XCTAssertFalse(signedIn)
         XCTAssertNil(service.account)
         XCTAssertNil(service.usageCaptureOwner())
+    }
+
+    @MainActor func testStartupUnauthorizedCleanupSuspendsWithoutAllowingCredentialReplacement() async throws {
+        let (service, http, secrets, file) = try fixture()
+        let signedIn = await service.signIn(handle: "test_handle", password: "test-password-only")
+        XCTAssertTrue(signedIn)
+        service.stop()
+        http.meFailure = 401
+        secrets.holdDelete = true
+        let deleting = expectation(description: "startup deletion pending")
+        secrets.deleteStarted = deleting
+        let restored = try KilnAccountService(testingBaseURL: URL(string: "http://localhost:8765")!,
+                                             transport: http, secrets: secrets, outboxURL: file)
+        let startup = Task { await restored.start() }
+        await fulfillment(of: [deleting], timeout: 2)
+        XCTAssertTrue(restored.isLoading)
+        XCTAssertNil(restored.account)
+        let overlapping = await restored.signIn(handle: "test_handle", password: "test-password-only")
+        XCTAssertFalse(overlapping)
+        secrets.holdDelete = false
+        secrets.deleteGate?.resume()
+        await startup.value
+        XCTAssertNil(secrets.value)
+        http.meFailure = nil
+        http.token = "replacement-fixture-only"
+        let replacement = await restored.signIn(handle: "test_handle", password: "test-password-only")
+        XCTAssertTrue(replacement)
+        XCTAssertEqual(secrets.value?.token, "replacement-fixture-only")
+        restored.stop()
+    }
+
+    @MainActor func testBackgroundUnauthorizedCleanupRejectsLoginUntilDeletionCompletes() async throws {
+        let (service, http, secrets, _) = try fixture()
+        let owner = try await enable(service)
+        XCTAssertTrue(service.record(event(), owner: owner))
+        http.usageFailure = 401
+        secrets.holdDelete = true
+        let deleting = expectation(description: "background deletion pending")
+        secrets.deleteStarted = deleting
+        let upload = Task { await service.flushOutbox() }
+        await fulfillment(of: [deleting], timeout: 2)
+        XCTAssertFalse(service.isLoading)
+        XCTAssertTrue(service.isCleaningCredentials)
+        let overlapping = await service.signIn(handle: "test_handle", password: "test-password-only")
+        XCTAssertFalse(overlapping)
+        secrets.holdDelete = false
+        secrets.deleteGate?.resume()
+        await upload.value
+        XCTAssertFalse(service.isCleaningCredentials)
+        let replacement = await service.signIn(handle: "test_handle", password: "test-password-only")
+        XCTAssertTrue(replacement)
+        service.stop()
     }
 
     @MainActor func testCrossOriginAndPortAndSchemeRejected() async throws {

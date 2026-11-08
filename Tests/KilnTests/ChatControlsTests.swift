@@ -31,7 +31,7 @@ final class ChatControlsTests: XCTestCase {
         let version = try XCTUnwrap(CLIVersion("0.153.4"))
         ModelCatalog.shared.replaceLive(models, version: version)
         defer { ModelCatalog.shared.replaceLive(original, version: version) }
-        XCTAssertTrue(AgentModel.gpt6Astra.supportsOpenAIFastMode)
+        XCTAssertTrue(AgentModel.gpt61Sol.supportsOpenAIFastMode)
         let service = AgentService()
         let id = UUID().uuidString
         defer { service.forgetThread(for: id) }
@@ -44,7 +44,7 @@ final class ChatControlsTests: XCTestCase {
         }
         defer { timeout.cancel() }
         var output = "", errors: [String] = []
-        await service.sendMessage(sessionId: id, message: "Reply with KILN_FAST_OK only. Do not use tools.", model: .gpt6Astra,
+        await service.sendMessage(sessionId: id, message: "Reply with KILN_FAST_OK only. Do not use tools.", model: .gpt61Sol,
             workDir: "/tmp", options: options) {
             if case .textDelta(let text) = $0 { output += text }
             if case .error(let error) = $0 { errors.append(error) }

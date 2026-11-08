@@ -159,7 +159,7 @@ final class AttachmentTests: XCTestCase {
         for _ in 0..<2 {
             var output = "", errors: [String] = []
             await service.sendMessage(sessionId: id, message: "Name the single color in the attached image. One word only. Do not use tools.",
-                model: .gpt6Astra, workDir: "/tmp", options: options, attachments: [attachment]) {
+                model: .gpt61Sol, workDir: "/tmp", options: options, attachments: [attachment]) {
                 if case .textDelta(let value) = $0 { output += value }
                 if case .error(let value) = $0 { errors.append(value) }
             }

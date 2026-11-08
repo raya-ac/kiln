@@ -126,6 +126,7 @@ struct WhatsNewView: View {
             .padding(12)
         }
         .frame(width: 520)
+        .onExitCommand(perform: onDismiss)
     }
 }
 

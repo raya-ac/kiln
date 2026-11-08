@@ -1,6 +1,6 @@
 # kiln
 
-a native macOS client for codex and opencode.
+a native macOS client for codex, opencode, and grok.
 
 i wanted the CLI workflow without having to live in a terminal for every part of it. kiln keeps the conversations, files, tools, and model controls together. there's a web client too, so i can check a run or send something from another device.
 
@@ -19,13 +19,16 @@ you sign in to the model provider through its CLI. this is separate from a kiln 
 ```sh
 codex login
 opencode auth login
+grok login
 ```
 
-settings has an update checker for both CLIs. it checks the installed version and the package manager's release, then gives you the appropriate update command. it doesn't install anything behind your back.
+grok uses the installed [grok cli](https://docs.x.ai/build/cli/reference) and its existing login. its model list comes from `grok models`, not a list baked into kiln. each chat resumes its own grok session. the fast grok model is a separate model choice, not codex's fast-mode switch.
+
+settings checks installed versions for all three clis and links to their published releases. grok uses its own `grok update --check --json` checker. for supported installs kiln offers a copyable update command; it never installs or updates a cli by itself.
 
 ## the chat
 
-paste screenshots, drop files, or attach them from the composer. images go to the backend as image inputs, not just a path mentioned in the prompt.
+paste screenshots, drop files, or attach them from the composer. images go to codex and opencode as file inputs, not just a path mentioned in the prompt. the current grok integration accepts text prompts only, so kiln asks you to remove attachments before sending with grok.
 
 replies keep the model that produced them. reasoning summaries and tool output are expandable, and the run log is there when something goes wrong. reasoning is whatever the backend exposes, not a separate hidden-thoughts feed.
 
@@ -39,15 +42,33 @@ there's conversation search, forks, pinned messages, export, and an editor for l
 
 auto-compact is on by default at 90% of the backend's current context, not the total tokens processed across a run. codex reports the latest request size and its effective context limit; kiln uses those same numbers for the meter and trigger. it checks before the next send, saves an archive, and compacts the existing codex thread without replacing the visible conversation or restarting it.
 
-if the measurement isn't available, kiln says so and doesn't guess. opencode's current CLI transport only supplies usage totals here, so kiln's automatic trigger stays inactive for it; manual compaction is still available. this toggle controls kiln's trigger, not the backend's own context management. turn it off in chat & composer settings. saved archives can be restored as a separate chat.
+if the measurement isn't available, kiln says so and doesn't guess. opencode and grok currently provide usage totals here, not a reliable current-context measurement, so kiln's automatic trigger stays inactive for them; manual compaction remains available for opencode. grok manages its own context, and its compaction events appear in the run log. this toggle controls kiln's trigger, not the backend's own context management. turn it off in chat & composer settings. saved archives can be restored as a separate chat.
 
 ## the workspace
 
-the native client has a file browser, editor, git panel, terminal, and activity view alongside the conversation. you can resize, collapse, and rearrange the panels.
+the navigation rail keeps chats, files, git, terminal, and tools within reach. the conversation gets the space by default; open the inspector when you need it. model, reasoning, permissions, and fast mode sit inside the composer. the web client follows the same layout, with drawers on smaller screens.
 
-permissions matter. bypass skips the normal prompts; guarded and read-only use the backend's restrictions. operations that need interactive CLI approval may be blocked in guarded mode. don't use bypass on a repository you haven't looked at.
+the native client also has an editor and resizable panels. the previous three-column arrangement is still available under workspace > classic layout.
 
-opencode runs with external plugins disabled and automatic sharing off. kiln doesn't rewrite your global backend configuration to make a session work.
+the tools drawer puts those panels and recent tool calls in one place. pin the ones you use to the composer rail, search calls by tool or file, filter failures, and copy output without digging through a long conversation. `option-command-t` opens it. the command palette also jumps straight to each workspace panel.
+
+## computer use
+
+computer access starts off. choose one window in tools > computer and explicitly share it with the selected model for that chat. kiln needs screen recording and accessibility permissions from macos; it doesn't turn those on for you.
+
+the model can observe that window, then propose a click, typing, a key, or a scroll. **every input action needs your approval in the native app**, including in bypass mode. typing shows the full proposed text. deny it, let it expire, or stop access from the composer rail. there's no approve-all switch.
+
+captures expire after a minute and each action consumes its capture. moving or closing the window invalidates it. changing models, interrupting the run, or stopping access revokes the connection. password-field input, clipboard shortcuts, and global app-switching shortcuts aren't available. this is window-scoped input, not an isolated desktop: an approved action can still submit something or change real data.
+
+computer use currently requires codex and a per-turn MCP connection in build mode. opencode and grok chat still work, but their computer connections are disabled until their plugin and helper isolation is verified. no helper has computer authority without an active, enabled kiln turn. the CLI and its trusted configuration are part of that boundary, not an isolated desktop.
+
+the web client has a searchable tool drawer too, but cannot share windows or approve computer input. remote sends can't inherit a native computer grant. observations and proposed typing aren't kept in kiln's run logs; screenshots still go to the selected model and its backend may retain them under its own settings.
+
+## backend permissions
+
+permissions matter. bypass skips the normal prompts; guarded and read-only use the backend's restrictions. grok's guarded mode uses its workspace sandbox and blocks operations needing interactive approval. read-only and plan restrict it to file reads and searches; chat mode denies tools altogether. don't use bypass on a repository you haven't looked at.
+
+opencode 1 runs with external plugins disabled and automatic sharing off. opencode 2 uses a private server and a temporary per-run config with version-compatible permission rules. kiln also requests a plugin-deny policy, but older 2.x builds don't support that policy and still use their own plugin configuration. don't treat a private server as a sandbox. kiln doesn't rewrite your global backend configuration to make a chat work.
 
 ## memory and decisions
 
@@ -63,7 +84,7 @@ choose a decision with "use for next request" to check its dependencies before s
 
 ## accounts and usage
 
-kiln accounts live at [kiln.raya.ac](https://kiln.raya.ac). you can register and sign in from account settings in the app, or in a browser at `/signin`. account settings handles registration, sign-in, sign-out, password changes, and recovery. keep the recovery code shown at registration: there is no email recovery service. provider login still belongs to codex or opencode, not this server.
+kiln accounts live at [kiln.raya.ac](https://kiln.raya.ac). you can register and sign in from account settings in the app, or in a browser at `/signin`. account settings handles registration, sign-in, sign-out, password changes, and recovery. keep the recovery code shown at registration: there is no email recovery service. provider login still belongs to codex, opencode, or grok, not this server.
 
 the hosted account service uses PostgreSQL for accounts, sessions, profiles, consent, usage, and rate limits. the private outbox on your mac is local state, not a substitute server database.
 
@@ -91,7 +112,7 @@ the tool timeline borrows closely from [T3 Code](https://github.com/pingdotgg/t3
 
 ## building it
 
-you need macOS 14 or newer and a Swift 6 toolchain. codex or opencode needs to be installed separately.
+you need macos 14 or newer and a swift 6 toolchain. codex, opencode, or grok must be installed separately.
 
 ```sh
 git clone https://github.com/raya-ac/kiln.git

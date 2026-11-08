@@ -1,11 +1,11 @@
 import SwiftUI
 import AppKit
 
-@main
 struct KilnApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var store = AppStore()
     @StateObject private var updater = UpdaterService()
+    @AppStorage("classicWorkspace") private var classicWorkspace = false
 
     init() {
         AgentTraceLog.shared.appendLocal(
@@ -34,6 +34,9 @@ struct KilnApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1400, height: 900)
         .commands {
+            CommandMenu("Workspace") {
+                Toggle("Classic layout", isOn: $classicWorkspace)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
                     store.showNewSessionSheet = true
@@ -44,6 +47,9 @@ struct KilnApp: App {
                     store.showCommandPalette = true
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Button("Tools") { store.openTools() }
+                    .keyboardShortcut("t", modifiers: [.command, .option])
 
                 Button("Quick Open…") {
                     store.showQuickOpen = true
@@ -215,6 +221,19 @@ struct KilnApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(store.isBusy || store.activeSession?.messages.isEmpty != false)
             }
+        }
+    }
+}
+
+@main
+enum KilnLauncher {
+    @MainActor static func main() {
+        if CommandLine.arguments.contains("--computer-mcp") {
+            Task { await ComputerMCP.run(); exit(0) }
+            dispatchMain()
+        } else {
+            // AppKit owns the main run loop; do not hold an async actor job around it.
+            KilnApp.main()
         }
     }
 }

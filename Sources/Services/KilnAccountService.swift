@@ -10,13 +10,37 @@ struct KilnAccountCredential: Codable, Equatable, Sendable {
 }
 
 @MainActor protocol KilnAccountCredentialStore {
-    func load() throws -> KilnAccountCredential?
-    func save(_ credential: KilnAccountCredential) throws
-    func delete() throws
+    func load() async throws -> KilnAccountCredential?
+    func save(_ credential: KilnAccountCredential) async throws
+    func delete() async throws
+    func restoreForStartup(requiresLogin: Bool) async throws -> KilnAccountCredential?
+}
+
+extension KilnAccountCredentialStore {
+    func restoreForStartup(requiresLogin: Bool) async throws -> KilnAccountCredential? {
+        if requiresLogin { try await delete(); return nil }
+        return try await load()
+    }
 }
 
 @MainActor final class KilnAccountKeychain: KilnAccountCredentialStore {
-    private var query: [String: Any] {
+    private let vault = KilnAccountKeychainVault.shared
+
+    func load() async throws -> KilnAccountCredential? { try await vault.load() }
+    func save(_ credential: KilnAccountCredential) async throws { try await vault.save(credential) }
+    func delete() async throws { try await vault.delete() }
+
+    func restoreForStartup(requiresLogin: Bool) async throws -> KilnAccountCredential? {
+        // The persisted sign-out tombstone is authoritative.
+        if requiresLogin { return nil }
+        return try await load()
+    }
+}
+
+private actor KilnAccountKeychainVault {
+    static let shared = KilnAccountKeychainVault()
+
+    private static var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: "ac.raya.kiln.account.v1",
          kSecAttrAccount as String: "production-session",
@@ -24,7 +48,8 @@ struct KilnAccountCredential: Codable, Equatable, Sendable {
     }
 
     func load() throws -> KilnAccountCredential? {
-        var query = query
+        var query = Self.query
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -40,15 +65,17 @@ struct KilnAccountCredential: Codable, Equatable, Sendable {
         let data = try JSONEncoder().encode(credential)
         let attributes: [String: Any] = [kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
-        let result = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let result = SecItemUpdate(Self.query as CFDictionary, attributes as CFDictionary)
         if result == errSecItemNotFound {
-            var item = query
+            var item = Self.query
             attributes.forEach { item[$0.key] = $0.value }
             guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { throw KilnAccountError.keychain }
         } else if result != errSecSuccess { throw KilnAccountError.keychain }
     }
 
     func delete() throws {
+        var query = Self.query
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         let result = SecItemDelete(query as CFDictionary)
         guard result == errSecSuccess || result == errSecItemNotFound else { throw KilnAccountError.keychain }
     }
@@ -164,6 +191,7 @@ struct KilnAccountOutbox: Codable, Sendable {
 
     @Published private(set) var account: KilnAccount?
     @Published private(set) var isLoading = false
+    @Published private(set) var isCleaningCredentials = false
     @Published private(set) var isSyncing = false
     @Published private(set) var isLoadingHistory = false
     @Published private(set) var errorMessage: String?
@@ -226,17 +254,24 @@ struct KilnAccountOutbox: Codable, Sendable {
         guard !started else { return }
         started = true
         if storageHealthy {
+            let epoch = generation
+            isLoading = true
             do {
-                if state.requiresLogin { try secrets.delete() }
-                else { credential = try secrets.load() }
-            } catch { errorMessage = KilnAccountError.keychain.localizedDescription }
+                let restored = try await secrets.restoreForStartup(requiresLogin: state.requiresLogin)
+                guard started, epoch == generation else { return }
+                credential = restored
+            } catch {
+                guard started, epoch == generation else { return }
+                errorMessage = KilnAccountError.keychain.localizedDescription
+            }
+            isLoading = false
             updateSharingState()
             await refresh()
             await flushOutbox()
         }
     }
 
-    func stop() { uploadTask?.cancel(); started = false }
+    func stop() { uploadTask?.cancel(); started = false; generation = UUID(); isLoading = false }
     func dismissRecoveryCodes() { recoveryCodes = [] }
     func clearError() { errorMessage = nil }
 
@@ -255,7 +290,7 @@ struct KilnAccountOutbox: Codable, Sendable {
     }
 
     private func authenticate(path: String, body: [String: String]) async -> Bool {
-        guard !isLoading, credential == nil, storageHealthy else { return false }
+        guard !isLoading, !isCleaningCredentials, credential == nil, storageHealthy else { return false }
         isLoading = true
         errorMessage = nil
         let epoch = generation
@@ -263,9 +298,9 @@ struct KilnAccountOutbox: Codable, Sendable {
         do {
             let response: AuthResponse = try await request(path, method: "POST", body: body, token: nil)
             guard epoch == generation else { return false }
-            try install(response)
+            try await install(response)
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     func refresh() async {
@@ -278,7 +313,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return }
             try accept(response.account, expectedID: credential.accountID)
             errorMessage = nil
-        } catch { if epoch == generation { report(error) } }
+        } catch { if epoch == generation { await report(error) } }
     }
 
     @discardableResult func updateProfile(displayName: String, bio: String, location: String = "", website: String = "", accent: String = "") async -> Bool {
@@ -301,7 +336,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             try accept(response.account, expectedID: credential.accountID)
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     @discardableResult func clearAvatar() async -> Bool {
@@ -317,7 +352,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             try accept(response.account, expectedID: credential.accountID)
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     /// Publishes measured usage on the public profile. This is separate from
@@ -348,7 +383,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             readmes.removeAll { $0.id == response.readme.id }
             readmes.insert(response.readme, at: 0)
             return response.readme
-        } catch { report(error); return nil }
+        } catch { if epoch == generation { await report(error) }; return nil }
     }
 
     @discardableResult func refreshReadmes() async -> Bool {
@@ -362,7 +397,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             readmes = response.readmes
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     @discardableResult func setReadme(_ id: String, enabled: Bool) async -> Bool {
@@ -377,7 +412,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             if let index = readmes.firstIndex(where: { $0.id == id }) { readmes[index] = response.readme }
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     @discardableResult func deleteReadme(_ id: String) async -> Bool {
@@ -392,11 +427,14 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             readmes.removeAll { $0.id == id }
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     @discardableResult func setShareUsage(_ enabled: Bool) async -> Bool {
         guard let credential, !isLoading, account?.id == credential.accountID else { return false }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
         var localRevocationSaved = true
         // Revocation is local and durable before waiting on the server.
         if !enabled {
@@ -406,16 +444,16 @@ struct KilnAccountOutbox: Codable, Sendable {
             localRevocationSaved = persist()
             if !localRevocationSaved {
                 // If disk revocation fails, remove the credential too. Still attempt server-side revocation below.
-                do { try secrets.delete() } catch { errorMessage = KilnAccountError.keychain.localizedDescription }
                 self.credential = nil
                 account = nil
                 updateSharingState()
+                let epoch = generation
+                do { try await secrets.delete() }
+                catch { if epoch == generation { errorMessage = KilnAccountError.keychain.localizedDescription } }
+                guard epoch == generation else { return false }
             }
         }
-        isLoading = true
-        errorMessage = nil
         let epoch = generation
-        defer { isLoading = false }
         do {
             let response: AccountResponse = try await request("/settings", method: "PATCH",
                 body: ["usageSharingEnabled": enabled], token: credential.token)
@@ -428,7 +466,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard persist() else { return false }
             if enabled { scheduleUpload() }
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     private func updateAccount<T: Encodable>(_ path: String, body: T) async -> Bool {
@@ -442,7 +480,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation else { return false }
             try accept(response.account, expectedID: credential.accountID)
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     @discardableResult func changePassword(currentPassword: String, newPassword: String) async -> Bool {
@@ -457,9 +495,9 @@ struct KilnAccountOutbox: Codable, Sendable {
             guard epoch == generation, response.account.id == credential.accountID else {
                 throw KilnAccountError.invalidResponse
             }
-            try install(response, preservingConsent: true)
+            try await install(response, preservingConsent: true)
             return true
-        } catch { report(error); return false }
+        } catch { if epoch == generation { await report(error) }; return false }
     }
 
     func signOut() async {
@@ -467,7 +505,7 @@ struct KilnAccountOutbox: Codable, Sendable {
         let oldCredential = credential
         isLoading = true
         defer { isLoading = false }
-        clearSession()
+        await clearSession()
         guard let oldCredential else { return }
         do {
             let _: OKResponse = try await request("/auth/logout", method: "POST", body: EmptyBody(), token: oldCredential.token)
@@ -527,7 +565,7 @@ struct KilnAccountOutbox: Codable, Sendable {
             } catch {
                 guard epoch == generation else { return }
                 syncError = safeMessage(error)
-                if case KilnAccountError.unauthorized = error { clearSession() }
+                if case KilnAccountError.unauthorized = error { await clearSession() }
                 else if case KilnAccountError.sharingDisabled = error {
                     state.discardPending(); _ = persist()
                 } else if case let KilnAccountError.server(status, _) = error,
@@ -558,17 +596,19 @@ struct KilnAccountOutbox: Codable, Sendable {
             history = existing + page.events.filter { !identifiers.contains($0.id) }
             aggregate = totals
             nextHistoryCursor = page.nextBefore
-        } catch { if epoch == generation { report(error) } }
+        } catch { if epoch == generation { await report(error) } }
     }
 
-    private func install(_ response: AuthResponse, preservingConsent: Bool = false) throws {
+    private func install(_ response: AuthResponse, preservingConsent: Bool = false) async throws {
         guard !response.session.token.isEmpty, UUID(uuidString: response.account.id) != nil,
               KilnAccount.validHandle(response.account.handle) else { throw KilnAccountError.invalidResponse }
         let newCredential = KilnAccountCredential(accountID: response.account.id, token: response.session.token)
-        try secrets.save(newCredential)
+        let epoch = generation
+        try await secrets.save(newCredential)
+        guard epoch == generation else { throw CancellationError() }
         if !preservingConsent { state.discardPending() }
         state.requiresLogin = false
-        guard persist() else { try? secrets.delete(); throw KilnAccountError.storage }
+        guard persist() else { try? await secrets.delete(); throw KilnAccountError.storage }
         generation = UUID()
         credential = newCredential
         account = response.account
@@ -586,7 +626,10 @@ struct KilnAccountOutbox: Codable, Sendable {
         updateSharingState()
     }
 
-    private func clearSession() {
+    private func clearSession() async {
+        guard !isCleaningCredentials else { return }
+        isCleaningCredentials = true
+        defer { isCleaningCredentials = false }
         generation = UUID()
         uploadTask?.cancel()
         credential = nil
@@ -600,7 +643,9 @@ struct KilnAccountOutbox: Codable, Sendable {
         state.discardPending()
         state.requiresLogin = true
         _ = persist()
-        do { try secrets.delete() } catch { errorMessage = KilnAccountError.keychain.localizedDescription }
+        let epoch = generation
+        do { try await secrets.delete() }
+        catch { if epoch == generation { errorMessage = KilnAccountError.keychain.localizedDescription } }
         updateSharingState()
     }
 
@@ -639,9 +684,9 @@ struct KilnAccountOutbox: Codable, Sendable {
         }
     }
 
-    private func report(_ error: Error) {
+    private func report(_ error: Error) async {
         errorMessage = safeMessage(error)
-        if case KilnAccountError.unauthorized = error { clearSession() }
+        if case KilnAccountError.unauthorized = error { await clearSession() }
     }
 
     private func safeMessage(_ error: Error) -> String {

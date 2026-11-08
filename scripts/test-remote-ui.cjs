@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
-const { chromium } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
 const assets = path.join(root, 'Sources/App/Resources/remote');
@@ -12,7 +11,7 @@ const html = read('index.html').replace('/*STYLES*/', () => read('remote.css'))
   .replace('/*APPLICATION*/', () => read('remote.js'))
   .replace('<!--VENDOR-->', () => ['purify.min.js', 'marked.umd.js', 'lucide.min.js'].map(f => '<script>' + read('vendor/' + f) + '</script>').join('\n'))
   .replaceAll('__OPENAI_LOGO__', 'data:image/png;base64,' + logo);
-const model = {id:'gpt-6-astra',label:'GPT-6-Astra',provider:'codex',brand:'openai',efforts:['low','medium','high','xhigh','max','ultra'],supportsFast:true,contextWindow:272000};
+const model = {id:'gpt-6.1-sol',label:'GPT-6.1-Sol',provider:'codex',brand:'openai',efforts:['low','medium','high','xhigh','max','ultra'],supportsFast:true,contextWindow:500000};
 const data = {
   activeSessionId:'fixture',
   sessions:[{id:'fixture',name:'Kiln workspace redesign',kind:'code',model:model.id,workDir:'/Users/ari/projects/kiln-app',messageCount:4,tags:['design'],updatedAt:1788580000},
@@ -29,14 +28,38 @@ const data = {
   models:[model,{...model,id:'gpt-5.5',label:'GPT-5.5'},{...model,id:'gpt-5.3-codex',label:'GPT-5.3-Codex',older:true,supportsFast:false}]
 };
 let failSend = true;
+if (process.env.KILN_BUSY_FIXTURE === '1') {
+  data.live.isBusy = true;
+  data.live.streamingText = 'Synthetic running request';
+}
 const mediaFiles = {
   picture: {mime:'image/png', data:fs.readFileSync(path.join(root,'Sources/App/Resources/brands/OpenAI-white-monoblossom.png'))},
   sound: {mime:'audio/wav', data:fs.existsSync(path.join(root,'.tmp/media-fixture.wav')) ? fs.readFileSync(path.join(root,'.tmp/media-fixture.wav')) : null},
   clip: {mime:'video/mp4', data:fs.existsSync(path.join(root,'.tmp/media-fixture.mp4')) ? fs.readFileSync(path.join(root,'.tmp/media-fixture.mp4')) : null}
 };
+const securityReceipts = {external:[],local:[]};
+let collectorURL = '';
+const collector = http.createServer((req,res) => {
+  securityReceipts.external.push({path:req.url,method:req.method,authorization:req.headers.authorization||null});
+  res.setHeader('Access-Control-Allow-Origin','*');
+  res.setHeader('Access-Control-Allow-Headers','Authorization, Content-Type');
+  res.end('fixture receiver');
+});
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if(url.pathname === '/') { res.setHeader('Content-Type','text/html'); res.end(html); return; }
+  if(process.env.KILN_SECURITY_FIXTURE==='1') {
+    if(url.pathname==='/__security_receipts'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(securityReceipts));return;}
+    if(url.pathname.startsWith('/api/'))securityReceipts.local.push({path:req.url,authorization:req.headers.authorization||null});
+    if(url.pathname==='/api/media'&&url.searchParams.get('id')==='redirect'){
+      res.writeHead(302,{Location:collectorURL+'/redirect-target'});res.end();return;
+    }
+  }
+  if(url.pathname === '/') {
+    if(process.env.KILN_CLIPBOARD_FALLBACK_FIXTURE==='1')res.setHeader('Permissions-Policy','clipboard-write=()');
+    const theme = url.searchParams.get('theme');
+    if (process.env.KILN_FIXTURE_ONLY === '1' && ['light','dark'].includes(theme)) data.settings.themeMode = theme;
+    res.setHeader('Content-Type','text/html'); res.end(html); return;
+  }
   if(url.pathname === '/api/media') {
     const file=mediaFiles[url.searchParams.get('id')];
     if(!file?.data){res.statusCode=404;res.end();return;}
@@ -57,12 +80,38 @@ const server = http.createServer(async (req, res) => {
   else if(url.pathname==='/api/settings/chat'){Object.assign(data.settings,body);out=data.settings;}
   else if(url.pathname==='/api/model'){data.sessions[0].model=body.model;out={status:'ok'};}
   else if(url.pathname==='/api/send'){if(failSend){res.statusCode=409;out={error:'Test rejection: draft retained'};}else{out={status:'queued'};}}
+  else if(url.pathname==='/api/interrupt'){
+    assert.equal(body.sessionId,'fixture','Stop must name the displayed chat, not native selection');
+    console.log('PASS: remote Stop explicitly targeted '+body.sessionId);
+    data.live.isBusy=false;data.live.streamingText='';out={status:'interrupted'};
+  }
+  else if(url.pathname==='/api/retry'){
+    assert.equal(body.sessionId,'fixture','Retry must name the displayed chat');
+    console.log('PASS: remote Retry explicitly targeted '+body.sessionId);out={status:'queued'};
+  }
   else if(url.pathname==='/api/select'){data.activeSessionId=body.sessionId;}
+  else if(['/api/export','/api/export-json','/api/settings/export'].includes(url.pathname)){
+    res.setHeader('Content-Type','text/plain');res.setHeader('Content-Disposition','attachment; filename="fixture.txt"');res.end('fixture export');return;
+  }
   else {res.statusCode=404;out={error:'Unknown fixture route'};}
   res.end(JSON.stringify(out));
 });
 
-(async()=>{
+if (process.env.KILN_FIXTURE_ONLY === '1') {
+  const start = () => server.listen(0, '127.0.0.1', () => console.log('Kiln UI fixture: http://127.0.0.1:' + server.address().port));
+  if(process.env.KILN_SECURITY_FIXTURE==='1')collector.listen(0,'127.0.0.1',()=>{
+    collectorURL='http://127.0.0.1:'+collector.address().port;
+    data.messages=[{id:'security',role:'assistant',model:model.id,assistantName:model.label,blocks:[{type:'text',text:
+      '<span data-authed="'+collectorURL+'/hydrate" class="inline-media" id="forged">forged hydration</span>\n\n'+
+      '<a href="#" data-authed-open="'+collectorURL+'/open">forged open</a>\n\n'+
+      '<a href="#" data-authed-download="'+collectorURL+'/download">forged download</a>\n\n'+
+      '<span data-authed="/api/settings/export">forged internal endpoint</span>',
+      media:[{id:'picture',kind:'image',label:'Legitimate local picture',source:'/fixture/picture'},
+             {id:'redirect',kind:'image',label:'Redirect must fail closed',source:'/fixture/redirect'}]}]}];
+    start();
+  });else start();
+} else (async()=>{
+  const { chromium } = require('playwright');
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const browser=await chromium.launch({headless:true,channel:process.env.KILN_BROWSER_CHANNEL || 'chrome'});
   const page=await browser.newPage({viewport:{width:1440,height:1000},colorScheme:'dark'});

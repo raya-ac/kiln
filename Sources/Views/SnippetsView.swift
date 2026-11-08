@@ -192,6 +192,7 @@ struct SnippetsView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.kilnBorder, lineWidth: 1))
         .shadow(color: Color.black.opacity(0.5), radius: 24, y: 8)
         .onAppear { focused = true }
+        .onExitCommand { dismiss() }
         .onKeyPress(.upArrow) {
             if selectedIndex > 0 { selectedIndex -= 1 }
             return .handled

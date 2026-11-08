@@ -6,8 +6,18 @@ enum OpenCodeProtocol {
             .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/bin/env"
     }
 
-    static func arguments(sessionId: String?, model: AgentModel, workDir: String, options: SendOptions, filePaths: [String] = []) -> [String] {
-        var args = ["run", "--format", "json", "--model", model.cliModel, "--dir", workDir, "--pure"]
+    static func installedMajorVersion() async throws -> Int {
+        let data = try await CodexCLI.output(["--version"], executable: executablePath, command: "opencode")
+        guard let version = CLIVersion(String(decoding: data, as: UTF8.self)) else { throw CocoaError(.fileReadCorruptFile) }
+        return version.major
+    }
+
+    static func arguments(sessionId: String?, model: AgentModel, workDir: String, options: SendOptions, filePaths: [String] = [], majorVersion: Int = 1) -> [String] {
+        let effort = options.thinkingEnabled ? options.effortLevel?.rawValue : nil
+        let variant = effort.flatMap { model.reasoningEfforts.contains($0) ? $0 : nil }
+        let cliModel = model.cliModel + (majorVersion >= 2 ? variant.map { "#" + $0 } ?? "" : "")
+        var args = ["run", "--format", "json", "--model", cliModel]
+        args += majorVersion >= 2 ? ["--standalone"] : ["--dir", workDir, "--pure"]
         if let sessionId { args += ["--session", sessionId] }
         if options.mode == .plan || options.chatMode || options.permissions == .deny {
             args += ["--agent", "plan"]
@@ -16,20 +26,45 @@ enum OpenCodeProtocol {
         }
         if options.thinkingEnabled {
             args.append("--thinking")
-            if let effort = options.effortLevel?.rawValue, model.reasoningEfforts.contains(effort) {
-                args += ["--variant", effort]
+            if let variant, majorVersion < 2 {
+                args += ["--variant", variant]
             }
         }
         args += filePaths.flatMap { ["--file", $0] }
         return args
     }
 
-    static func configuration(_ options: SendOptions) -> String {
+    static func configuration(_ options: SendOptions, computerExecutable: String? = nil, majorVersion: Int = 1) -> String {
         let readOnly = options.mode == .plan || options.chatMode || options.permissions == .deny
         let permission: [String: String] = readOnly
             ? ["*": "deny", "read": "allow", "glob": "allow", "grep": "allow"]
             : ["*": options.permissions == .bypass ? "allow" : "ask"]
-        let data = try? JSONSerialization.data(withJSONObject: ["share": "disabled", "permission": permission])
+        var config: [String: Any] = ["share": "disabled", "permission": permission]
+        if majorVersion >= 2 {
+            var rules = [["action": "*", "resource": "*", "effect": readOnly ? "deny" : options.permissions == .bypass ? "allow" : "ask"]]
+            var policies = [["action": "plugin.use", "resource": "*", "effect": "deny"]]
+            if readOnly {
+                policies.append(["action": "tool.use", "resource": "*", "effect": "deny"])
+                for action in ["read", "glob", "grep"] {
+                    rules.append(["action": action, "resource": "*", "effect": "allow"])
+                    policies.append(["action": "tool.use", "resource": action + ":*", "effect": "allow"])
+                }
+            }
+            config = ["permissions": rules, "policies": policies, "plugins": []]
+            if readOnly {
+                // Early V2 releases advertise only this policy shape in their live schema.
+                config["experimental"] = ["policies": policies.filter { $0["action"] == "tool.use" }.map {
+                    ["action": "permission", "resource": $0["resource"] ?? "*", "effect": $0["effect"] ?? "deny"]
+                }]
+            }
+        }
+        if let computerExecutable, !readOnly, majorVersion >= 2 {
+            var rules = config["permissions"] as? [[String: String]] ?? []
+            rules.append(["action": "kiln_computer_*", "resource": "*", "effect": "allow"])
+            config["permissions"] = rules
+            config["mcp"] = ["servers": [ComputerConnection.serverName: ComputerConnection.openCodeServer(executable: computerExecutable)]]
+        }
+        let data = try? JSONSerialization.data(withJSONObject: config)
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
 
@@ -72,7 +107,7 @@ enum OpenCodeProtocol {
         case "error":
             let error = json["error"] as? [String: Any] ?? [:]
             let data = error["data"] as? [String: Any] ?? [:]
-            events.append(.error(data["message"] as? String ?? error["name"] as? String ?? "OpenCode failed"))
+            events.append(.error(data["message"] as? String ?? error["message"] as? String ?? error["name"] as? String ?? "OpenCode failed"))
         default: break
         }
         return events
@@ -97,10 +132,22 @@ final class OpenCodeModels: @unchecked Sendable {
     }
 
     func reload() async throws {
-        let data = try await CodexCLI.output(["models", "--pure", "--verbose"], executable: OpenCodeProtocol.executablePath, command: "opencode")
-        let models = Self.parse(data)
+        let major = try await OpenCodeProtocol.installedMajorVersion()
+        let data = try await CodexCLI.output(major >= 2 ? ["models", "--standalone"] : ["models", "--pure", "--verbose"], executable: OpenCodeProtocol.executablePath, command: "opencode")
+        let models = major >= 2 ? Self.parseV2(data) : Self.parse(data)
         guard !models.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         replace(models)
+    }
+
+    static func parseV2(_ data: Data) -> [ModelDescriptor] {
+        var seen = Set<String>()
+        return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).compactMap { line in
+            let id = line.trimmingCharacters(in: .whitespaces)
+            guard id.split(separator: "/").count == 2, !id.contains(where: \.isWhitespace),
+                  let model = AgentModel(rawValue: "opencode:" + id), seen.insert(id).inserted else { return nil }
+            // V2's CLI lists IDs only; do not invent reasoning or media capabilities.
+            return ModelDescriptor(model: model, displayName: model.cliModel, description: "OpenCode", contextWindow: 128_000, efforts: [])
+        }
     }
 
     /// The CLI frames each pretty-printed JSON object between unindented braces.

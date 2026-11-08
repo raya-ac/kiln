@@ -82,6 +82,7 @@ enum PermissionMode: String, CaseIterable, Identifiable, Sendable, Codable {
 
 /// Options passed to each Codex CLI invocation
 struct SendOptions: Sendable {
+    var computerUseAllowed: Bool = true
     var mode: SessionMode = .build
     var permissions: PermissionMode = .ask
     var extendedContext: Bool = false
@@ -196,10 +197,13 @@ struct SessionRuntimeState: Sendable {
     var activeToolCalls: [ToolUseBlock] = []
     var currentToolId: String? = nil
     var lastError: String? = nil
+    var wasCancelled: Bool = false
     var inputTokens: Int = 0
     var outputTokens: Int = 0
     var contextUsage: ContextUsage? = nil
     var contextChecked: Bool = false
+
+    var completedSuccessfully: Bool { !wasCancelled && lastError == nil }
 }
 
 struct ToolResultBlock: Sendable {
@@ -282,6 +286,7 @@ struct Session: Identifiable, Sendable {
     /// the next launch, we know the previous run was interrupted (app crash,
     /// `codex` crash, force-quit) and can offer a retry.
     var wasInterrupted: Bool = false
+    var needsBackendReset: Bool = false
     var composerPreferences: ComposerPreferences?
     /// Codex fast mode for ChatGPT-backed GPT-5.4 sessions. This maps to
     /// Codex's own fast service tier rather than changing models.

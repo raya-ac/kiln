@@ -30,19 +30,19 @@ extension NSColor {
 
 extension Color {
     // Backgrounds
-    static let kilnBg = kilnDyn(0xFFFFFF, 0x171719)
-    static let kilnSurface = kilnDyn(0xF5F5F7, 0x121214)
-    static let kilnSurfaceElevated = kilnDyn(0xF0F0F3, 0x222225)
-    static let kilnSurfaceHover = kilnDyn(0xE7E7EB, 0x2C2C30)
+    static let kilnBg = kilnDyn(0xFAFAFC, 0x19191C)
+    static let kilnSurface = kilnDyn(0xF0F1F4, 0x131315)
+    static let kilnSurfaceElevated = kilnDyn(0xFFFFFF, 0x232326)
+    static let kilnSurfaceHover = kilnDyn(0xE8E9EE, 0x2D2D32)
 
     // Borders
-    static let kilnBorder = kilnDyn(0xD9D9DF, 0x343438)
-    static let kilnBorderSubtle = kilnDyn(0xE8E8ED, 0x26262A)
+    static let kilnBorder = kilnDyn(0xDCDDE4, 0x37373D)
+    static let kilnBorderSubtle = kilnDyn(0xE6E7EC, 0x29292E)
 
     // Text
-    static let kilnText = kilnDyn(0x09090B, 0xE4E4E7)
-    static let kilnTextSecondary = kilnDyn(0x52525B, 0xA1A1AA)
-    static let kilnTextTertiary = kilnDyn(0x71717A, 0x85858D)
+    static let kilnText = kilnDyn(0x17171C, 0xEEEEF2)
+    static let kilnTextSecondary = kilnDyn(0x575761, 0xADADB7)
+    static let kilnTextTertiary = kilnDyn(0x74747E, 0x888893)
 
     // Accent
     /// User-configurable accent color. Reads the current setting from

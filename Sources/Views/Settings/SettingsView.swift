@@ -16,6 +16,8 @@ struct SettingsView: View {
     // Synced from `store.remoteServer.port` on appear and when the server
     // mutates it (e.g. on launch); applied back on submit/focus loss.
     @State private var portDraft: String = ""
+    @State private var remoteTokenDraft = ""
+    @State private var savingRemoteToken = false
     @FocusState private var portFocused: Bool
 
     enum SettingsTab: String, CaseIterable, Identifiable {
@@ -85,6 +87,7 @@ struct SettingsView: View {
                         Image(systemName: "xmark").frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain).help("Close settings").accessibilityLabel("Close settings")
+                    .keyboardShortcut(.cancelAction)
                 }
                 .foregroundStyle(Color.kilnText)
                 .padding(24)
@@ -97,9 +100,12 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .sheet(isPresented: $showArchives) { CompactionArchivesView() }
+        .sheet(isPresented: $showArchives) {
+            CompactionArchivesView().onExitCommand { showArchives = false }
+        }
         .frame(width: 820, height: 640)
         .background(Color.kilnBg)
+        .onExitCommand { dismiss() }
         .onAppear {
             if store.showCLIUpdates { tab = .cliUpdates; store.showCLIUpdates = false }
         }
@@ -1104,13 +1110,13 @@ struct SettingsView: View {
             }
 
             SettingsRow(label: "Token") {
-                SecureField("optional bearer token", text: Binding(
-                    get: { store.remoteServer.token },
-                    set: {
-                        store.remoteServer.token = $0
-                        UserDefaults.standard.set($0, forKey: "remote.token")
-                    }
-                ))
+                if store.remoteServer.token.isEmpty {
+                    Button("Unlock saved token") {
+                        Task { await store.remoteServer.restoreTokenAndStart(allowInteraction: true) }
+                    }.help("Let macOS ask for access to Kiln's saved remote token")
+                        .disabled(store.remoteServer.credentialBusy)
+                }
+                SecureField("bearer token", text: $remoteTokenDraft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.kilnText)
@@ -1119,11 +1125,16 @@ struct SettingsView: View {
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.kilnBorder, lineWidth: 1))
+                .onAppear { remoteTokenDraft = store.remoteServer.token }
+                .onSubmit { saveRemoteToken() }
+
+                Button { saveRemoteToken() } label: { Image(systemName: "checkmark").frame(width: 22, height: 22) }
+                    .help("Save token").accessibilityLabel("Save token")
+                    .disabled(savingRemoteToken || store.remoteServer.credentialBusy || remoteTokenDraft.isEmpty || remoteTokenDraft == store.remoteServer.token)
 
                 Button {
-                    let t = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-                    store.remoteServer.token = t
-                    UserDefaults.standard.set(t, forKey: "remote.token")
+                    remoteTokenDraft = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                    saveRemoteToken()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 10))
@@ -1134,6 +1145,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Generate new token")
+                .disabled(savingRemoteToken || store.remoteServer.credentialBusy)
             }
 
             SettingsRow(label: "Access") {
@@ -1152,7 +1164,7 @@ struct SettingsView: View {
                             store.remoteServer.allowLAN = (level != .loopback)
                             UserDefaults.standard.set(level.rawValue, forKey: "remote.accessLevel")
                             UserDefaults.standard.set(level != .loopback, forKey: "remote.allowLAN")
-                            if store.remoteServer.isRunning { store.remoteServer.start() }
+                            if store.remoteServer.hasListener { store.remoteServer.start() }
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: icon).font(.system(size: 9))
@@ -1283,20 +1295,7 @@ struct SettingsView: View {
             SettingsRow(label: "Tunnel Kiln") {
                 SettingsToggle(value: UserDefaults.standard.bool(forKey: "warden.tunnelKiln")) { enabled in
                     UserDefaults.standard.set(enabled, forKey: "warden.tunnelKiln")
-                    if enabled {
-                        // Always register the sub our token was issued for;
-                        // any other value is rejected by the server. Nil →
-                        // client rolls a random one, which only works
-                        // pre-claim.
-                        let sub = store.wardenTunnels.config.claimedSub
-                        store.wardenTunnels.start(
-                            owner: .kilnSelf,
-                            target: "127.0.0.1:\(store.remoteServer.port)",
-                            sub: sub.isEmpty ? nil : sub
-                        )
-                    } else {
-                        store.wardenTunnels.stop(owner: .kilnSelf)
-                    }
+                    store.reconcileRemoteTunnel()
                 }
                 .disabled(!store.wardenTunnels.config.isConfigured)
 
@@ -1342,7 +1341,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     urlRow(label: "public", url: url)
                     if !store.remoteServer.token.isEmpty {
-                        urlRow(label: "with token", url: "\(url)/?t=\(store.remoteServer.token)")
+                        urlRow(label: "with token", url: "\(url)/#t=\(store.remoteServer.token)")
                     }
                 }
                 .padding(.top, 6)
@@ -1506,9 +1505,7 @@ struct SettingsView: View {
         if p == store.remoteServer.port { return }
         store.remoteServer.port = p
         UserDefaults.standard.set(Int(p), forKey: "remote.port")
-        if store.remoteServer.isRunning { store.remoteServer.start() }
-        // A running Kiln self-tunnel points at the old port — retarget it.
-        restartKilnTunnelIfActive()
+        if store.remoteServer.hasListener { store.remoteServer.start() }
     }
 
     /// Restart Kiln's own warden tunnel if the user has it enabled, picking
@@ -1518,13 +1515,17 @@ struct SettingsView: View {
     /// kiln subdomain field.
     private func restartKilnTunnelIfActive() {
         guard store.wardenTunnels.isActive(owner: .kilnSelf) else { return }
-        let sub = UserDefaults.standard.string(forKey: "warden.kilnSub")
-            .flatMap { $0.isEmpty ? nil : $0 }
-        store.wardenTunnels.start(
-            owner: .kilnSelf,
-            target: "127.0.0.1:\(store.remoteServer.port)",
-            sub: sub
-        )
+        store.reconcileRemoteTunnel()
+    }
+
+    private func saveRemoteToken() {
+        guard !savingRemoteToken else { return }
+        let candidate = remoteTokenDraft
+        savingRemoteToken = true
+        Task {
+            if await store.remoteServer.rotateToken(candidate) { remoteTokenDraft = store.remoteServer.token }
+            savingRemoteToken = false
+        }
     }
 
     private var tailscaleStatusColor: Color {
@@ -1557,13 +1558,13 @@ struct SettingsView: View {
             Button {
                 NSPasteboard.general.clearContents()
                 var s = url
-                // Only append the token if the URL doesn't already carry
-                // it — otherwise the "with token" row double-appends and
-                // the browser lands on `?t=X?t=X`, which the server reads
-                // as a single malformed value and 401s.
+                // Fragment, not query. The server never sees it, and a second
+                // copy must not produce `#t=X#t=X`.
                 let tok = store.remoteServer.token
-                if !tok.isEmpty && !s.contains("t=\(tok)") {
-                    s += (s.contains("?") ? "&" : "?") + "t=\(tok)"
+                if !tok.isEmpty && !s.contains("#t=") {
+                    if let hash = s.firstIndex(of: "#") { s = String(s[..<hash]) }
+                    let encoded = tok.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? tok
+                    s += "#t=\(encoded)"
                 }
                 NSPasteboard.general.setString(s, forType: .string)
             } label: {
@@ -1575,7 +1576,7 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 5))
             }
             .buttonStyle(.plain)
-            .help("Copy URL with token")
+            .help("Copy URL. The token stays in the fragment and is not sent to the server.")
         }
     }
 }

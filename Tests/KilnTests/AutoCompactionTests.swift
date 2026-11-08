@@ -2,6 +2,51 @@ import XCTest
 @testable import Kiln
 
 final class AutoCompactionTests: XCTestCase {
+    @MainActor
+    func testLiveInPlaceCompactionWhenRequested() async throws {
+        guard ProcessInfo.processInfo.environment["KILN_LIVE_COMPACTION"] == "1" else {
+            throw XCTSkip("Opt-in real Sol thread compaction")
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("kiln-compact-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = AgentService()
+        let sessionID = UUID().uuidString
+        defer { service.forgetThread(for: sessionID) }
+        var options = SendOptions()
+        options.permissions = .deny
+        options.computerUseAllowed = false
+
+        func send(_ marker: String) async throws {
+            var output = ""
+            var errors: [String] = []
+            let watchdog = Task { @MainActor in
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                service.interrupt(sessionId: sessionID)
+            }
+            defer { watchdog.cancel() }
+            await service.sendMessage(sessionId: sessionID,
+                message: "Reply with exactly \(marker). Do not call tools, inspect files, or change anything.",
+                model: .gpt61Sol, workDir: directory.path, options: options) {
+                switch $0 {
+                case .textDelta(let text): output += text
+                case .error(let error): errors.append(error)
+                case .cancelled: errors.append("Turn was cancelled")
+                default: break
+                }
+            }
+            XCTAssertTrue(errors.isEmpty, errors.joined(separator: "\n"))
+            XCTAssertTrue(output.contains(marker), output)
+        }
+
+        try await send("KILN_BEFORE_COMPACT_OK")
+        let threadID = try XCTUnwrap(service.threadID(for: sessionID))
+        try await CodexThreadCompactor.compact(threadID: threadID, executable: CodexCLI.executablePath, workDir: directory.path)
+        XCTAssertEqual(service.threadID(for: sessionID), threadID)
+        try await send("KILN_AFTER_COMPACT_OK")
+        XCTAssertEqual(service.threadID(for: sessionID), threadID)
+    }
+
     private let thread = "11111111-1111-4111-8111-111111111111"
     private func context(_ used: Int, window: Int = 1000) -> ContextUsage {
         ContextUsage(usedTokens: used, window: window, modelID: "gpt-5.5", threadID: thread)
@@ -40,7 +85,7 @@ final class AutoCompactionTests: XCTestCase {
     func testMeasuredContextPersistsButLegacyTotalsAreNotContext() {
         let message = ChatMessage(role: .assistant, blocks: [.trace([context(900).trace])])
         XCTAssertEqual(AutoCompactionPolicy.lastContext(in: [message], modelID: "gpt-5.5", threadID: thread), context(900))
-        XCTAssertNil(AutoCompactionPolicy.lastContext(in: [message], modelID: "gpt-6-astra", threadID: thread))
+        XCTAssertNil(AutoCompactionPolicy.lastContext(in: [message], modelID: "gpt-6.1-sol", threadID: thread))
         XCTAssertNil(AutoCompactionPolicy.lastContext(in: [message], modelID: "gpt-5.5", threadID: "other"))
         let legacy = ChatMessage(role: .assistant, blocks: [.trace([AgentTraceEntry(source: "codex", phase: "usage", title: "Usage", metadata: ["inputTokens": "999999", "outputTokens": "1000"])])])
         XCTAssertNil(AutoCompactionPolicy.lastContext(in: [legacy], modelID: "gpt-5.5", threadID: thread))

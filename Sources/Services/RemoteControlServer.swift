@@ -8,7 +8,8 @@ import Security
 /// - Web UI served at / for phone/tablet browsers on the LAN
 ///
 /// Bound to 127.0.0.1 by default; flip `allowLAN` to let other devices reach it.
-/// Optional bearer token via `Authorization: Bearer <token>` header or `?t=` query param.
+/// Bearer token via `Authorization: Bearer <token>` only. Query `t` is ignored.
+/// A token is required before starting the listener, including on loopback.
 enum RemoteAccessLevel: String, CaseIterable, Sendable {
     case loopback   // 127.0.0.1 only
     case lan        // all interfaces, LAN IP surfaced
@@ -18,6 +19,7 @@ enum RemoteAccessLevel: String, CaseIterable, Sendable {
 @MainActor
 final class RemoteControlServer: ObservableObject {
     @Published private(set) var isRunning: Bool = false
+    @Published private(set) var boundPort: UInt16?
     @Published private(set) var lastError: String?
     @Published var port: UInt16 = 8421
     @Published var token: String = ""
@@ -37,7 +39,11 @@ final class RemoteControlServer: ObservableObject {
     private let authLockoutDuration: TimeInterval = 60
 
     private var listener: NWListener?
+    var hasListener: Bool { listener != nil }
+    private var credentialRestoreID: UUID?
+    @Published private(set) var credentialBusy = false
     nonisolated private let queue = DispatchQueue(label: "kiln.remote", qos: .userInitiated)
+    nonisolated private let gate = RemoteConnectionGate()
     private weak var store: AppStore?
 
     init(store: AppStore) {
@@ -46,8 +52,48 @@ final class RemoteControlServer: ObservableObject {
 
     // MARK: - Lifecycle
 
+    func restoreTokenAndStart(allowInteraction: Bool = false) async {
+        guard !credentialBusy else { return }
+        credentialBusy = true
+        defer { credentialBusy = false }
+        let restoreID = UUID()
+        credentialRestoreID = restoreID
+        let startingToken = token
+        let restored = await RemoteCredentialVault.shared.restore(allowInteraction: allowInteraction)
+        guard credentialRestoreID == restoreID, token == startingToken, !Task.isCancelled else { return }
+        guard !restored.isEmpty else {
+            lastError = "Saved remote token is unavailable. Unlock remote access in Settings; the saved token has not been replaced."
+            return
+        }
+        token = restored
+        start()
+        let deadline = Date().addingTimeInterval(2)
+        while !isRunning, lastError == nil, Date() < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    @discardableResult func rotateToken(_ replacement: String) async -> Bool {
+        guard !credentialBusy else { return false }
+        credentialBusy = true
+        defer { credentialBusy = false }
+        credentialRestoreID = nil
+        guard !replacement.isEmpty, await RemoteCredentialVault.shared.replace(replacement) else {
+            lastError = "Token was not saved. The previous token is still active."
+            return false
+        }
+        token = replacement
+        lastError = nil
+        return true
+    }
+
     func start() {
+        if token.isEmpty {
+            lastError = "Unlock or save a remote token before starting remote access."
+            return
+        }
         stop()
+        lastError = nil
         // Refresh Tailscale info on start (fire-and-forget).
         Task { await refreshTailscale() }
         do {
@@ -64,17 +110,25 @@ final class RemoteControlServer: ObservableObject {
                 return
             }
             let listener = try NWListener(using: params, on: nwPort)
-            listener.stateUpdateHandler = { [weak self] state in
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
                 Task { @MainActor in
+                    guard let self, let listener, self.listener === listener else { return }
                     switch state {
                     case .ready:
-                        self?.isRunning = true
-                        self?.lastError = nil
+                        guard let port = listener.port?.rawValue else {
+                            self.stop()
+                            self.lastError = "Remote listener has no bound port."
+                            return
+                        }
+                        self.boundPort = port
+                        self.isRunning = true
+                        self.lastError = nil
+                        self.store?.reconcileRemoteTunnel()
                     case .failed(let err):
-                        self?.isRunning = false
-                        self?.lastError = err.localizedDescription
+                        self.stop()
+                        self.lastError = err.localizedDescription
                     case .cancelled:
-                        self?.isRunning = false
+                        self.stop()
                     default:
                         break
                     }
@@ -92,39 +146,72 @@ final class RemoteControlServer: ObservableObject {
     }
 
     func stop() {
+        credentialRestoreID = nil
+        store?.wardenTunnels.stop(owner: .kilnSelf)
         listener?.cancel()
         listener = nil
+        boundPort = nil
         isRunning = false
     }
 
     // MARK: - Connection handling (nonisolated — runs on internal queue)
 
     nonisolated private func accept(_ conn: NWConnection) {
+        guard gate.enter() else {
+            conn.cancel()
+            return
+        }
+        let release = RemoteConnectionRelease(gate)
+        conn.stateUpdateHandler = { state in
+            if case .cancelled = state { release.leave() }
+        }
         conn.start(queue: queue)
-        readRequest(conn, buffer: Data())
+        let deadline = RemoteRequestDeadline { conn.cancel() }
+        queue.asyncAfter(deadline: .now() + RemoteLimits.requestTimeout, execute: deadline.item)
+        readRequest(conn, buffer: Data(), peerIsLoopback: RemoteAuth.isLoopback(conn.endpoint), deadline: deadline)
     }
 
-    nonisolated private func readRequest(_ conn: NWConnection, buffer: Data) {
+    nonisolated private func readRequest(_ conn: NWConnection, buffer: Data, peerIsLoopback: Bool, deadline: RemoteRequestDeadline, authorized: Bool = false) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             var buf = buffer
             if let data = data { buf.append(data) }
 
-            // Try to parse headers; if we have them and the body is complete, handle.
-            if let request = HTTPRequest.parse(buf) {
-                Task { @MainActor in
-                    let response = await self.route(request)
-                    self.send(response, on: conn)
-                }
+            if let status = RemoteLimits.ingressStatus(buffer: buf) {
+                deadline.cancel()
+                let response: HTTPResponse = status == 413
+                    ? .json(["error": "payload_too_large"], status: 413)
+                    : .text(status == 431 ? "headers too large" : "bad request", status: status)
+                self.send(response, on: conn)
                 return
             }
 
-            if error != nil || isComplete {
-                conn.cancel()
+            if !authorized, buf.range(of: Data("\r\n\r\n".utf8)) != nil {
+                guard let headers = HTTPRequest.parse(buf, headersOnly: true) else {
+                    deadline.cancel(); self.send(.text("bad request", status: 400), on: conn); return
+                }
+                let received = buf
+                Task { @MainActor in
+                    if let rejection = self.authenticationFailure(headers, peerIsLoopback: peerIsLoopback) {
+                        deadline.cancel(); self.send(rejection, on: conn); return
+                    }
+                    self.consumeRequest(conn, buffer: received, peerIsLoopback: peerIsLoopback, deadline: deadline,
+                                        isComplete: isComplete || error != nil)
+                }
                 return
             }
-            self.readRequest(conn, buffer: buf)
+            self.consumeRequest(conn, buffer: buf, peerIsLoopback: peerIsLoopback, deadline: deadline,
+                                isComplete: isComplete || error != nil, authorized: authorized)
         }
+    }
+
+    nonisolated private func consumeRequest(_ conn: NWConnection, buffer: Data, peerIsLoopback: Bool,
+                                            deadline: RemoteRequestDeadline, isComplete: Bool, authorized: Bool = true) {
+        if authorized, let request = HTTPRequest.parse(buffer) {
+            deadline.cancel()
+            Task { @MainActor in self.send(await self.route(request, peerIsLoopback: peerIsLoopback), on: conn) }
+        } else if isComplete { deadline.cancel(); conn.cancel() }
+        else { readRequest(conn, buffer: buffer, peerIsLoopback: peerIsLoopback, deadline: deadline, authorized: authorized) }
     }
 
     nonisolated private func send(_ response: HTTPResponse, on conn: NWConnection) {
@@ -146,30 +233,33 @@ final class RemoteControlServer: ObservableObject {
     // MARK: - Routing
 
     @MainActor
-    private func route(_ req: HTTPRequest) async -> HTTPResponse {
-        // The PreToolUse hook endpoint authenticates with its own per-process
-        // shared secret (X-Kiln-Hook-Secret) — the bearer token is for humans
-        // on the remote UI, not for hook callbacks spawned by the local CLI.
-
-
-        // Auth check (skip for root HTML so browsers can load the page and prompt)
-        let needsAuth = !token.isEmpty && !req.path.hasPrefix("/static") && req.path != "/"
-        if needsAuth {
+    private func authenticationFailure(_ req: HTTPRequest, peerIsLoopback: Bool) -> HTTPResponse? {
+        let tunnelExposed = store?.wardenTunnels.isActive(owner: .kilnSelf) ?? false
+        let auth = RemoteAuth.Context(
+            method: req.method, path: req.path, authorization: req.headers["authorization"],
+            peerIsLoopback: peerIsLoopback, accessLevel: accessLevel,
+            tunnelExposed: tunnelExposed, token: token)
+        if RemoteAuth.credentialRequired(auth) {
             // Lockout gate — if we're inside a lockout window, reject
             // unconditionally without even looking at the credential.
             if let until = authLockoutUntil, Date() < until {
                 return .json(["error": "rate_limited", "retry_after": Int(until.timeIntervalSinceNow)], status: 429)
             }
-            let provided = req.headers["authorization"]?
-                .replacingOccurrences(of: "Bearer ", with: "")
-                ?? req.query["t"] ?? ""
-            if !Self.constantTimeEq(provided, token) {
+            if RemoteAuth.decision(auth) == .unauthorized {
                 recordAuthFailure()
                 return .json(["error": "unauthorized"], status: 401)
+                    .with(header: "WWW-Authenticate", value: "Bearer")
             }
             // Success — don't reset the failure list (a valid request
             // inside a flood shouldn't excuse the flood).
         }
+
+        return nil
+    }
+
+    @MainActor
+    private func route(_ req: HTTPRequest, peerIsLoopback: Bool) async -> HTTPResponse {
+        if let rejection = authenticationFailure(req, peerIsLoopback: peerIsLoopback) { return rejection }
 
         guard let store = store else { return .text("no store", status: 500) }
 
@@ -355,6 +445,9 @@ final class RemoteControlServer: ObservableObject {
             guard store.activeSession != nil else {
                 return .json(["error": "no active session"], status: 400)
             }
+            if let id = store.activeSessionId, ComputerUse.shared.enabled[id] != nil {
+                return .json(["error": "Computer access is enabled for this chat. Stop it in the native app before sending remotely."], status: 409)
+            }
             let paths = (body["attachments"] as? [String]) ?? []
             let attachments: [ComposerAttachment]
             do { attachments = try paths.map { try AttachmentImporter.file(URL(fileURLWithPath: $0)) } }
@@ -363,7 +456,7 @@ final class RemoteControlServer: ObservableObject {
             if !draft.isEmpty && draft != ComposerDraft(text: text, attachments: attachments) {
                 return .json(["error": "There is an unsent draft in the native client. Send or clear it first."], status: 409)
             }
-            guard store.queueSend(text, attachments: attachments) else {
+            guard store.queueSend(text, attachments: attachments, allowComputerUse: false) else {
                 return .json(["error": "Message could not be queued. Your draft has been kept."], status: 409)
             }
             return .json(["status": "queued"])
@@ -379,11 +472,26 @@ final class RemoteControlServer: ObservableObject {
             return .json(["autoCompactEnabled": store.settings.autoCompactEnabled])
 
         case ("POST", "/api/interrupt"):
-            store.interrupt()
+            guard let sid = req.jsonBody?["sessionId"] as? String, !sid.isEmpty else {
+                return .json(["error": "missing sessionId"], status: 400)
+            }
+            guard store.sessions.contains(where: { $0.id == sid }) else {
+                return .json(["error": "Session not found"], status: 404)
+            }
+            store.interrupt(sessionID: sid)
             return .json(["status": "interrupted"])
 
         case ("POST", "/api/retry"):
-            Task { await store.retryLastMessage() }
+            guard let sid = req.jsonBody?["sessionId"] as? String, !sid.isEmpty else {
+                return .json(["error": "missing sessionId"], status: 400)
+            }
+            guard store.sessions.contains(where: { $0.id == sid }) else {
+                return .json(["error": "Session not found"], status: 404)
+            }
+            if ComputerUse.shared.enabled[sid] != nil {
+                return .json(["error": "Stop computer access in the native app before retrying remotely."], status: 409)
+            }
+            Task { await store.retryLastMessage(allowComputerUse: false, targetSessionID: sid) }
             return .json(["status": "queued"])
 
         case ("POST", "/api/session"):
@@ -539,31 +647,6 @@ final class RemoteControlServer: ObservableObject {
         }
     }
 
-    /// Reads the persistent auto-generated PSK from `~/.kiln/psk`, creating
-    /// it with 32 bytes of hex-encoded entropy + 0600 perms on first call.
-    /// Unlike `hookSecret` this value survives relaunches so remote bookmarks
-    /// keep working across sessions.
-    nonisolated static func loadOrCreatePersistentPSK() -> String {
-        let home = NSHomeDirectory()
-        let dir = "\(home)/.kiln"
-        let path = "\(dir)/psk"
-        let fm = FileManager.default
-
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-           let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !s.isEmpty {
-            return s
-        }
-
-        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
-        let hex = bytes.map { String(format: "%02x", $0) }.joined()
-        try? hex.write(toFile: path, atomically: true, encoding: .utf8)
-        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
-        return hex
-    }
-
     /// Record one failed auth attempt and, if the sliding window has
     /// crossed the limit, engage the lockout.
     private func recordAuthFailure() {
@@ -577,19 +660,7 @@ final class RemoteControlServer: ObservableObject {
         }
     }
 
-    /// Constant-time string equality for auth tokens / shared secrets.
-    /// Short-circuits only on length mismatch (which leaks length, but length
-    /// is fixed per deployment so that's acceptable).
-    private static func constantTimeEq(_ a: String, _ b: String) -> Bool {
-        let aBytes = Array(a.utf8)
-        let bBytes = Array(b.utf8)
-        if aBytes.count != bBytes.count { return false }
-        var diff: UInt8 = 0
-        for i in 0..<aBytes.count {
-            diff |= aBytes[i] ^ bBytes[i]
-        }
-        return diff == 0
-    }
+
 
     // MARK: - JSON serialization
 
@@ -622,7 +693,7 @@ final class RemoteControlServer: ObservableObject {
                 "sendKey": store.settings.sendKey.rawValue,
                 "userDisplayName": store.settings.userDisplayName,
             ],
-            "models": AgentModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0, "efforts": $0.reasoningEfforts, "provider": $0.provider.rawValue, "older": AgentModel.olderModels.contains($0), "supportsFast": $0.supportsOpenAIFastMode, "brand": $0.brand == .chatgpt ? "openai" : "terminal"] as [String: Any] },
+            "models": AgentModel.allCases.map { ["id": $0.rawValue, "label": $0.label, "full": $0.fullId, "contextWindow": $0.contextWindow, "extended": $0.extendedContextWindow ?? 0, "efforts": $0.reasoningEfforts, "provider": $0.provider.rawValue, "older": AgentModel.olderModels.contains($0), "supportsFast": $0.supportsOpenAIFastMode, "brand": $0.brand == .chatgpt ? "openai" : ($0.brand == .grok ? "grok" : "terminal")] as [String: Any] },
         ]
     }
 
@@ -845,6 +916,13 @@ final class RemoteControlServer: ObservableObject {
 
 // MARK: - HTTP request/response
 
+/// DispatchWorkItem cancellation is thread-safe; no mutable Swift state crosses queues.
+final class RemoteRequestDeadline: @unchecked Sendable {
+    let item: DispatchWorkItem
+    init(_ action: @escaping @Sendable () -> Void) { item = DispatchWorkItem(block: action) }
+    func cancel() { item.cancel() }
+}
+
 struct HTTPRequest {
     let method: String
     let path: String
@@ -859,12 +937,10 @@ struct HTTPRequest {
         return obj
     }
 
-    static func parse(_ data: Data) -> HTTPRequest? {
+    static func parse(_ data: Data, headersOnly: Bool = false) -> HTTPRequest? {
         // Need at least one \r\n\r\n to have full headers.
-        guard let bytes = String(data: data, encoding: .utf8) else { return nil }
-        guard let headerEnd = bytes.range(of: "\r\n\r\n") else { return nil }
-
-        let headerSection = String(bytes[..<headerEnd.lowerBound])
+        guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)),
+              let headerSection = String(data: data[..<headerEnd.lowerBound], encoding: .utf8) else { return nil }
         var lines = headerSection.components(separatedBy: "\r\n")
         guard !lines.isEmpty else { return nil }
 
@@ -887,7 +963,8 @@ struct HTTPRequest {
 
         // Body size from Content-Length
         let contentLength = Int(headers["content-length"] ?? "") ?? 0
-        let bodyStart = data.index(data.startIndex, offsetBy: headerEnd.upperBound.utf16Offset(in: bytes))
+        if headersOnly { return HTTPRequest(method: method, path: path, query: query, headers: headers, body: Data()) }
+        let bodyStart = headerEnd.upperBound
         let available = data.distance(from: bodyStart, to: data.endIndex)
         guard available >= contentLength else { return nil } // wait for more
         let body = contentLength > 0 ? data.subdata(in: bodyStart ..< data.index(bodyStart, offsetBy: contentLength)) : Data()
@@ -937,17 +1014,27 @@ struct HTTPResponse {
         let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.fragmentsAllowed])) ?? Data("{}".utf8)
         return HTTPResponse(status: status, headers: [
             "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
         ], body: data)
     }
 
     static var notFound: HTTPResponse { .text("not found", status: 404) }
+
+    func with(header key: String, value: String) -> HTTPResponse {
+        var copy = self
+        copy.headers[key] = value
+        return copy
+    }
 
     func serialize() -> Data {
         var out = "HTTP/1.1 \(status) \(statusPhrase(status))\r\n"
         var hs = headers
         if hs["Content-Length"] == nil { hs["Content-Length"] = String(file?.range.count ?? UInt64(body.count)) }
         hs["Connection"] = "close"
+        if hs["X-Content-Type-Options"] == nil { hs["X-Content-Type-Options"] = "nosniff" }
+        if hs["Referrer-Policy"] == nil { hs["Referrer-Policy"] = "no-referrer" }
+        if hs["X-Frame-Options"] == nil { hs["X-Frame-Options"] = "DENY" }
+        if hs["Cache-Control"] == nil { hs["Cache-Control"] = "no-store" }
+        hs.removeValue(forKey: "Access-Control-Allow-Origin")
         for (k, v) in hs { out += "\(k): \(v)\r\n" }
         out += "\r\n"
         var data = Data(out.utf8)
@@ -965,8 +1052,47 @@ struct HTTPResponse {
         case 409: "Conflict"
         case 413: "Payload Too Large"
         case 416: "Range Not Satisfiable"
+        case 429: "Too Many Requests"
+        case 431: "Request Header Fields Too Large"
         case 500: "Internal Server Error"
         default: "OK"
         }
+    }
+}
+
+/// Caps simultaneous remote connections. The listener queue and the
+/// connection state handler can both touch this, so the count is locked.
+final class RemoteConnectionGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func enter() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if count >= RemoteLimits.maxInFlight { return false }
+        count += 1
+        return true
+    }
+
+    func leave() {
+        lock.lock()
+        defer { lock.unlock() }
+        if count > 0 { count -= 1 }
+    }
+}
+
+final class RemoteConnectionRelease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    private let gate: RemoteConnectionGate
+
+    init(_ gate: RemoteConnectionGate) { self.gate = gate }
+
+    func leave() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return }
+        fired = true
+        gate.leave()
     }
 }

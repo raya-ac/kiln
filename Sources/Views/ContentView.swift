@@ -12,6 +12,8 @@ enum PanelSlot: String, Codable, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject var store: AppStore
+    @ObservedObject private var computer = ComputerUse.shared
+    @AppStorage("classicWorkspace") private var classicWorkspace = false
 
     @AppStorage("panelOrder") private var panelOrderRaw: String = "sessions,chat,tools"
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
@@ -193,6 +195,8 @@ struct ContentView: View {
     }
 
     var body: some View {
+        Group {
+        if classicWorkspace {
         GeometryReader { geo in
             let totalWidth = geo.size.width
             let dividerWidth: Double = 8
@@ -218,6 +222,8 @@ struct ContentView: View {
                 }
             }
         } // GeometryReader
+        } else { WorkspaceShell() }
+        }
         .background(Color.kilnBg)
         .overlay(ToastOverlay(), alignment: .bottom)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -236,6 +242,9 @@ struct ContentView: View {
             NewSessionSheet(workDir: store.settings.defaultWorkDir, model: store.settings.defaultModel)
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
+        .sheet(isPresented: $store.showSettings) {
+            SettingsView().environmentObject(store).preferredColorScheme(Color.kilnPreferredColorScheme)
+        }
         .sheet(isPresented: $store.showOnboarding) {
             OnboardingView()
                 .environmentObject(store)
@@ -246,6 +255,7 @@ struct ContentView: View {
                 .environmentObject(store)
                 .preferredColorScheme(Color.kilnPreferredColorScheme)
         }
+        .sheet(isPresented: $store.showToolShelf) { ToolShelfView().environmentObject(store) }
         .sheet(isPresented: $store.showSessionInfo) {
             if let session = store.activeSession {
                 SessionInfoView(
@@ -258,9 +268,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $store.showMemory) {
             VStack(spacing: 0) {
-                HStack { Spacer(); Button("Done") { store.showMemory = false } }.padding(12)
+                HStack { Spacer(); Button("Done") { store.showMemory = false }.keyboardShortcut(.cancelAction) }.padding(12)
                 CognitiveView()
             }.frame(width: 720, height: 720).environmentObject(store)
+                .onExitCommand { store.showMemory = false }
         }
         .sheet(isPresented: $store.showWhatsNew) {
             if let version = WhatsNew.currentVersion,
@@ -347,6 +358,10 @@ struct ContentView: View {
                 store.showWhatsNew = true
             }
         }
+        .onReceive(computer.$pending) { proposal in
+            let chatName = proposal.flatMap { request in store.sessions.first(where: { $0.id == request.sessionID })?.name }
+            ComputerApprovalPresenter.shared.show(proposal, chatName: chatName)
+        }
         .onChange(of: store.isBusy) { wasBusy, isBusy in
             if wasBusy && !isBusy && store.settings.notifyOnCompletion {
                 CompletionNotifier.shared.notifyIfUnfocused(
@@ -375,6 +390,7 @@ struct ContentView: View {
         case .sessions:
             if sidebarCollapsed {
                 CollapsedRail(side: railSide(for: .sessions)) {
+                    if focusMode { store.toggleFocusMode() }
                     withAnimation(.easeInOut(duration: 0.18)) { sidebarCollapsed = false }
                 }
                 .onDrop(of: [UTType.plainText], delegate: PanelDropDelegate(
@@ -404,6 +420,7 @@ struct ContentView: View {
         case .tools:
             if rightPanelCollapsed {
                 CollapsedRail(side: railSide(for: .tools)) {
+                    if focusMode { store.toggleFocusMode() }
                     withAnimation(.easeInOut(duration: 0.18)) { rightPanelCollapsed = false }
                 }
                 .onDrop(of: [UTType.plainText], delegate: PanelDropDelegate(

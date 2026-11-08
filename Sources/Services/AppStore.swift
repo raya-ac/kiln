@@ -160,6 +160,18 @@ final class AppStore: ObservableObject {
     @Published var showInSessionFind = false
     /// Tool-call timeline sheet toggle. Flipped by `/timeline`.
     @Published var showToolTimeline = false
+    @Published var showToolShelf = false
+    @Published var toolShelfTab: ToolShelfTab = .tools
+    @Published var selectedWorkspaceTab: RightTab = .files
+
+    func openTools(_ tab: ToolShelfTab = .tools) { toolShelfTab = tab; showToolShelf = true }
+    func openWorkspacePanel(_ panel: RightTab) {
+        guard activeSession?.kind == .code else { return }
+        if UserDefaults.standard.bool(forKey: "focusMode") { toggleFocusMode() }
+        selectedWorkspaceTab = panel
+        UserDefaults.standard.set(false, forKey: "rightPanelCollapsed")
+        UserDefaults.standard.set(true, forKey: "workspaceInspectorVisible")
+    }
     /// `/diff` sheet — raw git diff for the active session's workdir.
     /// Populated on command, cleared when the sheet dismisses.
     @Published var diffSheetContent: String?
@@ -240,7 +252,7 @@ final class AppStore: ObservableObject {
     var streamingText: String { activeRuntime.streamingText }
     var thinkingText: String { activeRuntime.thinkingText }
     var traceEntries: [AgentTraceEntry] { activeRuntime.traceEntries }
-    var isBusy: Bool { activeRuntime.isBusy }
+    var isBusy: Bool { isSessionBusy(activeSessionId) }
     var activeToolCalls: [ToolUseBlock] { activeRuntime.activeToolCalls }
     var lastError: String? { activeRuntime.lastError }
 
@@ -252,7 +264,7 @@ final class AppStore: ObservableObject {
     /// True iff the given session is currently generating.
     func isSessionBusy(_ sessionId: String?) -> Bool {
         guard let sessionId = sessionId else { return false }
-        return runtimeStates[sessionId]?.isBusy == true
+        return runtimeStates[sessionId]?.isBusy == true || sendRequestIDs[sessionId] != nil || compactingSessionIds.contains(sessionId)
     }
 
     /// All sessions currently generating (may be empty, one, or many).
@@ -277,7 +289,10 @@ final class AppStore: ObservableObject {
         update(&preferences)
         let previous = sessions[idx].composerPreferences
         sessions[idx].composerPreferences = preferences
-        do { try Persistence.saveSessionChecked(sessions[idx]) }
+        do {
+            try Persistence.saveSessionChecked(sessions[idx])
+            if preferences.mode != .build || preferences.permissions == .deny { ComputerUse.shared.stop(sessionID: sessions[idx].id) }
+        }
         catch {
             sessions[idx].composerPreferences = previous
             ToastCenter.shared.show("Could not save chat controls: " + error.localizedDescription, kind: .error)
@@ -378,6 +393,8 @@ final class AppStore: ObservableObject {
     }
     @Published private var pendingSends: [String: PendingSend] = [:]
     private var pendingSendTasks: [String: Task<Void, Never>] = [:]
+    @Published private var sendRequestIDs: [String: UUID] = [:]
+    @Published private var compactionRequestIDs: [String: UUID] = [:]
     var pendingSend: PendingSend? { activeSessionId.flatMap { pendingSends[$0] } }
     func hasPendingSend(_ id: String) -> Bool { pendingSends[id] != nil }
 
@@ -440,11 +457,20 @@ final class AppStore: ObservableObject {
 
     let codex = AgentService()
     let opencode = AgentService(backend: .opencode)
-    func agent(for model: AgentModel) -> AgentService { model.provider == .codex ? codex : opencode }
+    let grok = AgentService(backend: .grok)
+    func agent(for model: AgentModel) -> AgentService {
+        switch model.provider {
+        case .codex: codex
+        case .opencode: opencode
+        case .grok: grok
+        }
+    }
     @Published var modelCatalogRevision = 0
     @Published var modelCatalogError: String?
     @Published var codexCatalogWarning: String?
     @Published var refreshingCodexModels = false
+    @Published var grokCatalogError: String?
+    @Published var refreshingGrokModels = false
     func refreshCodexModelCatalog(force: Bool = false) async {
         guard !refreshingCodexModels else { return }
         refreshingCodexModels = true
@@ -469,7 +495,13 @@ final class AppStore: ObservableObject {
     }
 
     var activeModelWarning: String? {
-        guard let model = activeSession?.model, model.provider == .codex else { return nil }
+        guard let model = activeSession?.model else { return nil }
+        if model.provider == .grok {
+            if refreshingGrokModels { return nil }
+            if let grokCatalogError { return grokCatalogError }
+            return GrokModels.shared.models.contains(model) ? nil : "Refresh Grok's model catalog before sending."
+        }
+        guard model.provider == .codex else { return nil }
         if refreshingCodexModels { return nil }
         if let codexCatalogWarning { return codexCatalogWarning }
         if !ModelCatalog.shared.models.contains(where: { $0.model == model }) {
@@ -487,14 +519,29 @@ final class AppStore: ObservableObject {
         await refreshCodexModelCatalog(force: true)
         do { try await OpenCodeModels.shared.reload(); modelCatalogError = nil }
         catch { modelCatalogError = "OpenCode model list unavailable. Check installation and configuration." }
+        await refreshGrokModelCatalog()
         modelCatalogRevision += 1
     }
+
+    func refreshGrokModelCatalog() async {
+        guard !refreshingGrokModels else { return }
+        refreshingGrokModels = true
+        defer { refreshingGrokModels = false; modelCatalogRevision += 1 }
+        do {
+            try await GrokModels.shared.reload()
+            grokCatalogError = nil
+        } catch {
+            grokCatalogError = "Grok model list unavailable. Install Grok CLI and run grok login in Terminal, then refresh."
+        }
+    }
+
     let wardenTunnels = WardenTunnelService()
     lazy var remoteServer: RemoteControlServer = RemoteControlServer(store: self)
 
     // MARK: - Init
 
     init() {
+        wardenTunnels.onConfigurationReady = { [weak self] in self?.reconcileRemoteTunnel() }
         Task { await KilnAccountService.shared.start() }
         draftSubscription = drafts.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         Persistence.ensureDirectories()
@@ -502,6 +549,16 @@ final class AppStore: ObservableObject {
 
         let stored = Persistence.loadSessions()
         sessions = stored.map { $0.toSession() }
+        // A retry may have committed just before the app process crashed, while
+        // the old backend mapping still lived in UserDefaults.
+        for index in sessions.indices where sessions[index].needsBackendReset {
+            let service = agent(for: sessions[index].model)
+            service.forgetThread(for: sessions[index].id)
+            if service.flushThreadMapping() {
+                sessions[index].needsBackendReset = false
+                Persistence.saveSession(sessions[index])
+            }
+        }
 
         // Restore the last-focused session if that id still exists.
         // Falls through to nil (sidebar renders "no selection") if the
@@ -521,12 +578,8 @@ final class AppStore: ObservableObject {
         // Restore remote server config from UserDefaults and auto-start if enabled.
         let d = UserDefaults.standard
         remoteServer.port = UInt16(d.integer(forKey: "remote.port")) == 0 ? 8421 : UInt16(d.integer(forKey: "remote.port"))
-        // Bearer token: prefer the user's override in UserDefaults; if absent,
-        // fall back to the persistent auto-generated PSK at ~/.kiln/psk. This
-        // means remote access is usable the very first time the user flips
-        // the toggle — no "generate token" step required.
-        let overrideToken = d.string(forKey: "remote.token") ?? ""
-        remoteServer.token = overrideToken.isEmpty ? RemoteControlServer.loadOrCreatePersistentPSK() : overrideToken
+        // Bearer lives in the Keychain. A UserDefaults override or the old
+        // ~/.kiln/psk file is migrated on this read, then removed.
         remoteServer.allowLAN = d.bool(forKey: "remote.allowLAN")
         if let lvl = d.string(forKey: "remote.accessLevel"),
            let parsed = RemoteAccessLevel(rawValue: lvl) {
@@ -540,21 +593,9 @@ final class AppStore: ObservableObject {
         if !d.bool(forKey: "remote.enabled") && remoteServer.accessLevel != .loopback {
             remoteServer.accessLevel = .loopback
         }
-        remoteServer.start()
-
-        // Auto-start the warden tunnel for Kiln itself if the user had
-        // "Tunnel Kiln" on last session. Requires warden to be configured;
-        // silently stays idle otherwise (surface any failure in Settings).
-        if d.bool(forKey: "warden.tunnelKiln") && wardenTunnels.config.isConfigured {
-            // Tokens only authorize the sub they were issued for, so the
-            // restore path uses the claimed sub — ignoring any stale
-            // `warden.kilnSub` override from before auto-claim existed.
-            let sub = wardenTunnels.config.claimedSub
-            wardenTunnels.start(
-                owner: .kilnSelf,
-                target: "127.0.0.1:\(remoteServer.port)",
-                sub: sub.isEmpty ? nil : sub
-            )
+        Task { [weak self] in
+            guard let self else { return }
+            await self.remoteServer.restoreTokenAndStart()
         }
 
         // Auto-start any previously-running session tunnels. Whether a
@@ -759,6 +800,8 @@ final class AppStore: ObservableObject {
     }
 
     func deleteSession(_ id: String) {
+        sendRequestIDs[id] = nil
+        compactionRequestIDs[id] = nil
         pendingSendTasks.removeValue(forKey: id)?.cancel()
         pendingSends.removeValue(forKey: id)
         drafts.remove(id)
@@ -1039,9 +1082,11 @@ final class AppStore: ObservableObject {
     func setModel(_ model: AgentModel) {
         guard let idx = activeSessionIndex else { return }
         guard !isSessionBusy(sessions[idx].id) else { return }
+        if sessions[idx].model != model { ComputerUse.shared.stop(sessionID: sessions[idx].id) }
         if sessions[idx].model.provider != model.provider {
             codex.forgetThread(for: sessions[idx].id)
             opencode.forgetThread(for: sessions[idx].id)
+            grok.forgetThread(for: sessions[idx].id)
         }
         if !model.reasoningEfforts.contains(effortLevel.rawValue) {
             effortLevel = model.reasoningEfforts.compactMap(EffortLevel.init(rawValue:)).first ?? .medium
@@ -1080,17 +1125,19 @@ final class AppStore: ObservableObject {
     }
 
     /// Retry preserves attached files and starts from the edited local transcript.
-    func retryLastMessage() async {
-        guard let idx = activeSessionIndex, !isSessionBusy(sessions[idx].id),
+    func retryLastMessage(allowComputerUse: Bool = true, targetSessionID: String? = nil) async {
+        guard let target = targetSessionID ?? activeSessionId,
+              let idx = sessions.firstIndex(where: { $0.id == target }), !isSessionBusy(sessions[idx].id),
               let last = sessions[idx].messages.last(where: { $0.role == .user }),
               let messageIndex = sessions[idx].messages.firstIndex(where: { $0.id == last.id }) else { return }
         let id = sessions[idx].id
         let text = last.blocks.compactMap { if case .text(let text) = $0 { return text }; return nil }.joined(separator: "\n")
         let files = last.blocks.compactMap { if case .attachment(let file) = $0 { return file }; return nil }
-        sessions[idx].messages.removeSubrange(messageIndex...)
-        agent(for: sessions[idx].model).forgetThread(for: id)
-        Persistence.saveSession(sessions[idx])
-        await sendMessage(text, attachments: files, allowAutoCompact: false, targetSessionId: id)
+        var options = makeSendOptions(for: sessions[idx])
+        options.computerUseAllowed = allowComputerUse
+        let expectedMessageIDs = sessions[idx].messages.map(\.id)
+        await sendMessage(text, attachments: files, allowAutoCompact: false, targetSessionId: id, capturedOptions: options,
+                          retry: RetryRevision(messageIndex: messageIndex, expectedMessageIDs: expectedMessageIDs))
     }
 
     /// Clear all messages in a session
@@ -1369,12 +1416,24 @@ final class AppStore: ObservableObject {
     func compactSession(sessionId targetSessionId: String? = nil,
                         continueWith followUpText: String? = nil,
                         attachments followUpAttachments: [ComposerAttachment] = [],
-                        capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil) async {
+                        capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil,
+                        continuationRequestID: UUID? = nil) async {
         guard let id = targetSessionId ?? activeSessionId,
               let session = sessions.first(where: { $0.id == id }),
-              !isSessionBusy(id), !compactingSessionIds.contains(id), !session.messages.isEmpty else { return }
+              !runtime(id).isBusy, compactionRequestIDs[id] == nil,
+              (sendRequestIDs[id] == nil || sendRequestIDs[id] == continuationRequestID),
+              !compactingSessionIds.contains(id), !session.messages.isEmpty else { return }
+        let compactionID = UUID()
+        compactionRequestIDs[id] = compactionID
         compactingSessionIds.insert(id)
-        defer { compactingSessionIds.remove(id) }
+        defer {
+            if compactionRequestIDs[id] == compactionID { compactionRequestIDs[id] = nil }
+            compactingSessionIds.remove(id)
+        }
+        if session.model.provider == .grok {
+            ToastCenter.shared.show("Grok manages its own context. Kiln cannot measure its remaining context or manually compact it.", kind: .error)
+            return
+        }
         if session.model.provider == .codex {
             guard let thread = codex.threadID(for: id) else {
                 ToastCenter.shared.show("Send a message to establish a backend session before compacting.", kind: .error)
@@ -1386,8 +1445,14 @@ final class AppStore: ObservableObject {
                 guard sessions.contains(where: { $0.id == id && $0.model == session.model }),
                       codex.threadID(for: id) == thread else { return }
                 await refreshContextUsage(sessionId: id)
+                guard compactionRequestIDs[id] == compactionID, !Task.isCancelled else { return }
+                compactionRequestIDs[id] = nil
                 compactingSessionIds.remove(id)
                 if let followUpText {
+                    if let continuationRequestID {
+                        guard sendRequestIDs[id] == continuationRequestID, !Task.isCancelled else { return }
+                        sendRequestIDs[id] = nil
+                    }
                     await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
                 }
             } catch {
@@ -1400,7 +1465,9 @@ final class AppStore: ObservableObject {
             + TranscriptContext.text(from: session.messages, characterLimit: 160_000)
         guard let summary = await Self.oneShotAsk(prompt: prompt, workDir: session.workDir, model: session.model),
               let idx = sessions.firstIndex(where: { $0.id == id }),
-              sessions[idx].messages.map(\.id) == messageIds, !isSessionBusy(id) else {
+              compactionRequestIDs[id] == compactionID, !Task.isCancelled,
+              sessions[idx].model == session.model, sessions[idx].workDir == session.workDir,
+              sessions[idx].messages.map(\.id) == messageIds, !runtime(id).isBusy else {
             ToastCenter.shared.show("Compaction failed or the conversation changed. History was retained.")
             return
         }
@@ -1419,8 +1486,13 @@ final class AppStore: ObservableObject {
         sessions[idx] = compacted
         agent(for: session.model).forgetThread(for: id)
         runtimeStates[id] = SessionRuntimeState()
+        compactionRequestIDs[id] = nil
         compactingSessionIds.remove(id)
         if let followUpText {
+            if let continuationRequestID {
+                guard sendRequestIDs[id] == continuationRequestID, !Task.isCancelled else { return }
+                sendRequestIDs[id] = nil
+            }
             await sendMessage(followUpText, attachments: followUpAttachments, allowAutoCompact: false, targetSessionId: id, capturedOptions: capturedOptions, queuedRequestID: queuedRequestID)
         }
     }
@@ -1516,11 +1588,15 @@ final class AppStore: ObservableObject {
     /// Entry point from the composer. Honors the undo-send window setting;
     /// pending sends can be cancelled for the configured duration.
     @discardableResult
-    func queueSend(_ text: String, attachments: [ComposerAttachment] = []) -> Bool {
+    func queueSend(_ text: String, attachments: [ComposerAttachment] = [], allowComputerUse: Bool = true) -> Bool {
         guard let session = activeSession, !session.readOnly, !isSessionBusy(session.id),
               pendingSends[session.id] == nil, !drafts.isImporting(session.id) else { return false }
         let request = ComposerDraft(text: text, attachments: attachments)
         guard !request.isEmpty else { return false }
+        if let problem = session.model.attachmentError(attachments) {
+            ToastCenter.shared.show(problem, kind: .error)
+            return false
+        }
         for file in attachments {
             guard (try? AttachmentImporter.file(URL(fileURLWithPath: file.path))) != nil else {
                 ToastCenter.shared.show("Attachment unavailable: " + file.name, kind: .error)
@@ -1533,7 +1609,8 @@ final class AppStore: ObservableObject {
             ToastCenter.shared.show(drafts.storageError ?? "This chat already has a pending message.", kind: .error)
             return false
         }
-        let options = makeSendOptions(for: session)
+        var options = makeSendOptions(for: session)
+        options.computerUseAllowed = allowComputerUse
         let delay = max(0, settings.undoSendWindow)
         let pending = PendingSend(id: requestID, sessionId: sid, text: text,
             attachments: attachments, sentAt: .now, delaySeconds: delay)
@@ -1599,16 +1676,36 @@ final class AppStore: ObservableObject {
         return options
     }
 
-    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil) async {
+    func sendMessage(_ text: String, attachments: [ComposerAttachment] = [], allowAutoCompact: Bool = true, targetSessionId: String? = nil, capturedOptions: SendOptions? = nil, queuedRequestID: String? = nil, retry: RetryRevision? = nil) async {
         guard let target = targetSessionId ?? activeSessionId,
               var idx = sessions.firstIndex(where: { $0.id == target }),
               !isSessionBusy(target), !compactingSessionIds.contains(target), !sessions[idx].readOnly,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
         else { return }
+        guard sendRequestIDs[target] == nil, !Task.isCancelled else { return }
+        if let problem = sessions[idx].model.attachmentError(attachments) {
+            ToastCenter.shared.show(problem, kind: .error)
+            return
+        }
+        let sendID = UUID()
+        sendRequestIDs[target] = sendID
+        defer { if sendRequestIDs[target] == sendID { sendRequestIDs[target] = nil } }
         let options = capturedOptions ?? makeSendOptions(for: sessions[idx])
         let sessionId = sessions[idx].id
         let model = sessions[idx].model
         let workDir = sessions[idx].workDir
+
+        if model.provider == .grok && !GrokModels.shared.models.contains(model) {
+            await refreshGrokModelCatalog()
+            guard sendRequestIDs[target] == sendID, !Task.isCancelled else { return }
+            guard GrokModels.shared.models.contains(model) else {
+                ToastCenter.shared.show(grokCatalogError ?? "This model is not available in the installed Grok CLI.", kind: .error)
+                return
+            }
+            guard let refreshedIndex = sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir }),
+                  !runtime(sessionId).isBusy, !sessions[refreshedIndex].readOnly else { return }
+            idx = refreshedIndex
+        }
 
         let checkedAction = CognitiveStore.shared.checkedAction(project: workDir, session: sessionId)
         if let reason = await CognitiveStore.shared.preflight(project: workDir, session: sessionId, action: checkedAction) {
@@ -1616,8 +1713,9 @@ final class AppStore: ObservableObject {
             showMemory = true
             return
         }
+        guard sendRequestIDs[target] == sendID, !Task.isCancelled else { return }
         guard let checkedIndex = sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir }),
-              !isSessionBusy(sessionId), !sessions[checkedIndex].readOnly else { return }
+              !runtime(sessionId).isBusy, !sessions[checkedIndex].readOnly else { return }
         idx = checkedIndex
 
         // Expand {{var}} tokens (clipboard, date, file contents, etc.)
@@ -1628,8 +1726,9 @@ final class AppStore: ObservableObject {
         ))
 
         if allowAutoCompact { await refreshContextUsage(sessionId: sessionId) }
+        guard sendRequestIDs[target] == sendID, !Task.isCancelled else { return }
         guard let updatedIndex = sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir }),
-              !isSessionBusy(sessionId), !compactingSessionIds.contains(sessionId), !sessions[updatedIndex].readOnly else { return }
+              !runtime(sessionId).isBusy, !compactingSessionIds.contains(sessionId), !sessions[updatedIndex].readOnly else { return }
         idx = updatedIndex
         if allowAutoCompact, shouldAutoCompact(sessionId: sessionId) {
             await compactSession(
@@ -1637,7 +1736,8 @@ final class AppStore: ObservableObject {
                 continueWith: expandedText,
                 attachments: attachments,
                 capturedOptions: options,
-                queuedRequestID: queuedRequestID
+                queuedRequestID: queuedRequestID,
+                continuationRequestID: sendID
             )
             return
         }
@@ -1648,7 +1748,13 @@ final class AppStore: ObservableObject {
         for a in attachments { displayBlocks.append(.attachment(a)) }
         if !expandedText.isEmpty { displayBlocks.append(.text(expandedText)) }
         let userMessage = ChatMessage(role: .user, blocks: displayBlocks)
-        sessions[idx].messages.append(userMessage)
+        let originalMessages = sessions[idx].messages
+        var prepared = sessions[idx]
+        if let retry {
+            guard let messages = retry.prefix(of: originalMessages) else { return }
+            prepared.messages = messages
+        }
+        prepared.messages.append(userMessage)
 
         // Build the TRANSMISSION text for Codex — still includes paths so
         // Codex can Read them. The display in the UI uses the blocks above.
@@ -1660,15 +1766,18 @@ final class AppStore: ObservableObject {
             expanded = "Attached files:\n\(lines)\n\n" + expandedText
         }
 
-        if !agent(for: model).hasThread(for: sessionId) {
-            let context = TranscriptContext.text(from: Array(sessions[idx].messages.dropLast()), characterLimit: 80_000)
+        if retry != nil || !agent(for: model).hasThread(for: sessionId) {
+            let context = TranscriptContext.text(from: Array(prepared.messages.dropLast()), characterLimit: 80_000)
             if !context.isEmpty { expanded = "The following is prior conversation history for continuity, not a new request. Continue directly with the current request; do not repeat or summarize this history.\n\nPrevious conversation:\n\(context)\n\nCurrent request:\n" + expanded }
         }
         let previouslyInterrupted = sessions[idx].wasInterrupted
-        sessions[idx].wasInterrupted = true
-        do { try Persistence.saveSessionChecked(sessions[idx]) }
+        prepared.wasInterrupted = true
+        if retry == nil { sessions[idx] = prepared }
+        do {
+            if retry == nil { try Persistence.saveSessionChecked(prepared) }
+        }
         catch {
-            sessions[idx].messages.removeAll { $0.id == userMessage.id }
+            sessions[idx].messages = originalMessages
             sessions[idx].wasInterrupted = previouslyInterrupted
             ToastCenter.shared.show("Message not sent. Could not save chat: " + error.localizedDescription, kind: .error)
             return
@@ -1685,15 +1794,38 @@ final class AppStore: ObservableObject {
         if checkedAction != nil { CognitiveStore.shared.clearCheckedAction(project: workDir, session: sessionId) }
         let requestID = UUID().uuidString
         var recordedUsage = Set<String>()
+        var didLaunch = false
         await agent(for: model).sendMessage(
                 sessionId: sessionId,
                 message: expanded,
                 model: model,
                 workDir: workDir,
                 options: options,
-                attachments: attachments
+                attachments: attachments,
+                resetThread: retry != nil,
+                onLaunch: { [weak self] _ in
+                    guard let self, self.sendRequestIDs[sessionId] == sendID,
+                          let currentIndex = self.sessions.firstIndex(where: { $0.id == sessionId && $0.model == model && $0.workDir == workDir && !$0.readOnly }) else { throw CancellationError() }
+                    if let retry {
+                        guard let prefix = retry.prefix(of: self.sessions[currentIndex].messages) else { throw CancellationError() }
+                        var committed = self.sessions[currentIndex]
+                        var replacement = userMessage
+                        replacement.isPinned = committed.messages[retry.messageIndex].isPinned
+                        committed.messages = prefix + [replacement]
+                        committed.wasInterrupted = true
+                        committed.needsBackendReset = true
+                        try Persistence.saveSessionChecked(committed)
+                        self.sessions[currentIndex] = committed
+                    }
+                }
             ) { [weak self] event in
                 guard let self else { return }
+                if case .started = event { didLaunch = true }
+                if retry != nil, !didLaunch, case .done = event {
+                    self.mutateRuntime(sessionId) { $0.isBusy = false }
+                    if self.generatingSessionId == sessionId { self.generatingSessionId = self.busySessionIds.first(where: { $0 != sessionId }) }
+                    return
+                }
                 if case .measuredUsage(let usage) = event, usage.hasMeasurement {
                     let sourceID = usage.sourceID ?? requestID
                     let key = "\(model.provider.rawValue):\(sessionId):\(sourceID)"
@@ -1717,6 +1849,16 @@ final class AppStore: ObservableObject {
     }
 
     // MARK: - Per-session tunnels
+
+    func reconcileRemoteTunnel() {
+        guard remoteServer.isRunning, let port = remoteServer.boundPort, !remoteServer.token.isEmpty,
+              UserDefaults.standard.bool(forKey: "warden.tunnelKiln"), wardenTunnels.config.isConfigured else {
+            wardenTunnels.stop(owner: .kilnSelf)
+            return
+        }
+        let sub = wardenTunnels.config.claimedSub
+        wardenTunnels.start(owner: .kilnSelf, target: "127.0.0.1:\(port)", sub: sub.isEmpty ? nil : sub)
+    }
 
     /// Update a session's tunnel config. Doesn't start/stop the tunnel —
     /// call `startSessionTunnel` / `stopSessionTunnel` for that.
@@ -1906,11 +2048,12 @@ final class AppStore: ObservableObject {
         Persistence.saveSession(sessions[sIdx])
     }
 
-    func interrupt() {
-        // Prefer the session that's actually generating; fall back to active.
-        let id = generatingSessionId ?? activeSessionId
-        guard let id = activeSessionId ?? id else { return }
+    func interrupt(sessionID: String? = nil) {
+        guard let id = sessionID ?? activeSessionId ?? generatingSessionId else { return }
         guard let session = sessions.first(where: { $0.id == id }) else { return }
+        sendRequestIDs[id] = nil
+        compactionRequestIDs[id] = nil
+        cancelPendingSend(for: id)
         agent(for: session.model).interrupt(sessionId: id)
     }
 
@@ -1992,13 +2135,21 @@ final class AppStore: ObservableObject {
                 // reflects real usage velocity.
                 RateLimitTracker.shared.recordUsage(inputTokens: input, outputTokens: output)
 
-        case .cost, .error, .sessionId, .done, .measuredUsage:
+            case .cancelled:
+                state.wasCancelled = true
+        case .started, .cost, .error, .sessionId, .done, .measuredUsage:
                 break // handled below (outside the mutate closure)
             }
         }
 
         // Events that affect store-level state, not per-session buffers.
         switch event {
+        case .sessionId:
+            if let index = sessions.firstIndex(where: { $0.id == sessionId }), sessions[index].needsBackendReset,
+               agent(for: sessions[index].model).flushThreadMapping() {
+                sessions[index].needsBackendReset = false
+                Persistence.saveSession(sessions[index])
+            }
         case .cost(let usd):
             totalCost += usd
             // Append to the persistent cost log for dashboard analysis.
@@ -2031,7 +2182,7 @@ final class AppStore: ObservableObject {
                 recentlyCompleted[sessionId] = Date()
             }
             // Fire the on-complete shell hook if configured.
-            if runtimeStates[sessionId]?.lastError == nil { runCompletionHook(sessionId: sessionId) }
+            if runtimeStates[sessionId]?.completedSuccessfully == true { runCompletionHook(sessionId: sessionId) }
         default:
             break
         }

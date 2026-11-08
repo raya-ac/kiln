@@ -12,6 +12,8 @@ struct ModelBrandIcon: View {
                 OpenAIKnotMark()
             case .codex:
                 Image(systemName: "terminal").resizable().scaledToFit()
+            case .grok:
+                Text("xAI").font(.system(size: size * 0.55, weight: .semibold, design: .monospaced))
             }
         }
         .frame(width: size, height: size)

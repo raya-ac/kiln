@@ -37,6 +37,8 @@ struct ChatView: View {
             return URL(string: "https://opencode.ai/docs/")
         case .codex:
             return URL(string: "https://help.openai.com/en/articles/8313428-chatgpt-accuracy-and-limitations")
+        case .grok:
+            return URL(string: "https://x.ai/legal/terms-of-service")
         case .none:
             return nil
         }
@@ -49,11 +51,13 @@ struct ChatView: View {
                 SessionInstructionsEditor()
                     .environmentObject(store)
                     .preferredColorScheme(Color.kilnPreferredColorScheme)
+                    .onExitCommand { showInstructionsEditor = false }
             }
             .sheet(isPresented: $store.showToolTimeline) {
                 if let s = store.activeSession {
                     ToolTimelineSheet(session: s)
                         .preferredColorScheme(Color.kilnPreferredColorScheme)
+                        .onExitCommand { store.showToolTimeline = false }
                 }
             }
             .sheet(isPresented: Binding(
@@ -62,6 +66,7 @@ struct ChatView: View {
             )) {
                 DiffSheet(content: store.diffSheetContent ?? "")
                     .preferredColorScheme(Color.kilnPreferredColorScheme)
+                    .onExitCommand { store.diffSheetContent = nil }
             }
 
             Rectangle().fill(Color.kilnBorder).frame(height: 1)

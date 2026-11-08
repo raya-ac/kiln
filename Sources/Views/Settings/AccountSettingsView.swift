@@ -107,7 +107,9 @@ struct AccountSettingsView: View {
                       systemImage: "person.crop.circle")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer(minLength: 8)
-                if account.isLoading { ProgressView().controlSize(.small).accessibilityLabel("Loading account") }
+                if account.isLoading || account.isCleaningCredentials {
+                    ProgressView().controlSize(.small).accessibilityLabel("Loading account")
+                }
                 Button {
                     Task { await account.refresh(); await account.flushOutbox(); await account.refreshHistory() }
                 } label: { Image(systemName: "arrow.clockwise") }
@@ -149,9 +151,10 @@ struct AccountSettingsView: View {
                 Spacer()
                 Button(mode.rawValue) { submitAuthentication() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!validAuthentication || account.isLoading)
+                    .disabled(!canSubmitAuthentication)
             }
         }
+        .onSubmit { submitAuthentication() }
     }
 
     private func profile(_ identity: KilnAccount) -> some View {
@@ -441,19 +444,11 @@ struct AccountSettingsView: View {
                 Button("Sign out", role: .destructive) { confirmSignOut = true }
                     .disabled(account.isLoading)
                 Spacer()
-                Button("Change password") {
-                    let current = password
-                    let replacement = newPassword
-                    clearSecrets()
-                    Task {
-                        if await account.changePassword(currentPassword: current, newPassword: replacement) {
-                            savedMessage = "Password changed. Other sessions have been signed out."
-                        }
-                    }
-                }
-                .disabled(account.isLoading || password.isEmpty || !validNewPassword(newPassword) || newPassword != passwordConfirmation)
+                Button("Change password") { submitPasswordChange() }
+                    .disabled(!canChangePassword)
             }
         }
+        .onSubmit { submitPasswordChange() }
     }
 
     private var recoveryCodes: some View {
@@ -512,6 +507,7 @@ struct AccountSettingsView: View {
     private func count(_ value: Int?) -> String { value.map { $0.formatted() } ?? "Unknown" }
 
     private func submitAuthentication() {
+        guard canSubmitAuthentication else { return }
         let password = password
         let newPassword = newPassword
         let recoveryCode = recoveryCode
@@ -537,6 +533,27 @@ struct AccountSettingsView: View {
             accent = identity.accent ?? ""
         } else {
             handle = ""; displayName = ""; bio = ""; location = ""; website = ""; accent = ""; savedMessage = nil
+        }
+    }
+
+    private var canSubmitAuthentication: Bool {
+        validAuthentication && !account.isLoading && !account.isCleaningCredentials
+    }
+
+    private var canChangePassword: Bool {
+        !account.isLoading && !account.isCleaningCredentials && !password.isEmpty
+            && validNewPassword(newPassword) && newPassword == passwordConfirmation
+    }
+
+    private func submitPasswordChange() {
+        guard canChangePassword else { return }
+        let current = password
+        let replacement = newPassword
+        clearSecrets()
+        Task {
+            if await account.changePassword(currentPassword: current, newPassword: replacement) {
+                savedMessage = "Password changed. Other sessions have been signed out."
+            }
         }
     }
 

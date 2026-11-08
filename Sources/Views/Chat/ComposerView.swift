@@ -75,6 +75,7 @@ struct ComposerView: View {
             // Workdir activity chip — visible only when there are uncommitted
             // changes in the session's workdir. Click to see which files.
             WorkdirActivityChip()
+            QuickToolRail().padding(.horizontal, 24).padding(.top, 4)
 
             if let session = store.activeSession,
                let action = cognition.checkedAction(project: session.workDir, session: session.id) {
@@ -118,7 +119,7 @@ struct ComposerView: View {
                         placeholder: placeholderText,
                         fontSize: 14 * store.settings.fontScale.factor,
                         spellCheck: store.settings.spellCheck,
-                        minimumLines: 3,
+                        minimumLines: 2,
                         onSubmit: submitAction,
                         onCommandReturn: { if store.settings.sendKey == .cmdEnter { send() } },
                         onKey: handleInputKey,
@@ -135,6 +136,7 @@ struct ComposerView: View {
                             atSelectedIndex = 0
                         }
             } controls: {
+                VStack(spacing: 10) {
                 HStack(spacing: 4) {
                     WorkspaceIconButton(icon: "paperclip", label: "Attach files or images") { pickFiles() }
                     WorkspaceIconButton(icon: "text.alignleft", label: "Snippets") { showSnippets = true }
@@ -173,10 +175,11 @@ struct ComposerView: View {
                         .modifier(CmdEnterSendModifier(enabled: store.settings.sendKey == .cmdEnter))
                     }
                 }
+                Divider()
+                ComposerToolbar().padding(.horizontal, -16).padding(.vertical, -4)
+                }
             }
-            .padding(.horizontal, 24).padding(.top, 10)
-            ComposerToolbar()
-                .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
+            .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 18)
 
         }
         .frame(maxWidth: 920)
@@ -1385,8 +1388,8 @@ struct ComposerToolbar: View {
 
                 Spacer()
 
-                // Rate-limit meter — shows tokens-per-5min velocity
-                RateLimitMeter()
+                // Keep the composer percentage tied to the active conversation's context.
+                ComposerContextMeter()
             }
             .controlSize(.small)
             .font(.system(size: 11, weight: .medium))
@@ -1427,7 +1430,7 @@ struct ModelPill: View {
             .padding(.vertical, 4)
             .background(selected ? modelColor : (hovering ? Color.kilnSurfaceHover : Color.kilnSurface))
             .clipShape(RoundedRectangle(cornerRadius: 5))
-            .help(model.fullId)
+            .help(model.helpText)
             .overlay(
                 RoundedRectangle(cornerRadius: 5)
                     .stroke(selected ? .clear : Color.kilnBorderSubtle, lineWidth: 1)
@@ -1448,7 +1451,7 @@ struct ModelProviderIcon: View {
 
     var body: some View {
         switch provider {
-        case .codex, .opencode:
+        case .codex, .opencode, .grok:
             Image(systemName: "terminal")
                 .font(.system(size: size, weight: .semibold))
         }
@@ -1829,7 +1832,12 @@ struct ExpandedComposerEditor: View {
             }
 
             ComposerTextInput(text: $text, isFocused: $focused, expanded: true,
-                onCommandReturn: { if canSend { dismiss(); onSend() } }, onPaste: onPaste)
+                onCommandReturn: { if canSend { dismiss(); onSend() } },
+                onKey: { key in
+                    guard key == .escape else { return .ignored }
+                    dismiss()
+                    return .handled
+                }, onPaste: onPaste)
                 .padding(10)
                 .frame(minHeight: 360, idealHeight: 420)
                 .background(Color.kilnSurface)
@@ -1874,73 +1882,79 @@ struct ExpandedComposerEditor: View {
         .padding(20)
         .frame(minWidth: 640, minHeight: 520)
         .background(Color.kilnBg)
+        .onExitCommand { dismiss() }
     }
 }
 
-// MARK: - Rate Limit Meter
-//
-// A compact indicator in the composer toolbar that tracks tokens-per-5min
-// against a user-configurable soft cap. Turns amber at 70%, red when
-// throttled. Tooltip explains what it's measuring.
+// MARK: - Composer Context Meter
 
-struct RateLimitMeter: View {
+struct ComposerContextMeter: View {
+    @EnvironmentObject private var store: AppStore
     @ObservedObject private var tracker: RateLimitTracker = .shared
-    @State private var now: Date = .now
 
-    private var color: Color {
-        if tracker.isRateLimited { return Color.kilnError }
-        let r = tracker.usageRatio
-        if r >= 1.0 { return Color.kilnError }
-        if r >= 0.7 { return Color(hex: 0xF59E0B) }
+    private var context: ContextUsage? { store.contextUsage }
+
+    private var contextColor: Color {
+        let fraction = context?.fraction ?? 0
+        if fraction >= 0.9 { return Color.kilnError }
+        if fraction >= 0.75 { return Color(hex: 0xF59E0B) }
+        return Color.kilnTextTertiary
+    }
+
+    private var rateColor: Color {
+        if tracker.isRateLimited || tracker.usageRatio >= 1.0 { return Color.kilnError }
+        if tracker.usageRatio >= 0.7 { return Color(hex: 0xF59E0B) }
         return Color.kilnTextTertiary
     }
 
     private var label: String {
-        if tracker.isRateLimited {
-            if let remaining = tracker.cooldownRemaining {
-                return "cooling \(remaining)s"
-            }
-            return "rate limited"
-        }
-        let pct = Int(tracker.usageRatio * 100)
-        return "\(pct)%"
+        guard let context else { return "context n/a" }
+        return "context \(Int(context.fraction * 100))%"
     }
 
     private var shouldShow: Bool {
-        tracker.isRateLimited || tracker.tokensLastFiveMin > 0
+        tracker.isRateLimited || tracker.tokensLastFiveMin > 0 || context != nil
     }
 
     var body: some View {
         if shouldShow {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
             HStack(spacing: 4) {
                 Image(systemName: tracker.isRateLimited ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
                     .font(.system(size: 9))
-                    .foregroundStyle(color)
+                    .foregroundStyle(rateColor)
                 Text(label)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(color)
+                    .foregroundStyle(contextColor)
+                if tracker.isRateLimited, let remaining = tracker.cooldownRemaining {
+                    Text("wait ~\(remaining / 60):\(String(format: "%02d", remaining % 60))")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.kilnError)
+                        .accessibilityLabel("Estimated rate-limit cooldown: \(remaining) seconds")
+                }
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(tracker.isRateLimited ? Color.kilnError.opacity(0.12) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 3))
             .help(helpText)
-            .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
-                // Force a redraw so the cooldown counter ticks.
-                now = .now
-            }
             .onTapGesture {
                 if tracker.isRateLimited { tracker.clearRateLimited() }
+            }
             }
         }
     }
 
     private var helpText: String {
-        if tracker.isRateLimited {
-            return "Codex returned a rate-limit error recently. Click to dismiss."
+        let rate = "Token rate: \(tracker.tokensLastFiveMin.formatted()) / \(tracker.softCapTokensPerFiveMin.formatted()) tokens in the last 5 minutes. The gauge is separate from context usage."
+        let warning = tracker.isRateLimited ? " Estimated cooldown: \(tracker.cooldownRemaining ?? 0) seconds, not a provider reset time. Click to dismiss." : ""
+        return contextDescription + " " + rate + warning
+    }
+
+    private var contextDescription: String {
+        guard let context else {
+            return "The backend has not reported current conversation context."
         }
-        let used = tracker.tokensLastFiveMin
-        let cap = tracker.softCapTokensPerFiveMin
-        return "Rate meter: \(used.formatted()) / \(cap.formatted()) tokens in the last 5 minutes. Configurable in settings."
+        return "Conversation context: \(context.usedTokens.formatted()) / \(context.window.formatted()) tokens (\(Int(context.fraction * 100))%)."
     }
 }

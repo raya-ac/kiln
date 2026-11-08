@@ -67,7 +67,7 @@ struct KilnUsageEvent: Codable, Equatable, Sendable {
     func isValid(now: Date = .now) -> Bool {
         let opaque = "^[A-Za-z0-9_-]{16,128}$"
         let identifier = "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,95}$"
-        let providers: Set<String> = ["codex", "opencode"]
+        let providers: Set<String> = ["codex", "opencode", "grok"]
         func matches(_ value: String, _ pattern: String) -> Bool {
             value.range(of: pattern, options: .regularExpression) == value.startIndex..<value.endIndex
         }

@@ -102,11 +102,20 @@ struct WardenConfig: Codable, Equatable, Sendable {
 /// remote server, plus one per session for user dev servers.
 @MainActor
 final class WardenTunnelService: ObservableObject {
-    @Published var config: WardenConfig
+    @Published var config: WardenConfig {
+        didSet { if config != oldValue { configurationGeneration = UUID() } }
+    }
     @Published private(set) var tunnels: [String: TunnelState] = [:]
+    var onConfigurationReady: (() -> Void)?
+    private var configurationGeneration = UUID()
+    private var generations: [String: UUID] = [:]
+    private var lifetimes: [String: TunnelLifetime] = [:]
+    private let persistConfiguration: Bool
+    private let makeClient: @MainActor () -> any WardenTunnelConnection
+    private let claimRequest: @MainActor (URLRequest) async throws -> (Data, URLResponse)
 
     /// Per-owner currently-running clients. Cancelled on stop().
-    private var clients: [String: TunnelClient] = [:]
+    private var clients: [String: any WardenTunnelConnection] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
 
     /// Keys the user currently wants running. Start() adds, stop() removes.
@@ -133,8 +142,9 @@ final class WardenTunnelService: ObservableObject {
     @Published private(set) var claimInFlight: Bool = false
     @Published private(set) var claimError: String?
 
-    init() {
-        self.config = Self.loadConfig()
+    convenience init() {
+        self.init(config: Self.loadConfig(), persistConfiguration: true, makeClient: { TunnelClient() },
+                  claimRequest: { try await URLSession.shared.data(for: $0) })
         // Persist the migrated config so backfilled fields (claimedSub,
         // baked-in defaults) survive future launches. Cheap — UserDefaults
         // write is synchronous but tiny.
@@ -145,6 +155,21 @@ final class WardenTunnelService: ObservableObject {
         if config.bearerToken.isEmpty && config.pskPath.isEmpty && !config.server.isEmpty {
             Task { [weak self] in await self?.claimIfNeeded() }
         }
+    }
+
+    convenience init(testingConfig: WardenConfig,
+                     makeClient: @escaping @MainActor () -> any WardenTunnelConnection,
+                     claimRequest: @escaping @MainActor (URLRequest) async throws -> (Data, URLResponse)) {
+        self.init(config: testingConfig, persistConfiguration: false, makeClient: makeClient, claimRequest: claimRequest)
+    }
+
+    private init(config: WardenConfig, persistConfiguration: Bool,
+                 makeClient: @escaping @MainActor () -> any WardenTunnelConnection,
+                 claimRequest: @escaping @MainActor (URLRequest) async throws -> (Data, URLResponse)) {
+        self.config = config
+        self.persistConfiguration = persistConfiguration
+        self.makeClient = makeClient
+        self.claimRequest = claimRequest
     }
 
     // MARK: - Config persistence
@@ -176,6 +201,7 @@ final class WardenTunnelService: ObservableObject {
     }
 
     func saveConfig() {
+        guard persistConfiguration else { return }
         if let data = try? JSONEncoder().encode(config) {
             UserDefaults.standard.set(data, forKey: Self.configKey)
         }
@@ -188,6 +214,13 @@ final class WardenTunnelService: ObservableObject {
     /// `sub` defaults to a random 8-char hex label; pass a stable value
     /// for predictable URLs.
     func start(owner: TunnelOwner, target: String, sub: String? = nil) {
+        start(owner: owner, target: target, sub: sub, retrying: false)
+    }
+
+    private func start(owner: TunnelOwner, target: String, sub: String?, retrying: Bool) {
+        let previousBackoff = retrying ? backoffSeconds[owner.key] : nil
+        stop(owner: owner)
+        if let previousBackoff { backoffSeconds[owner.key] = previousBackoff }
         guard config.isConfigured else {
             let key = owner.key
             var s = tunnels[key] ?? TunnelState(id: key, owner: owner, sub: sub ?? "", target: target, status: .idle)
@@ -200,8 +233,8 @@ final class WardenTunnelService: ObservableObject {
         let finalSub = (sub?.isEmpty == false ? sub! : TunnelSub.random(8))
         let key = owner.key
 
-        // Stop any prior tunnel for this owner (cancels old reconnect too).
-        stop(owner: owner)
+        let generation = UUID()
+        generations[key] = generation
 
         // Record intent + params so a transient disconnect can auto-retry
         // without the user re-flipping the toggle.
@@ -243,12 +276,14 @@ final class WardenTunnelService: ObservableObject {
             insecure: config.insecure
         )
 
-        let client = TunnelClient()
+        let client = makeClient()
+        lifetimes[key] = tcfg.lifetime
         clients[key] = client
 
         let task = Task { [weak self] in
+            guard !Task.isCancelled, self?.generations[key] == generation else { return }
             await client.start(tcfg) { event in
-                self?.apply(event: event, ownerKey: key)
+                self?.apply(event: event, ownerKey: key, generation: generation)
             }
         }
         tasks[key] = task
@@ -257,6 +292,8 @@ final class WardenTunnelService: ObservableObject {
     /// Stop the tunnel (if any) for this owner.
     func stop(owner: TunnelOwner) {
         let key = owner.key
+        lifetimes.removeValue(forKey: key)?.revoke()
+        generations[key] = nil
         wantsRunning.remove(key)
         reconnectTasks.removeValue(forKey: key)?.cancel()
         backoffSeconds.removeValue(forKey: key)
@@ -287,8 +324,9 @@ final class WardenTunnelService: ObservableObject {
 
     // MARK: - Event wiring
 
-    private func apply(event: TunnelEvent, ownerKey: String) {
-        guard var s = tunnels[ownerKey] else { return }
+    private func apply(event: TunnelEvent, ownerKey: String, generation: UUID) {
+        guard generations[ownerKey] == generation, wantsRunning.contains(ownerKey),
+              var s = tunnels[ownerKey] else { return }
         switch event {
         case .connecting:
             s.status = .connecting
@@ -313,7 +351,7 @@ final class WardenTunnelService: ObservableObject {
             tunnels[ownerKey] = s
             // Auto-reconnect: if the user still wants this tunnel up and
             // we have the last params, schedule a retry with backoff.
-            scheduleReconnectIfNeeded(ownerKey: ownerKey)
+            scheduleReconnectIfNeeded(ownerKey: ownerKey, generation: generation)
             return
         }
         // Cap the log.
@@ -326,7 +364,7 @@ final class WardenTunnelService: ObservableObject {
     /// Kick off a delayed reconnect if the user hasn't stopped this tunnel.
     /// Backoff doubles on each consecutive failure; capped at 30s.
     /// A successful `.ready` resets the timer (see apply()).
-    private func scheduleReconnectIfNeeded(ownerKey: String) {
+    private func scheduleReconnectIfNeeded(ownerKey: String, generation: UUID) {
         guard wantsRunning.contains(ownerKey),
               let params = lastParams[ownerKey]
         else { return }
@@ -347,11 +385,13 @@ final class WardenTunnelService: ObservableObject {
         }
 
         let task = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(next * 1_000_000_000))
+            do { try await Task.sleep(nanoseconds: UInt64(next * 1_000_000_000)) }
+            catch { return }
             guard let self = self else { return }
             // Guard again — user may have stopped during the sleep.
-            guard self.wantsRunning.contains(ownerKey) else { return }
-            self.start(owner: params.owner, target: params.target, sub: params.sub)
+            guard !Task.isCancelled, self.generations[ownerKey] == generation,
+                  self.wantsRunning.contains(ownerKey) else { return }
+            self.start(owner: params.owner, target: params.target, sub: params.sub, retrying: true)
         }
         reconnectTasks[ownerKey] = task
     }
@@ -386,6 +426,7 @@ final class WardenTunnelService: ObservableObject {
         claimInFlight = true
         claimError = nil
         defer { claimInFlight = false }
+        let generation = configurationGeneration
 
         let wantedSub = (sub?.isEmpty == false ? sub! : TunnelSub.random(8))
         let scheme = config.scheme.isEmpty ? "https" : (config.scheme == "ws" ? "http" : "https")
@@ -401,7 +442,8 @@ final class WardenTunnelService: ObservableObject {
         req.timeoutInterval = 15
 
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await claimRequest(req)
+            guard !Task.isCancelled, generation == configurationGeneration else { return }
             let http = resp as? HTTPURLResponse
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             if (http?.statusCode ?? 500) >= 400 {
@@ -424,7 +466,9 @@ final class WardenTunnelService: ObservableObject {
                 config.claimedSub = wantedSub
             }
             saveConfig()
+            onConfigurationReady?()
         } catch {
+            guard !Task.isCancelled, generation == configurationGeneration else { return }
             claimError = "claim: \(error.localizedDescription)"
         }
     }

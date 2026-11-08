@@ -17,7 +17,7 @@ enum SlashCommands {
     /// where they'd be treated as plain text, so we intercept and perform
     /// the operation locally instead of sending the slash command through.
     static let builtins: [SlashCommand] = [
-        .init(id: "compact", label: "/compact", description: "Ask the assistant to summarize this session, then reset to the summary", kind: .kiln),
+        .init(id: "compact", label: "/compact", description: "Compact context and retain an archive; Codex continues in the same thread", kind: .kiln),
         .init(id: "clear", label: "/clear", description: "Clear all messages in this session", kind: .kiln),
         .init(id: "fork", label: "/fork", description: "Fork this session from the last message", kind: .kiln),
         .init(id: "export", label: "/export", description: "Export this chat as markdown", kind: .kiln),

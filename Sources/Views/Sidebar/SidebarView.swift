@@ -33,6 +33,9 @@ struct SidebarView: View {
     @State private var isDraggingOverUngrouped = false
     @State private var searchText = ""
     @State private var showArchived: Bool = false
+    @State private var brandTaps = BrandTapSequence()
+    @AppStorage("classicWorkspace") private var classicWorkspace = false
+    @AppStorage("focusMode") private var focusMode = false
 
     private func sortLabel(_ order: AppStore.SessionSort) -> String {
         switch order {
@@ -178,16 +181,21 @@ struct SidebarView: View {
             HStack(alignment: .center) {
                 // Custom "Kiln Code" mark — flame glyph overlaid on a rounded
                 // tile tinted with the current accent color.
+                if classicWorkspace {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.kilnAccent)
-                        .frame(width: 22, height: 22)
+                        .frame(width: 28, height: 28)
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 11, weight: .heavy))
+                        .font(.system(size: 14, weight: .heavy))
                         .foregroundStyle(Color.kilnBg)
                 }
+                .onTapGesture {
+                    if brandTaps.tap() { ToastCenter.shared.show("theo is a larper", kind: .info, duration: 4) }
+                }
+                }
                 Text("Kiln")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color.kilnText)
                 Spacer()
                 Menu {
@@ -236,6 +244,7 @@ struct SidebarView: View {
             .padding(.vertical, 18)
 
             // Code / Chat tabs
+            if classicWorkspace {
             HStack(spacing: 4) {
                 ForEach(SessionKind.allCases) { kind in
                     let selected = store.selectedSidebarTab == kind
@@ -265,6 +274,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 4)
+            }
 
             // Sort control — Pinned sessions always float to the top; this
             // picker just reorders the rest. Kept understated (right-aligned
@@ -345,9 +355,10 @@ struct SidebarView: View {
                         .foregroundStyle(Color.kilnText)
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
                 .background(Color.kilnBg)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.kilnBorderSubtle, lineWidth: 1))
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
             }
@@ -460,33 +471,28 @@ struct SidebarView: View {
 
             Spacer(minLength: 0)
 
-            Rectangle().fill(Color.kilnBorder).frame(height: 1)
-
-            // Settings button
-            Button {
-                store.showSettings = true
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "gear")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                    Text(store.settings.language.ui.settings)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.kilnTextSecondary)
-                    Spacer()
+            if classicWorkspace || focusMode {
+                Rectangle().fill(Color.kilnBorder).frame(height: 1)
+                Button {
+                    store.showSettings = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gear")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.kilnTextSecondary)
+                        Text(store.settings.language.ui.settings)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.kilnTextSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .buttonStyle(.plain)
+                .help("Open Settings (⌘,)")
             }
-            .buttonStyle(.plain)
-            .help("Open Settings (⌘,)")
         }
         .background(Color.kilnSurface)
-        .sheet(isPresented: $store.showSettings) {
-            SettingsView()
-                .environmentObject(store)
-                .preferredColorScheme(Color.kilnPreferredColorScheme)
-        }
         .alert(store.settings.language.ui.setGroup, isPresented: $showNewGroupAlert) {
             TextField(store.settings.language.ui.groupName, text: $newGroupName)
             Button(store.settings.language.ui.set) {
@@ -603,7 +609,7 @@ struct SessionRow: View {
                             .onExitCommand { renamingId = nil }
                         } else {
                             Text(session.name)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 13, weight: isActive ? .semibold : .medium))
                                 .foregroundStyle(isActive ? Color.kilnText : Color.kilnTextSecondary)
                                 .lineLimit(1)
                         }
@@ -668,6 +674,9 @@ struct SessionRow: View {
                         lineWidth: 1.5
                     )
             )
+            .overlay(alignment: .leading) {
+                if isActive { RoundedRectangle(cornerRadius: 1).fill(Color.kilnAccent).frame(width: 2, height: 22).padding(.leading, 1) }
+            }
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

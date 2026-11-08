@@ -93,6 +93,7 @@ struct SessionInfoView: View {
         }
         .frame(width: 460)
         .background(Color.kilnBg)
+        .onExitCommand(perform: onDismiss)
     }
 
     private var toolCallCount: Int {

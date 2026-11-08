@@ -2,50 +2,29 @@ import SwiftUI
 import SwiftTerm
 
 struct RightPanel: View {
-    @State private var selectedTab: RightTab = .files
     @EnvironmentObject var store: AppStore
+    private var selectedTab: RightTab { store.selectedWorkspaceTab }
 
     var body: some View {
         VStack(spacing: 0) {
             // Tab bar — indicator lives inside each tab so it aligns with
             // the tab's actual width (tabs have different natural widths).
-            HStack(spacing: 1) {
+            HStack(spacing: 2) {
+                Text(selectedTab.localizedLabel(store.settings.language.ui))
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.kilnText)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 6)
                 ForEach(RightTab.allCases) { tab in
-                    Button {
-                        selectedTab = tab
-                    } label: {
-                        VStack(spacing: 4) {
-                            HStack(spacing: 4) {
-                                Image(systemName: tab.icon)
-                                    .font(.system(size: 10))
-                                if selectedTab == tab {
-                                    Text(tab.localizedLabel(store.settings.language.ui))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .lineLimit(1)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                            .foregroundStyle(selectedTab == tab ? Color.kilnAccent : Color.kilnTextTertiary)
-
-                            Rectangle()
-                                .fill(selectedTab == tab ? Color.kilnAccent : Color.clear)
-                                .frame(height: 2)
-                        }
+                    WorkspaceIconButton(icon: tab.icon, label: "\(tab.label) panel", active: selectedTab == tab) {
+                        store.selectedWorkspaceTab = tab
                     }
-                    .buttonStyle(.plain)
-                    .help("\(tab.label) panel")
                     .accessibilityLabel(tab.label)
                 }
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)
-            .padding(.top, 8)
+            .frame(height: 46)
             .background(Color.kilnSurface)
 
-            Rectangle().fill(Color.kilnBorder).frame(height: 1)
+            Rectangle().fill(Color.kilnBorderSubtle).frame(height: 1)
 
             // Content
             switch selectedTab {

@@ -2,13 +2,19 @@ import Foundation
 import SwiftUI
 
 enum ModelProvider: String, Sendable, Codable {
-    case codex, opencode
+    case codex, opencode, grok
     var assistantName: String { label }
-    var label: String { self == .codex ? "Codex" : "OpenCode" }
+    var label: String {
+        switch self {
+        case .codex: "Codex"
+        case .opencode: "OpenCode"
+        case .grok: "Grok"
+        }
+    }
 }
 
 enum ModelBrand: Sendable {
-    case chatgpt, codex
+    case chatgpt, codex, grok
 }
 
 /// Persist the model slug, while keeping the selectable catalog independent of releases.
@@ -16,7 +22,9 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
     let rawValue: String
 
     init?(rawValue: String) {
-        guard (rawValue.hasPrefix("gpt-") || rawValue.hasPrefix("opencode:") && rawValue.contains("/")),
+        let isGrok = rawValue.hasPrefix("grok:grok-") && rawValue.count > "grok:grok-".count
+        guard (rawValue.hasPrefix("gpt-") || rawValue.hasPrefix("opencode:") && rawValue.contains("/")
+            || isGrok),
               !rawValue.contains(where: { $0.isWhitespace }),
               !rawValue.localizedCaseInsensitiveContains("claude"),
               !rawValue.localizedCaseInsensitiveContains("anthropic") else { return nil }
@@ -34,6 +42,7 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
     }
 
     static let gpt6Astra = Self(rawValue: "gpt-6-astra")!
+    static let gpt61Sol = Self(rawValue: "gpt-6.1-sol")!
     static let gpt55 = Self(rawValue: "gpt-5.5")!
     static let gpt54 = Self(rawValue: "gpt-5.4")!
     static let gpt54Mini = Self(rawValue: "gpt-5.4-mini")!
@@ -52,34 +61,63 @@ struct AgentModel: RawRepresentable, Hashable, Sendable, Codable, Identifiable, 
         [
             Group(id: "current", label: "Codex", provider: .codex, models: ModelCatalog.shared.models.map(\.model)),
             Group(id: "older", label: "Older models", provider: .codex, models: olderModels.filter { old in !ModelCatalog.shared.models.contains { $0.model == old } }),
-            Group(id: "opencode", label: "OpenCode", provider: .opencode, models: OpenCodeModels.shared.models)
+            Group(id: "opencode", label: "OpenCode", provider: .opencode, models: OpenCodeModels.shared.models),
+            Group(id: "grok", label: "Grok", provider: .grok, models: GrokModels.shared.models)
         ].filter { !$0.models.isEmpty }
     }
 
     var id: String { rawValue }
     var fullId: String { rawValue }
-    var provider: ModelProvider { rawValue.hasPrefix("opencode:") ? .opencode : .codex }
-    var cliModel: String { provider == .opencode ? String(rawValue.dropFirst(9)) : rawValue }
+    var provider: ModelProvider {
+        if rawValue.hasPrefix("opencode:") { return .opencode }
+        if rawValue.hasPrefix("grok:") { return .grok }
+        return .codex
+    }
+    var cliModel: String {
+        return switch provider {
+        case .codex: rawValue
+        case .opencode: String(rawValue.dropFirst("opencode:".count))
+        case .grok: String(rawValue.dropFirst("grok:".count))
+        }
+    }
     var brand: ModelBrand {
         let slug = cliModel.split(separator: "/").last.map(String.init) ?? cliModel
+        if provider == .grok { return .grok }
         return provider == .codex || cliModel.hasPrefix("openai/") || slug.hasPrefix("gpt-") ? .chatgpt : .codex
     }
     var assistantName: String { label }
     var providerDisplayName: String { provider.label }
-    private var descriptor: ModelDescriptor? {
-        (provider == .opencode ? OpenCodeModels.shared.descriptors : ModelCatalog.shared.models).first { $0.model == self }
+    func attachmentError(_ attachments: [ComposerAttachment]) -> String? {
+        guard provider == .grok, !attachments.isEmpty else { return nil }
+        return "Grok's Kiln integration currently accepts text prompts only. Remove attachments or choose Codex or OpenCode."
     }
-    var label: String { descriptor?.displayName ?? cliModel }
+    private var descriptor: ModelDescriptor? {
+        let catalog: [ModelDescriptor]
+        switch provider {
+        case .codex: catalog = ModelCatalog.shared.models
+        case .opencode: catalog = OpenCodeModels.shared.descriptors
+        case .grok: catalog = GrokModels.shared.descriptors
+        }
+        return catalog.first { $0.model == self }
+    }
+    var label: String {
+        return descriptor?.displayName ?? cliModel
+    }
     var shortLabel: String { label.replacingOccurrences(of: "GPT-", with: "") }
-    var tier: String { descriptor?.description ?? provider.label }
-    var contextWindow: Int { descriptor?.contextWindow ?? 272_000 }
+    var tier: String {
+        return descriptor?.description ?? provider.label
+    }
+    var helpText: String { fullId }
+    var contextWindow: Int { descriptor?.contextWindow ?? (provider == .grok ? 0 : 272_000) }
     var extendedContextWindow: Int? { nil }
     var supportsExtendedContext: Bool { false }
     var supportsOpenAIFastMode: Bool { provider == .codex && descriptor?.fastModeTier != nil }
     var fastModeTier: String? { descriptor?.fastModeTier }
     var fastModeDescription: String { descriptor?.fastModeDescription ?? "Faster responses may use more credits." }
     var tint: Color { Color.kilnAccent }
-    var reasoningEfforts: [String] { descriptor?.efforts ?? (provider == .opencode ? [] : ["low", "medium", "high", "xhigh"]) }
+    var reasoningEfforts: [String] {
+        descriptor?.efforts ?? (provider == .codex ? ["low", "medium", "high", "xhigh"] : [])
+    }
 }
 
 struct ModelDescriptor: Sendable {

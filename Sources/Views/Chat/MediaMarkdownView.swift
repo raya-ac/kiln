@@ -130,6 +130,7 @@ struct InlineMediaView: View {
                 HStack { Text(media.label).lineLimit(1); Spacer(); Button("Done") { fullscreen = false } }
                 if let image { AnimatedMediaImage(image: image).frame(maxWidth: .infinity, maxHeight: .infinity) }
             }.padding(20).frame(minWidth: 640, minHeight: 480)
+                .onExitCommand { fullscreen = false }
         }
     }
 

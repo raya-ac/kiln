@@ -3,7 +3,7 @@ import Foundation
 enum CodexCLI {
     static var executablePath: String {
         let home = NSHomeDirectory()
-        return ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "\(home)/.local/bin/codex"]
+        return ["\(home)/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
             .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/bin/env"
     }
 

@@ -3,22 +3,22 @@ import XCTest
 
 final class ModelDiscoveryTests: XCTestCase {
     func testLivePageParsingFiltersHiddenAndKeepsExactEfforts() throws {
-        let data = Data(#"{"data":[{"model":"gpt-6-astra","displayName":"GPT-6-Astra","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"ultra"}]},{"model":"gpt-hidden","displayName":"Hidden","hidden":true,"supportedReasoningEfforts":[]}],"nextCursor":"page2"}"#.utf8)
+        let data = Data(#"{"data":[{"model":"gpt-6.1-sol","displayName":"GPT-6.1-Sol","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"ultra"}]},{"model":"gpt-hidden","displayName":"Hidden","hidden":true,"supportedReasoningEfforts":[]}],"nextCursor":"page2"}"#.utf8)
         let page = try JSONDecoder().decode(CodexModelDiscovery.Page.self, from: data)
         XCTAssertEqual(page.nextCursor, "page2")
         let models = CodexModelDiscovery.descriptors(from: [page, page])
         XCTAssertEqual(models.count, 1)
-        XCTAssertEqual(models.first?.model, .gpt6Astra)
+        XCTAssertEqual(models.first?.model, .gpt61Sol)
         XCTAssertEqual(models.first?.efforts, ["ultra"])
     }
 
     func testCacheReloadDoesNotOverwriteLiveModelsFromSameCLI() throws {
         let catalog = ModelCatalog()
         let version = try XCTUnwrap(CLIVersion("0.153.4"))
-        catalog.replaceLive([ModelDescriptor(model: .gpt6Astra, displayName: "Astra", description: "Live",
+        catalog.replaceLive([ModelDescriptor(model: .gpt61Sol, displayName: "Sol", description: "Live",
             contextWindow: 272_000, efforts: ["ultra"])], version: version)
         catalog.reload(installedVersion: version)
-        XCTAssertEqual(catalog.models.map(\.model), [.gpt6Astra])
+        XCTAssertEqual(catalog.models.map(\.model), [.gpt61Sol])
         XCTAssertTrue(catalog.hasRecentLiveModels(for: version))
         XCTAssertFalse(catalog.hasRecentLiveModels(for: CLIVersion("0.151.0")!))
         catalog.reload(installedVersion: CLIVersion("0.151.0"))
@@ -28,11 +28,11 @@ final class ModelDiscoveryTests: XCTestCase {
     func testLiveInstalledModelListWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["KILN_LIVE_MODEL_LIST"] == "1" else { throw XCTSkip("Opt-in live model discovery") }
         let models = try await CodexModelDiscovery.fetch()
-        XCTAssertTrue(models.contains { $0.model == .gpt6Astra })
+        XCTAssertTrue(models.contains { $0.model == .gpt61Sol })
         print("Selected CLI models: " + models.map { $0.model.rawValue }.joined(separator: ", "))
         XCTAssertGreaterThan(models.count, 2)
         print("Speed tiers: " + models.map { $0.model.rawValue + "=" + ($0.fastModeTier ?? "standard only") }.joined(separator: ", "))
-        XCTAssertNotNil(models.first { $0.model == .gpt6Astra }?.fastModeTier)
+        XCTAssertNotNil(models.first { $0.model == .gpt61Sol }?.fastModeTier)
     }
 
     func testFastModeUsesAdvertisedTierAndNormalOverridesGlobalFast() throws {

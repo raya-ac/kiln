@@ -1,12 +1,14 @@
 name: CI
 
-# Fast "does it compile?" check on every push/PR that doesn't touch a tag.
-# Matches `swift build` locally — no bundle/sign/notarize.
+# Build and test every branch/PR, retaining per-architecture candidate bundles.
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -40,7 +42,23 @@ jobs:
       # Sanity: ensure the per-arch bundle script works on CI. Runner is
       # arm64, so arm64 compiles natively; x86_64 is a cross-compile.
       - name: Bundle arm64
-        run: ./scripts/make-app-bundle.sh 0.0.0-ci arm64
+        run: ./scripts/make-app-bundle.sh "$(cat VERSION)-ci.${GITHUB_RUN_NUMBER}" arm64 "$GITHUB_RUN_NUMBER"
+
+      - name: Upload arm64 candidate
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: kiln-arm64-${{ github.sha }}
+          path: dist/Kiln-*-arm64.zip
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Bundle x86_64
-        run: ./scripts/make-app-bundle.sh 0.0.0-ci x86_64
+        run: ./scripts/make-app-bundle.sh "$(cat VERSION)-ci.${GITHUB_RUN_NUMBER}" x86_64 "$GITHUB_RUN_NUMBER"
+
+      - name: Upload x86_64 candidate
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: kiln-x86_64-${{ github.sha }}
+          path: dist/Kiln-*-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -14,10 +14,14 @@ enum CLIInstallMethod: String, Sendable {
         }
         if provider == .codex && resolvedPath.contains("/.codex/packages/standalone/") { return .standalone }
         if provider == .opencode && resolvedPath.contains("/.opencode/bin/") { return .standalone }
+        if provider == .grok && (resolvedPath.contains("/.grok/downloads/") || resolvedPath.contains("/.grok/bin/")) { return .standalone }
         return .custom
     }
 
     func updateCommand(provider: ModelProvider, executable: String) -> String? {
+        if provider == .grok {
+            return "'" + executable.replacingOccurrences(of: "'", with: "'\\''") + "' update"
+        }
         let package = provider == .codex ? "@openai/codex" : "opencode-ai"
         switch self {
         case .homebrew: return "brew upgrade \(provider.rawValue)"
@@ -117,21 +121,39 @@ struct CLIUpdateResult: Identifiable, Sendable {
         return method.updateCommand(provider: provider, executable: executable)
     }
     var releaseURL: URL {
-        URL(string: provider == .codex ? "https://github.com/openai/codex/releases/latest" : "https://github.com/anomalyco/opencode/releases/latest")!
+        let value: String
+        switch provider {
+        case .codex: value = "https://github.com/openai/codex/releases/latest"
+        case .opencode: value = "https://github.com/anomalyco/opencode/releases/latest"
+        case .grok: value = "https://github.com/xai-org/grok-build/releases"
+        }
+        return URL(string: value)!
     }
     var instructionsURL: URL {
-        URL(string: provider == .codex ? "https://developers.openai.com/codex/cli/" : "https://opencode.ai/docs/cli/#upgrade")!
+        let value: String
+        switch provider {
+        case .codex: value = "https://developers.openai.com/codex/cli/"
+        case .opencode: value = "https://opencode.ai/docs/cli/#upgrade"
+        case .grok: value = "https://docs.x.ai/build/cli/reference"
+        }
+        return URL(string: value)!
     }
 }
 
 enum CLIUpdateInspector {
     static func executable(for provider: ModelProvider) -> String? {
-        let preferred = provider == .codex ? CodexCLI.executablePath : OpenCodeProtocol.executablePath
+        let preferred: String
+        switch provider {
+        case .codex: preferred = CodexCLI.executablePath
+        case .opencode: preferred = OpenCodeProtocol.executablePath
+        case .grok: preferred = GrokCLI.executablePath
+        }
         if preferred != "/usr/bin/env" { return preferred }
         let home = NSHomeDirectory()
         let paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "\(home)/.local/bin", "\(home)/.cargo/bin", "\(home)/.bun/bin"]
             + (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        return paths.map { $0 + "/" + provider.rawValue }.first { FileManager.default.isExecutableFile(atPath: $0) }
+        let command = provider.rawValue
+        return paths.map { $0 + "/" + command }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     static func inspect(_ provider: ModelProvider) async -> CLIUpdateResult {
@@ -140,11 +162,28 @@ enum CLIUpdateInspector {
         if let executable = result.executable {
             result.method = .detect(provider: provider, resolvedPath: URL(fileURLWithPath: executable).resolvingSymlinksInPath().path)
             do {
-                let data = try await CodexCLI.output(["--version"], executable: executable, command: provider.rawValue,
-                    environment: ["OPENCODE_DISABLE_AUTOUPDATE": "1"])
-                guard let version = CLIVersion(String(decoding: data, as: UTF8.self)) else { throw CLIUpdateError.invalidVersion }
+                let command = provider.rawValue
+                let env = provider == .opencode ? ["OPENCODE_DISABLE_AUTOUPDATE": "1"] : provider == .grok ? ["GROK_DISABLE_AUTOUPDATER": "1"] : [:]
+                let args = provider == .grok ? ["--no-auto-update", "--version"] : ["--version"]
+                let data = try await CodexCLI.output(args, executable: executable, command: command, environment: env)
+                let version = provider == .grok ? GrokCLI.installedVersion(data) : CLIVersion(String(decoding: data, as: UTF8.self))
+                guard let version else { throw CLIUpdateError.invalidVersion }
                 result.installed = version
             } catch { result.problem = "Installed version: \(error.localizedDescription)" }
+        }
+        if provider == .grok {
+            if let executable = result.executable {
+                do {
+                    let data = try await CodexCLI.output(["--no-auto-update", "update", "--check", "--json"],
+                        executable: executable, command: "grok", environment: ["GROK_DISABLE_AUTOUPDATER": "1"])
+                    result.latest = try GrokCLI.updateVersion(data)
+                    result.available = result.latest
+                } catch {
+                    result.problem = [result.problem, "Release check: \(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n")
+                }
+            }
+            result.checkedAt = Date()
+            return result
         }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
@@ -152,7 +191,13 @@ enum CLIUpdateInspector {
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         do {
-            result.latest = try await (provider == .codex ? CLIReleaseSource.codex : .opencode).fetch(using: session)
+            let source: CLIReleaseSource?
+            switch provider {
+            case .codex: source = .codex
+            case .opencode: source = .opencode
+            case .grok: source = nil
+            }
+            if let source { result.latest = try await source.fetch(using: session) }
             if result.method == .homebrew || result.method == .cask {
                 result.available = try await CLIReleaseSource.brew(provider, cask: result.method == .cask).fetch(using: session)
             } else { result.available = result.latest }
@@ -167,7 +212,7 @@ enum CLIUpdateInspector {
 @MainActor
 final class CLIUpdateChecker: ObservableObject {
     static let shared = CLIUpdateChecker()
-    @Published private(set) var results = [CLIUpdateResult(provider: .codex), CLIUpdateResult(provider: .opencode)]
+    @Published private(set) var results = [CLIUpdateResult(provider: .codex), CLIUpdateResult(provider: .opencode), CLIUpdateResult(provider: .grok)]
     @Published private(set) var isChecking = false
     @Published private(set) var checkedAt: Date?
     private let inspect: @Sendable (ModelProvider) async -> CLIUpdateResult
@@ -183,7 +228,7 @@ final class CLIUpdateChecker: ObservableObject {
         isChecking = true
         defer { isChecking = false }
         await withTaskGroup(of: CLIUpdateResult.self) { group in
-            for provider in [ModelProvider.codex, .opencode] {
+            for provider in [ModelProvider.codex, .opencode, .grok] {
                 group.addTask { [inspect] in await inspect(provider) }
             }
             for await result in group {

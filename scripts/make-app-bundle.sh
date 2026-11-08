@@ -18,6 +18,7 @@
 #
 # Env vars (all optional):
 #   KILN_DIST_ROOT     optional separate staging directory
+#   KILN_BUILD_SYSTEM  optional SwiftPM build engine (e.g. native)
 #   CODESIGN_IDENTITY   "Developer ID Application: …" — signs the bundle
 #   SUFEED_URL          overrides the default appcast URL embedded in Info.plist
 #   SUPUBLIC_ED_KEY     EdDSA public key for Sparkle update verification
@@ -41,9 +42,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # 1. Build release binary for the requested arch.
-swift build -c release --arch "$ARCH"
+BUILD_ARGS=()
+if [ -n "${KILN_BUILD_SYSTEM:-}" ]; then
+  BUILD_ARGS=(--build-system "$KILN_BUILD_SYSTEM")
+fi
+swift build ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -c release --arch "$ARCH"
 
-BIN_PATH="$(swift build -c release --arch "$ARCH" --show-bin-path)"
+BIN_PATH="$(swift build ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -c release --arch "$ARCH" --show-bin-path)"
 EXECUTABLE="$BIN_PATH/$APP_NAME"
 
 if [ ! -x "$EXECUTABLE" ]; then
@@ -109,7 +114,18 @@ for SPM_RES_BUNDLE in "$BIN_PATH/"*.bundle; do
   RESOURCE_NAME="$(basename "$SPM_RES_BUNDLE" .bundle)"
   DEST_BUNDLE="$APP/Contents/Resources/$RESOURCE_NAME.bundle"
   mkdir -p "$DEST_BUNDLE/Contents/Resources"
-  (cd "$SPM_RES_BUNDLE" && tar cf - .) | (cd "$DEST_BUNDLE/Contents/Resources" && tar xf -)
+  # SwiftPM's bundle already wraps payload files in Contents/Resources.
+  # Copy only that payload into our app-bundle wrapper; copying the bundle
+  # root here adds a second Contents/Resources layer and breaks Bundle.url.
+  if [ -d "$SPM_RES_BUNDLE/Contents/Resources" ]; then
+    cp -R "$SPM_RES_BUNDLE/Contents/Resources/." "$DEST_BUNDLE/Contents/Resources/"
+  elif [ -d "$SPM_RES_BUNDLE" ]; then
+    # The native SwiftPM engine emits a flat resource bundle.
+    cp -R "$SPM_RES_BUNDLE/." "$DEST_BUNDLE/Contents/Resources/"
+  else
+    echo "error: resource payload missing from $SPM_RES_BUNDLE" >&2
+    exit 1
+  fi
   cat > "$DEST_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -125,6 +141,19 @@ for SPM_RES_BUNDLE in "$BIN_PATH/"*.bundle; do
 </plist>
 EOF
 done
+
+for REQUIRED_RESOURCE in \
+  "$APP/Contents/Resources/Kiln_Kiln.bundle/Contents/Resources/brands/OpenAI-white-monoblossom.png" \
+  "$APP/Contents/Resources/Kiln_Kiln.bundle/Contents/Resources/brands/OpenAI-black-monoblossom.png" \
+  "$APP/Contents/Resources/Kiln_Kiln.bundle/Contents/Resources/remote/index.html" \
+  "$APP/Contents/Resources/Kiln_Kiln.bundle/Contents/Resources/remote/remote.js" \
+  "$APP/Contents/Resources/Kiln_Kiln.bundle/Contents/Resources/remote/remote.css"; do
+  if [ ! -f "$REQUIRED_RESOURCE" ]; then
+    echo "error: required app resource missing: $REQUIRED_RESOURCE" >&2
+    exit 1
+  fi
+done
+
 # Bundle CHANGELOG so the "What's New" popup has something to read.
 if [ -f "$ROOT/CHANGELOG.md" ]; then
   cp "$ROOT/CHANGELOG.md" "$APP/Contents/Resources/CHANGELOG.md"

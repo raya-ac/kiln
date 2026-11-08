@@ -1,6 +1,7 @@
 import Foundation
 
 enum AgentEvent: Sendable {
+    case started
     case sessionId(String)
     case messageStart
     case textDelta(String)
@@ -16,5 +17,6 @@ enum AgentEvent: Sendable {
     case toolResult(toolUseId: String, content: String, isError: Bool)
     case cost(Double)
     case error(String)
+    case cancelled
     case done
 }

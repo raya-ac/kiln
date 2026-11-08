@@ -39,9 +39,16 @@ macOS 14+, Xcode 15+ (Xcode 26 preferred). Apple Silicon or Intel.
 
 ## Tests
 
-There aren't many yet. If you're fixing a bug in a testable spot (parsers,
-pure-value transforms, non-UI services), a test that fails before and passes
-after is very welcome.
+Run `swift test` for the native suite. This checkout also supports
+`swift test --build-system native` when SwiftTerm's Metal build fails with
+the default engine. Use the remote fixture in `scripts/test-remote-ui.cjs`
+for browser acceptance, including compact layouts and recoverable drafts.
+
+After every substantial change, get a fresh code review from Astra before
+calling the phase complete. Address actionable findings and re-check the
+affected flow. Keep source review, automated tests, and actual client
+acceptance separate. Use GPT-6.1 Sol or Grok 4.7 for routine model smoke
+tests; Astra is the review gate, not the default test model.
 
 ## Commit messages
 

@@ -12,6 +12,7 @@ DerivedData/
 
 # Release artifacts produced by scripts/make-app-bundle.sh
 dist/
+.tmp/
 *.zip
 *.dmg
 

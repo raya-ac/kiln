@@ -24,7 +24,7 @@ struct CLIUpdatesView: View {
                 }
                 ForEach(checker.results) { result in
                     CLIUpdateRow(result: result, checking: checker.isChecking)
-                    if result.provider == .codex { Divider() }
+                    if result.id != checker.results.last?.id { Divider() }
                 }
             }
             .padding(24)
@@ -40,7 +40,13 @@ private struct CLIUpdateRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                ModelBrandIcon(brand: result.provider == .codex ? .chatgpt : .codex, size: 22)
+                ModelBrandIcon(brand: {
+                    switch result.provider {
+                    case .codex: .chatgpt
+                    case .opencode: .codex
+                    case .grok: .grok
+                    }
+                }(), size: 22)
                 Text(result.provider.label).font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Text(checking ? "Checking..." : result.status)
@@ -49,7 +55,7 @@ private struct CLIUpdateRow: View {
             }
             HStack(alignment: .top, spacing: 24) {
                 version("Installed", result.installed?.text ?? (result.checkedAt == nil ? "-" : result.executable == nil ? "Not found" : "Unknown"))
-                version("Latest stable", result.latest?.text ?? "-")
+                version(result.provider == .grok ? "Latest (CLI channel)" : "Latest stable", result.latest?.text ?? "-")
                 if result.method == .homebrew || result.method == .cask {
                     version("Homebrew", result.available?.text ?? "-")
                 }

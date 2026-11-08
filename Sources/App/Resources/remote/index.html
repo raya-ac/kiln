@@ -16,10 +16,23 @@
   <span class="spacer"></span>
   <button class="icon-button" id="mobileTools" title="Workspace tools" aria-label="Workspace tools"><i data-lucide="panel-right"></i></button>
 </header>
-<div class="layout">
+<nav class="workspace-rail" aria-label="Workspace navigation">
+  <span class="brand-mark"><i data-lucide="flame"></i></span>
+  <div class="rail-tabs" role="tablist" aria-label="Session type">
+    <button class="sidebar-tab rail-selector active" role="tab" aria-selected="true" data-kind="code" title="Code chats" aria-label="Code"><i data-lucide="code"></i></button>
+    <button class="sidebar-tab rail-selector" role="tab" aria-selected="false" data-kind="chat" title="Chats" aria-label="Chat"><i data-lucide="messages-square"></i></button>
+  </div>
+  <span class="rail-divider"></span>
+  <button class="icon-button" id="railToolShelf" title="All tools" aria-label="All tools"><i data-lucide="wrench"></i></button>
+  <button class="icon-button" id="railActivity" title="Activity panel" aria-label="Activity panel"><i data-lucide="activity"></i></button>
+  <button class="icon-button" id="railUsage" title="Usage panel" aria-label="Usage panel"><i data-lucide="chart-no-axes-column"></i></button>
+  <span class="spacer"></span>
+  <button class="icon-button" id="railSettings" title="Open settings" aria-label="Open settings"><i data-lucide="settings-2"></i></button>
+</nav>
+<div class="layout tools-hidden">
   <button id="panelScrim" class="panel-scrim" aria-label="Close panels"></button>
   <aside class="sidebar" aria-label="Sessions">
-    <div class="sidebar-brand"><span class="brand-mark"><i data-lucide="flame"></i></span><span class="logo">Kiln</span><span class="spacer"></span>
+    <div class="sidebar-brand"><span class="logo">Kiln</span><span class="spacer"></span>
       <button class="icon-button new-session-btn" id="newSessionBtn" title="New session" aria-label="New session"><i data-lucide="plus"></i></button>
     </div>
     <div class="sidebar-tabs" role="tablist" aria-label="Session type">
@@ -34,6 +47,7 @@
   <main class="main" id="main">
     <header class="chat-header">
       <div class="header-title"><h1 id="chatHdrName">Select a session</h1><span id="chatHdrBusy" hidden>Working<span class="live-dot"></span></span>
+        <button class="icon-button" id="toolShelfBtn" title="Tools" aria-label="Tools"><i data-lucide="wrench"></i></button>
         <button class="icon-button" id="retryBtn" title="Retry last request" aria-label="Retry last request"><i data-lucide="rotate-ccw"></i></button>
         <button class="icon-button" id="exportBtn" title="Export conversation" aria-label="Export conversation"><i data-lucide="download"></i></button>
         <button class="icon-button desktop-panel-toggle" id="toggleTools" title="Toggle workspace tools" aria-label="Toggle workspace tools"><i data-lucide="panel-right"></i></button>

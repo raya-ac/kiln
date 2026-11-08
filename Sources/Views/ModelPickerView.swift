@@ -13,9 +13,11 @@ struct ModelPickerButton: View {
             }
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(Color.kilnText)
+            .padding(.horizontal, 8).frame(minHeight: 28)
+            .background(Color.kilnSurface).clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.borderless)
-        .help(selection.fullId)
+        .buttonStyle(WorkspaceButtonStyle())
+        .help(selection.helpText)
         .popover(isPresented: $presented) {
             ModelPickerView(selection: $selection) { presented = false }
                 .environmentObject(store)
@@ -28,8 +30,21 @@ private struct ModelPickerView: View {
     @Binding var selection: AgentModel
     let onSelect: () -> Void
     @State private var query = ""
-    @State private var provider = ModelProvider.codex
+    @State private var tab: ModelTab = .codex
     @State private var refreshing = false
+
+    private enum ModelTab: String, CaseIterable, Identifiable {
+        case codex = "Codex", opencode = "OpenCode", grok = "Grok"
+        var id: String { rawValue }
+    }
+
+    private func shows(_ group: AgentModel.Group) -> Bool {
+        switch tab {
+        case .codex: return group.provider == .codex
+        case .opencode: return group.provider == .opencode
+        case .grok: return group.provider == .grok
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,21 +58,22 @@ private struct ModelPickerView: View {
                     if refreshing || store.refreshingCodexModels { ProgressView().controlSize(.small) }
                     else { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(refreshing || store.refreshingCodexModels)
+                .disabled(refreshing || store.refreshingCodexModels || store.refreshingGrokModels)
                 .help("Refresh model catalogs")
             }.padding(14)
-            Picker("Backend", selection: $provider) {
-                Text("Codex").tag(ModelProvider.codex)
-                Text("OpenCode").tag(ModelProvider.opencode)
+            Picker("Backend", selection: $tab) {
+                Text("Codex").tag(ModelTab.codex)
+                Text("OpenCode").tag(ModelTab.opencode)
+                Text("Grok").tag(ModelTab.grok)
             }
             .pickerStyle(.segmented).padding(.horizontal, 14).padding(.bottom, 10)
             Divider()
-            if let warning = store.codexCatalogWarning, provider == .codex {
+            if let warning = store.codexCatalogWarning, tab == .codex {
                 Text(warning).font(.system(size: 11)).foregroundStyle(Color.kilnWarning).padding(12)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(AgentModel.groupedByProvider.filter { $0.provider == provider }) { group in
+                    ForEach(AgentModel.groupedByProvider.filter(shows)) { group in
                         let matches = group.models.filter { query.isEmpty || $0.label.localizedCaseInsensitiveContains(query) || $0.rawValue.localizedCaseInsensitiveContains(query) }
                         if !matches.isEmpty {
                             Text(group.label).font(.system(size: 11, weight: .semibold))
@@ -72,9 +88,12 @@ private struct ModelPickerView: View {
                                         ModelBrandIcon(brand: model.brand, size: 20)
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(model.label).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                            Text(model.provider == .codex ? model.tier : model.cliModel)
-                                                .font(.system(size: 10)).foregroundStyle(Color.kilnTextSecondary)
-                                                .lineLimit(2)
+                                            let subtitle = model.provider == .codex ? model.tier : model.cliModel
+                                            if !subtitle.isEmpty {
+                                                Text(subtitle)
+                                                    .font(.system(size: 10)).foregroundStyle(Color.kilnTextSecondary)
+                                                    .lineLimit(2)
+                                            }
                                         }
                                         Spacer(minLength: 0)
                                         Image(systemName: "checkmark")
@@ -91,24 +110,46 @@ private struct ModelPickerView: View {
                             }
                         }
                     }
-                    if provider == .opencode && OpenCodeModels.shared.models.isEmpty {
+                    if tab == .opencode && OpenCodeModels.shared.models.isEmpty {
                         Text(refreshing ? "Loading models..." : "Refresh to load OpenCode models.")
                             .font(.system(size: 12)).foregroundStyle(Color.kilnTextSecondary).padding(16)
                     }
-                    if let error = store.modelCatalogError, provider == .opencode {
+                    if let error = store.modelCatalogError, tab == .opencode {
                         Text(error).font(.system(size: 11)).foregroundStyle(Color.kilnError).padding(14)
+                    }
+                    if tab == .grok {
+                        if store.refreshingGrokModels {
+                            ProgressView().controlSize(.small).padding(16)
+                        } else if let error = store.grokCatalogError {
+                            Text(error).font(.system(size: 11)).foregroundStyle(Color.kilnError).padding(14)
+                        } else if GrokModels.shared.models.isEmpty {
+                            Text("No Grok models available.").font(.system(size: 12)).foregroundStyle(Color.kilnTextSecondary).padding(16)
+                        }
                     }
                 }
             }
         }
-        .frame(width: 390, height: 460)
+        .frame(width: 460, height: 460)
         .background(Color.kilnBg)
-        .onAppear { provider = selection.provider }
-        .task { await store.refreshCodexModelCatalog() }
-        .onChange(of: provider) {
-            if provider == .opencode && OpenCodeModels.shared.models.isEmpty {
+        .onExitCommand(perform: onSelect)
+        .onAppear {
+            switch selection.provider {
+            case .codex: tab = .codex
+            case .opencode: tab = .opencode
+            case .grok: tab = .grok
+            }
+        }
+        .task {
+            await store.refreshCodexModelCatalog()
+            if selection.provider == .grok { await store.refreshGrokModelCatalog() }
+        }
+        .onChange(of: tab) {
+            if tab == .opencode && OpenCodeModels.shared.models.isEmpty {
                 refreshing = true
                 Task { await store.refreshModelCatalog(); refreshing = false }
+            }
+            if tab == .grok && GrokModels.shared.models.isEmpty {
+                Task { await store.refreshGrokModelCatalog() }
             }
         }
     }

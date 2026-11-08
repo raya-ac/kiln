@@ -3,7 +3,7 @@ import XCTest
 
 final class CLIUpdateTests: XCTestCase {
     func testCatalogMustMatchTheSelectedCLI() throws {
-        let data = Data(#"{"client_version":"0.151.0","models":[{"slug":"gpt-6-astra","visibility":"list"}]}"#.utf8)
+        let data = Data(#"{"client_version":"0.151.0","models":[{"slug":"gpt-6.1-sol","visibility":"list"}]}"#.utf8)
         XCTAssertNotNil(ModelCatalog.parse(data, installedVersion: CLIVersion("0.151.0")))
         XCTAssertNil(ModelCatalog.parse(data, installedVersion: CLIVersion("0.153.4")))
         XCTAssertEqual(AgentModel.defaultModel, .gpt55)
@@ -13,7 +13,7 @@ final class CLIUpdateTests: XCTestCase {
         var emitted = false
         let events = CodexProtocol.parseEvent(["type": "item.completed", "item": [
             "id": "item_3", "type": "error",
-            "message": "Model metadata for gpt-6-astra not found. Defaulting to fallback metadata."
+            "message": "Model metadata for gpt-6.1-sol not found. Defaulting to fallback metadata."
         ]], emittedText: &emitted)
         XCTAssertTrue(events.contains { if case .trace(let entry) = $0 { return entry.phase == "model_metadata" && entry.level == .warning }; return false })
         XCTAssertFalse(events.contains { if case .trace(let entry) = $0 { return entry.level == .success }; return false })
@@ -47,7 +47,7 @@ final class CLIUpdateTests: XCTestCase {
     }
 
     @MainActor
-    func testAstraMetadataWithSelectedCodexWhenRequested() async throws {
+    func testSolMetadataWithSelectedCodexWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["KILN_LIVE_CODEX_MODEL_CHECK"] == "1" else {
             throw XCTSkip("Opt-in live model metadata check")
         }
@@ -63,7 +63,7 @@ final class CLIUpdateTests: XCTestCase {
             do { try await Task.sleep(for: .seconds(60)) } catch { return }
             service.interrupt(sessionId: id)
         }
-        await service.sendMessage(sessionId: id, message: "Reply with KILN_MODEL_OK only. Do not use tools.", model: .gpt6Astra, workDir: "/tmp", options: options) {
+        await service.sendMessage(sessionId: id, message: "Reply with KILN_MODEL_OK only. Do not use tools.", model: .gpt61Sol, workDir: "/tmp", options: options) {
             if case .textDelta(let text) = $0 { output += text }
             if case .error(let error) = $0 { errors.append(error) }
             if case .trace(let trace) = $0, trace.phase == "model_metadata" { metadataWarnings += 1 }
@@ -152,7 +152,8 @@ final class CLIUpdateTests: XCTestCase {
         _ = await (first, second)
         await checker.check(force: false)
         let calls = await counter.calls
-        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(Set(checker.results.map(\.provider)), [.codex, .opencode, .grok])
         XCTAssertFalse(checker.isChecking)
         XCTAssertNotNil(checker.checkedAt)
         XCTAssertTrue(checker.results.allSatisfy { $0.checkedAt != nil })

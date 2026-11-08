@@ -58,7 +58,17 @@ struct CognitiveView: View {
         }
         .foregroundStyle(Color.kilnText)
         .background(Color.kilnBg)
-        .sheet(isPresented: $showConnection) { CognitiveConnectionView() }
+        .sheet(isPresented: $showConnection) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Memory connections").font(.headline)
+                    Spacer()
+                    Button("Done") { showConnection = false }.keyboardShortcut(.cancelAction)
+                }.padding(16)
+                Divider()
+                CognitiveConnectionView()
+            }.onExitCommand { showConnection = false }
+        }
         .task(id: (store.activeSession?.id ?? "") + (store.activeSession?.workDir ?? "")) {
             if let session = store.activeSession { await cognition.select(project: session.workDir, session: session.id) }
         }

@@ -1,6 +1,20 @@
-const token = new URLSearchParams(location.search).get('t') || '';
-const qt = token ? ('?t=' + encodeURIComponent(token)) : '';
+const search = new URLSearchParams(location.search);
+if (search.has('t')) search.delete('t');
+const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+const fromHash = hash.get('t') || '';
+if (fromHash) sessionStorage.setItem('kiln.remoteToken', fromHash);
+const token = fromHash || sessionStorage.getItem('kiln.remoteToken') || '';
+if (fromHash || location.search.includes('t=')) {
+  const next = location.pathname + (search.toString() ? '?' + search.toString() : '');
+  history.replaceState(null, '', next);
+}
 const authHeaders = token ? { 'Authorization': 'Bearer ' + token } : {};
+
+function authedDestination(path,allowed){
+ const url=new URL(path,location.href);
+ if(url.origin!==location.origin||url.username||url.password||!allowed.includes(url.pathname))throw Error('Invalid authenticated destination');
+ return url;
+}
 
 async function api(path,opts={}) {
  const url=new URL(path,location.href);
@@ -148,7 +162,7 @@ function renderSessions() {
           if (e.target.classList.contains('si-delete')) return;
           await api('/api/select', { method: 'POST', body: JSON.stringify({ sessionId: s.id }) });
           await refreshAll();
-          if (window.innerWidth <= 900) document.querySelector('.layout').classList.remove('show-sidebar');
+          if (window.innerWidth <= 900 && document.querySelector('.layout').classList.contains('show-sidebar')) closeDrawers();
         });
         it.addEventListener('dblclick', (e) => {
           if (e.target.classList.contains('si-delete')) return;
@@ -214,19 +228,55 @@ function renderMedia(media){
  const local=!url;
  if(local){
   if(!state.activeId||!media.id)return '';
-  url='/api/media?session='+encodeURIComponent(state.activeId)+'&id='+encodeURIComponent(media.id)+(token?'&t='+encodeURIComponent(token):'');
+  url='/api/media?session='+encodeURIComponent(state.activeId)+'&id='+encodeURIComponent(media.id);
  }
  const id=escHTML(media.id),label=escHTML(media.label||media.kind),src=escHTML(url);
  const download=escHTML(local?url+'&download=1':url);
  let body='';
- if(media.kind==='image')body=`<img class="media-image" src="${src}" alt="${label}" loading="lazy" referrerpolicy="no-referrer">`;
+ if(local){
+  const attr=' data-authed="'+src+'"';
+  if(media.kind==='image')body=`<img class="media-image" alt="${label}" referrerpolicy="no-referrer"${attr}>`;
+  else if(media.kind==='video')body=`<video controls playsinline preload="none" aria-label="${label}"${attr}></video>`;
+  else if(media.kind==='audio')body=`<audio controls preload="none" aria-label="${label}"${attr}></audio>`;
+  else body=`<iframe class="media-document" title="${label}" sandbox${attr}></iframe>`;
+ }else if(media.kind==='image')body=`<img class="media-image" src="${src}" alt="${label}" loading="lazy" referrerpolicy="no-referrer">`;
  else if(media.kind==='video')body=`<video controls playsinline preload="none" aria-label="${label}" src="${src}"></video>`;
  else if(media.kind==='audio')body=`<audio controls preload="none" aria-label="${label}" src="${src}"></audio>`;
  else if(media.kind==='document')body=`<iframe class="media-document" src="${src}" title="${label}" loading="lazy" sandbox></iframe>`;
- return `<figure class="inline-media ${escHTML(media.kind)}" data-media="${id}">${body}<figcaption><span>${label}</span><span class="media-error" hidden>Preview unavailable</span><a href="${src}" target="_blank" rel="noopener noreferrer" title="Open media" aria-label="Open media">${icon('external-link')}</a><a href="${download}" ${local?'download':''} target="_blank" rel="noopener noreferrer" title="Download media" aria-label="Download media">${icon('download')}</a></figcaption></figure>`;
+ const open=local?`<a href="#" data-authed-open="${src}" title="Open media" aria-label="Open media">${icon('external-link')}</a>`:`<a href="${src}" target="_blank" rel="noopener noreferrer" title="Open media" aria-label="Open media">${icon('external-link')}</a>`;
+ const save=local?`<a href="#" data-authed-download="${download}" title="Download media" aria-label="Download media">${icon('download')}</a>`:`<a href="${download}" download target="_blank" rel="noopener noreferrer" title="Download media" aria-label="Download media">${icon('download')}</a>`;
+ return `<figure class="inline-media ${escHTML(media.kind)}" data-media="${id}">${body}<figcaption><span>${label}</span><span class="media-error" hidden>Preview unavailable</span>${open}${save}</figcaption></figure>`;
+}
+
+async function downloadAuthed(path, fallbackName){
+  const url=authedDestination(path,['/api/media','/api/export','/api/export-json','/api/settings/export']);
+  const res=await fetch(url,{headers:authHeaders,redirect:'error'});
+  if(!res.ok)throw Error('download failed');
+  const blob=await res.blob();
+  const match=(res.headers.get('content-disposition')||'').match(/filename="?([^";]+)/);
+  const blobURL=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=blobURL;link.download=match?match[1]:fallbackName;link.click();
+  setTimeout(()=>URL.revokeObjectURL(blobURL),60_000);
 }
 
 function hydrateMedia(root=document){
+  root.querySelectorAll('[data-authed]').forEach(el=>{
+    if(el.dataset.authedWired)return;el.dataset.authedWired='true';
+    let url;try{url=authedDestination(el.dataset.authed,['/api/media']);}catch{return;}
+    fetch(url,{headers:authHeaders,redirect:'error'}).then(async res=>{
+      if(!res.ok)throw Error('media');
+      el.src=URL.createObjectURL(await res.blob());
+    }).catch(()=>{const err=el.closest('figure')?.querySelector('.media-error');if(err)err.hidden=false;});
+  });
+  root.querySelectorAll('[data-authed-open],[data-authed-download]').forEach(a=>{
+    if(a.dataset.authedWired)return;a.dataset.authedWired='true';
+    a.addEventListener('click',async(e)=>{
+      e.preventDefault();
+      try{await downloadAuthed(a.dataset.authedDownload||a.dataset.authedOpen,'media');}
+      catch{flash('Could not open media');}
+    });
+  });
  root.querySelectorAll('a[href]').forEach(a=>{const fixed=fixupXURL(a.href);if(fixed)a.href=fixed;});
  hydrateRichLinks(root);
  root.querySelectorAll('.inline-media img,.inline-media video,.inline-media audio').forEach(el=>{
@@ -577,7 +627,7 @@ function reconcileChildren(parent,incoming){
 }
 
 function renderBlock(block, key='') {
- if(block.type==='text') return '<div class="block-text">'+DOMPurify.sanitize(marked.parse(block.text||''),{USE_PROFILES:{html:true},FORBID_TAGS:['img','form','input','button','style','video','audio','iframe'],FORBID_ATTR:['style','id','name']})+'</div>'+(block.media||[]).map(renderMedia).join('');
+ if(block.type==='text') return '<div class="block-text">'+DOMPurify.sanitize(marked.parse(block.text||''),{USE_PROFILES:{html:true},ALLOW_DATA_ATTR:false,FORBID_TAGS:['img','form','input','button','style','video','audio','iframe'],FORBID_ATTR:['style','id','name','class']})+'</div>'+(block.media||[]).map(renderMedia).join('');
  if(block.type==='thinking') return reasoningRow(block.text||'',key,false).outerHTML;
  if(block.type==='trace')return traceRow(block.entries||[],key).outerHTML;
  if(block.type==='toolUse')return toolCall(block.tool,false,key).outerHTML;
@@ -638,7 +688,7 @@ function renderMessages() {
  }
  while(box.children.length>incoming.length)box.lastElementChild.remove();
  messageSignature=signature;renderedSession=state.activeId;
- box.querySelectorAll('.copy-message').forEach(b=>b.onclick=async()=>{const m=state.messages.find(m=>m.id===b.dataset.copy);try{await navigator.clipboard.writeText((m?.blocks||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n\n'));flash('Copied');}catch{flash('Clipboard unavailable');}});
+ box.querySelectorAll('.copy-message').forEach(b=>b.onclick=async()=>{const m=state.messages.find(m=>m.id===b.dataset.copy);await copyWithFeedback((m?.blocks||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n\n'));});
  hydrateIcons();hydrateMedia(box);
  if(changedSession||(followsOutput&&atBottom))box.scrollTop=box.scrollHeight;
  else if(anchor?.isConnected)box.scrollTop=scrollTop+anchor.getBoundingClientRect().top-anchorOffset;
@@ -694,6 +744,11 @@ function renderAttachments() {
 }
 
 function renderRightPanel() {
+  document.querySelectorAll('.right-tab').forEach(button=>{
+    const selected=button.dataset.tab===state.rightTab;
+    button.classList.toggle('active',selected);button.setAttribute('aria-selected',selected);
+  });
+  syncPanelControls();
   const box = document.getElementById('rightBody');
   if (state.rightTab === 'activity') {
     const calls = state.live.activeToolCalls || [];
@@ -853,23 +908,20 @@ async function handleSessionAction(act, s, data) {
         break;
       case 'copy-continuation': {
         const r = await api('/api/session/continuation?session=' + encodeURIComponent(id));
-        await copyToClipboard(r.text || '');
-        flash('Continuation prompt copied');
+        await copyWithFeedback(r.text || '', 'Continuation prompt copied');
         return;
       }
       case 'copy-path':
-        await copyToClipboard(s.workDir || '');
-        flash('Path copied');
+        await copyWithFeedback(s.workDir || '', 'Path copied');
         return;
       case 'copy-id':
-        await copyToClipboard(s.id);
-        flash('Session ID copied');
+        await copyWithFeedback(s.id, 'Session ID copied');
         return;
       case 'export':
-        window.location.href = '/api/export?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
+        downloadAuthed('/api/export?session=' + encodeURIComponent(id), 'chat.md');
         return;
       case 'export-json':
-        window.location.href = '/api/export-json?session=' + encodeURIComponent(id) + (token ? '&t=' + encodeURIComponent(token) : '');
+        downloadAuthed('/api/export-json?session=' + encodeURIComponent(id), 'session.json');
         return;
       case 'new-here':
         await api('/api/session/new-here', { sessionId: id });
@@ -898,6 +950,10 @@ async function copyToClipboard(text) {
     focused?.focus({preventScroll:true});
     return copied;
   }
+}
+
+async function copyWithFeedback(text, success='Copied') {
+  flash(await copyToClipboard(text) ? success : 'Clipboard unavailable');
 }
 
 let flashTimer = null;
@@ -956,6 +1012,7 @@ async function refreshAll() {
   applyServerAppearance(state.settings);
   document.getElementById('connectionState').textContent='Connected';
   render();
+  updateToolShelf?.();
   if(previous!==state.activeId)document.getElementById('messages').scrollTop=document.getElementById('messages').scrollHeight;
  }catch(e){
   document.getElementById('connectionState').textContent='Disconnected';
@@ -1003,18 +1060,31 @@ document.getElementById('composerInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && (state.settings.sendKey !== 'cmdEnter' || e.metaKey || e.ctrlKey)) { e.preventDefault(); sendMessage(); }
 });
 document.getElementById('sendBtn').onclick = sendMessage;
-document.getElementById('stopBtn').onclick = () => api('/api/interrupt', { method: 'POST' });
+document.getElementById('stopBtn').onclick = async () => {
+  const sessionId=state.activeId;
+  if(!sessionId)return;
+  try { await api('/api/interrupt',{method:'POST',body:JSON.stringify({sessionId})}); }
+  catch(error){flash(error.message);}
+};
 document.getElementById('attachBtn').onclick = () => document.getElementById('fileInput').click();
 document.getElementById('fileInput').addEventListener('change', (e) => handleFiles(e.target.files));
-document.getElementById('retryBtn').onclick = () => api('/api/retry', { method: 'POST' });
+document.getElementById('retryBtn').onclick = async () => {
+  const sessionId=state.activeId;
+  if(!sessionId)return;
+  try { await api('/api/retry',{method:'POST',body:JSON.stringify({sessionId})}); }
+  catch(error){flash(error.message);}
+};
 document.getElementById('exportBtn').onclick = () => {
   if (!state.activeId) return;
-  window.location.href = '/api/export?session=' + encodeURIComponent(state.activeId) + (token ? '&t=' + encodeURIComponent(token) : '');
+  downloadAuthed('/api/export?session=' + encodeURIComponent(state.activeId), 'chat.md');
 };
 
 document.querySelectorAll('.sidebar-tab').forEach(b => b.onclick = () => {
   state.sidebarKind = b.dataset.kind;
-  document.querySelectorAll('.sidebar-tab').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('.sidebar-tab').forEach(x => {
+    const selected=x.dataset.kind===state.sidebarKind;
+    x.classList.toggle('active',selected);x.setAttribute('aria-selected',selected);
+  });
   renderSessions();
   renderArchiveBar();
 });
@@ -1022,11 +1092,7 @@ document.getElementById('sessionSearch').addEventListener('input', (e) => {
   state.search = e.target.value;
   renderSessions();
 });
-document.querySelectorAll('.right-tab').forEach(b => b.onclick = () => {
-  state.rightTab = b.dataset.tab;
-  document.querySelectorAll('.right-tab').forEach(x => x.classList.toggle('active', x === b));
-  renderRightPanel();
-});
+document.querySelectorAll('.right-tab').forEach(b => b.onclick = () => openWorkspacePanel(b.dataset.tab));
 
 // Drag-drop
 const main = document.getElementById('main');
@@ -1085,7 +1151,7 @@ function openModels(){
  const renderList=()=>{
   const query=document.getElementById('modelSearch').value.toLowerCase();
   const box=document.getElementById('modelList');box.innerHTML='';
-  for(const [group,label] of [['codex','Codex'],['older','Older models'],['opencode','OpenCode']]){
+  for(const [group,label] of [['codex','Codex'],['older','Older models'],['opencode','OpenCode'],['grok','Grok']]){
    const models=state.models.filter(m=>(group==='older'?m.older:m.provider===group&&!m.older)&&(m.id+' '+m.label).toLowerCase().includes(query));
    if(!models.length)continue;
    box.insertAdjacentHTML('beforeend','<div class="model-group">'+label+'</div>');
@@ -1119,7 +1185,8 @@ async function openSettings(){
     document.getElementById('autoCompact').onchange=async(e)=>{const el=e.target,enabled=el.checked;el.disabled=true;try{const result=await api('/api/settings/chat',{method:'POST',body:JSON.stringify({autoCompactEnabled:enabled})});settings.autoCompactEnabled=result.autoCompactEnabled;el.checked=result.autoCompactEnabled;}catch(e){el.checked=!enabled;flash(e.message);}finally{el.disabled=false;}};
    }else{
     const remote=state.remote;
-    box.innerHTML=`<div class="setting-row"><span>Access</span><span>${escHTML(remote.accessLevel)}</span></div><div class="setting-row"><span>Port</span><span>${escHTML(remote.port)}</span></div><div class="setting-row"><span>Tailscale</span><span>${escHTML(remote.tailscale?.status||'Unavailable')}</span></div><div class="row"><a class="btn" href="/api/settings/export${qt}" download>Export settings</a><button class="btn" onclick="pickFileAndUpload('/api/settings/import','Settings imported')">Import settings</button><button class="btn" onclick="pickFileAndUpload('/api/session/import','Session imported',true)">Import session</button></div>`;
+    box.innerHTML=`<div class="setting-row"><span>Access</span><span>${escHTML(remote.accessLevel)}</span></div><div class="setting-row"><span>Port</span><span>${escHTML(remote.port)}</span></div><div class="setting-row"><span>Tailscale</span><span>${escHTML(remote.tailscale?.status||'Unavailable')}</span></div><div class="row"><button class="btn" id="exportSettingsBtn">Export settings</button><button class="btn" onclick="pickFileAndUpload('/api/settings/import','Settings imported')">Import settings</button><button class="btn" onclick="pickFileAndUpload('/api/session/import','Session imported',true)">Import session</button></div>`;
+     document.getElementById('exportSettingsBtn').onclick=()=>downloadAuthed('/api/settings/export','kiln-settings.json').catch(e=>flash(e.message));
    }
   };
   modal.querySelectorAll('[data-settings-tab]').forEach(b=>b.onclick=()=>select(b.dataset.settingsTab));
@@ -1139,10 +1206,10 @@ window.pickFileAndUpload = function(url, okMsg, refreshAfter) {
     if (!f) return;
     try {
       const text = await f.text();
-      const tq = token ? ('?t=' + encodeURIComponent(token)) : '';
-      const res = await fetch(url + tq, {
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        redirect: 'error',
         body: text,
       });
       const j = await res.json().catch(() => ({}));
@@ -1156,13 +1223,72 @@ window.pickFileAndUpload = function(url, okMsg, refreshAfter) {
   };
   inp.click();
 };
-function closeModal() { document.getElementById('modalBg').classList.remove('show'); modalOpener?.focus(); }
+let updateToolShelf=null;
+function closeModal() { updateToolShelf=null; document.getElementById('modalBg').classList.remove('show'); modalOpener?.focus(); }
 document.getElementById('modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
 window.closeModal = closeModal;
 
 function icon(name){return `<i data-lucide="${name}"></i>`;}
 
-function brandIcon(brand){return brand==='terminal'?icon('terminal'):'<img class="model-logo" src="__OPENAI_LOGO__" alt="">';}
+function openToolShelf(){
+ const modal=document.getElementById('modalContent');
+ modal.innerHTML='<div class="tool-shelf-heading"><h2><span class="tool-title-mark">'+icon('wrench')+'</span>Tools</h2><button class="icon-button" id="closeToolShelf" aria-label="Close tools" title="Close tools">'+icon('x')+'</button></div><div class="tool-shortcuts" id="toolShortcuts"></div><div class="tool-shelf-filter"><input id="toolCallSearch" type="search" placeholder="Filter calls by tool, file, or status" aria-label="Filter tool calls"><label><input type="checkbox" id="failedCallsOnly"> Failed only</label></div><div id="toolShelfCalls" class="tool-shelf-calls"></div><p class="tool-shelf-native">Computer access and input approvals remain native-only.</p>';
+ const shortcuts=document.getElementById('toolShortcuts');
+ for(const [label,glyph,action] of [['Models','cpu',()=>openModels()],['Find','search',()=>document.getElementById('findBtn').click()],['Export','download',()=>document.getElementById('exportBtn').click()],['Activity','activity',()=>openWorkspacePanel('activity')]]){
+  const button=timelineNode('button','tool-shortcut');button.append(timelineIcon(glyph),timelineNode('span','',label));button.onclick=()=>{closeModal();action();};shortcuts.append(button);
+ }
+ const search=document.getElementById('toolCallSearch'),failures=document.getElementById('failedCallsOnly');let signature='';
+ updateToolShelf=()=>{
+  if(!document.getElementById('toolShelfCalls')){updateToolShelf=null;return;}
+  const activeIDs=new Set((state.live.activeToolCalls||[]).map(tool=>tool.id));
+  const calls=[...(state.live.activeToolCalls||[])].slice(-400).reverse().map(tool=>({tool,live:!!state.live.isBusy,id:'live:'+tool.id}));
+  outer:for(const message of state.messages.slice(-200).reverse())for(const block of [...(message.blocks||[])].reverse()){
+   if(calls.length>=400)break outer;if(block.type==='toolUse'&&block.tool&&!activeIDs.has(block.tool.id))calls.push({tool:block.tool,live:false,id:message.id+':'+block.tool.id});
+  }
+  const next=JSON.stringify([calls.map(({tool,live,id})=>[id,tool.name,tool.isError,tool.completedAt,String(tool.input||'').slice(0,4000),String(tool.result||'').slice(0,outputPageSize),live]),search.value,failures.checked]);if(signature===next)return;signature=next;
+  const list=document.getElementById('toolShelfCalls'),open=new Set([...list.querySelectorAll('details[open]')].map(node=>node.dataset.call));list.replaceChildren();
+  const words=search.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  for(const {tool,live,id} of calls){
+   const status=toolStatus(tool,live),haystack=[tool.name,toolSummary(tool),String(tool.result||'').slice(0,4000),toolLabels[status]].join(' ').toLowerCase();
+   if(failures.checked&&status!=='failure'||!words.every(word=>haystack.includes(word)))continue;
+   const row=timelineNode('details','tool-shelf-call');row.dataset.call=id;row.open=open.has(row.dataset.call);
+   const heading=timelineNode('summary');heading.append(timelineIcon(toolIcon(tool.name)),timelineNode('span','',tool.name||'Tool'),timelineNode('small','tool-call-status',toolLabels[status]));row.append(heading);
+   if(toolSummary(tool))row.append(timelineNode('p','tool-summary',toolSummary(tool)));
+   row.append(timelineNode('pre','',String(tool.input||'').slice(0,4000)));
+   if(tool.result!=null)row.append(timelineNode('pre','',String(tool.result).slice(0,outputPageSize)));
+   row.append(timelineButton('Copy tool output','copy',()=>copyWithFeedback(String(tool.result??tool.input??''))));list.append(row);
+  }
+  if(!list.children.length)list.append(timelineNode('div','empty','No matching tool calls'));hydrateIcons();
+ };
+ search.oninput=()=>updateToolShelf?.();failures.onchange=()=>updateToolShelf?.();document.getElementById('closeToolShelf').onclick=closeModal;
+ updateToolShelf();showModal();search.focus();
+}
+document.getElementById('toolShelfBtn').onclick=openToolShelf;
+document.getElementById('railToolShelf').onclick=openToolShelf;
+document.getElementById('railSettings').onclick=()=>document.getElementById('settingsBtn').click();
+function openWorkspacePanel(tab,opener=null){
+ state.rightTab=tab;renderRightPanel();const layout=document.querySelector('.layout');
+ if(innerWidth<=1100){
+  const source=opener||(layout.classList.contains('show-right')?drawerOpener:document.activeElement);
+  toggleDrawer('show-right',source,true);
+ }else layout.classList.remove('tools-hidden');
+ syncPanelControls();
+}
+function syncPanelControls(){
+ const layout=document.querySelector('.layout');
+ const visible=innerWidth<=1100?layout.classList.contains('show-right'):!layout.classList.contains('tools-hidden');
+ for(const [id,tab] of [['railActivity','activity'],['railUsage','stats']])document.getElementById(id).setAttribute('aria-pressed',visible&&state.rightTab===tab);
+ document.getElementById('toggleTools').setAttribute('aria-pressed',visible);
+ document.getElementById('mobileTools').setAttribute('aria-pressed',visible);
+}
+for(const [id,tab] of [['railActivity','activity'],['railUsage','stats']])document.getElementById(id).onclick=e=>openWorkspacePanel(tab,e.currentTarget);
+let brandTaps=0,brandTapTime=0;
+for(const mark of document.querySelectorAll('.brand-mark,.topbar .logo'))mark.addEventListener('click',()=>{
+ const now=Date.now();brandTaps=now-brandTapTime>=0&&now-brandTapTime<3000?brandTaps+1:1;brandTapTime=now;
+ if(brandTaps===7){brandTaps=0;flash('theo is a larper');}
+});
+
+function brandIcon(brand){if(brand==='terminal')return icon('terminal');if(brand==='grok')return '<span class="model-wordmark" aria-hidden="true">xAI</span>';return '<img class="model-logo" src="__OPENAI_LOGO__" alt="">';}
 
 function hydrateIcons(){lucide.createIcons({attrs:{'aria-hidden':'true'}});}
 
@@ -1215,21 +1341,37 @@ function findInConversation(advance=false){
 }
 
 
-let refreshing=false, sending=false, uploading=0, followsOutput=true, messageSignature='', modalOpener=null, findIndex=0;
+let refreshing=false, sending=false, uploading=0, followsOutput=true, messageSignature='', modalOpener=null, drawerOpener=null, findIndex=0;
 let drafts={};
 try { drafts=JSON.parse(localStorage.getItem('kiln.remote.drafts.v1')||'{}'); if(!drafts||Array.isArray(drafts)||typeof drafts!=='object')drafts={}; } catch { drafts={}; }
 document.getElementById('composerInput').addEventListener('input',()=>{saveDraft();updateSendState();});
 document.getElementById('chatHdrModel').onclick=openModels;
 const composerOptions=timelineNode('div','composer-options');
 const composerBar=document.getElementById('composerBar');
-composerBar.before(composerOptions);
+document.querySelector('.composer-row').append(composerOptions);
 composerOptions.append(document.getElementById('chatHdrModel'),composerBar);
 document.getElementById('clearDraft').onclick=()=>{document.getElementById('composerInput').value='';state.attachments=[];saveDraft();renderAttachments();updateSendState();};
 document.getElementById('expandComposer').onclick=e=>{const expanded=document.querySelector('.composer').classList.toggle('expanded');e.currentTarget.setAttribute('aria-pressed',expanded);};
-document.getElementById('toggleTools').onclick=()=>{const layout=document.querySelector('.layout');if(innerWidth<=1100)layout.classList.toggle('show-right');else layout.classList.toggle('tools-hidden');};
-document.getElementById('mobileSessions').onclick=()=>{document.querySelector('.layout').classList.toggle('show-sidebar');document.querySelector('.layout').classList.remove('show-right');};
-document.getElementById('mobileTools').onclick=()=>{document.querySelector('.layout').classList.toggle('show-right');document.querySelector('.layout').classList.remove('show-sidebar');};
-document.getElementById('panelScrim').onclick=()=>document.querySelector('.layout').classList.remove('show-sidebar','show-right');
+function toggleDrawer(name, opener, opening=!document.querySelector('.layout').classList.contains(name)) {
+ const layout=document.querySelector('.layout');
+ layout.classList.remove('show-sidebar','show-right');
+ layout.classList.toggle(name,opening);drawerOpener=opening?opener:null;syncPanelControls();
+}
+function closeDrawers() {
+ const layout=document.querySelector('.layout');
+ const hadDrawer=layout.classList.contains('show-sidebar')||layout.classList.contains('show-right');
+ layout.classList.remove('show-sidebar','show-right');syncPanelControls();
+ if(hadDrawer){
+  const visible=el=>el?.isConnected&&el.getClientRects().length&&!el.disabled;
+  const opener=visible(drawerOpener)?drawerOpener:['toggleTools','mobileSessions','mobileTools','composerInput'].map(id=>document.getElementById(id)).find(visible);
+  opener?.focus({preventScroll:true});
+ }
+ drawerOpener=null;
+}
+document.getElementById('toggleTools').onclick=e=>{if(innerWidth<=1100)toggleDrawer('show-right',e.currentTarget);else{document.querySelector('.layout').classList.toggle('tools-hidden');syncPanelControls();}};
+document.getElementById('mobileSessions').onclick=e=>toggleDrawer('show-sidebar',e.currentTarget);
+document.getElementById('mobileTools').onclick=e=>toggleDrawer('show-right',e.currentTarget);
+document.getElementById('panelScrim').onclick=closeDrawers;
 document.getElementById('followBtn').onclick=()=>{followsOutput=!followsOutput;document.getElementById('followBtn').setAttribute('aria-pressed',followsOutput);if(followsOutput){const box=document.getElementById('messages');box.scrollTop=box.scrollHeight;}};
 document.getElementById('messages').addEventListener('scroll',()=>{const box=document.getElementById('messages');if(box.scrollHeight-box.scrollTop-box.clientHeight>=80)pauseFollowing();},{passive:true});
 document.getElementById('findBtn').onclick=()=>{document.getElementById('findBar').hidden=false;document.getElementById('findInput').focus();};
@@ -1237,7 +1379,10 @@ document.getElementById('findInput').oninput=()=>findInConversation();
 document.getElementById('findNext').onclick=()=>findInConversation(true);
 document.getElementById('findClose').onclick=()=>{document.getElementById('findBar').hidden=true;document.querySelectorAll('.search-match').forEach(r=>r.classList.remove('search-match'));};
 document.addEventListener('keydown',e=>{
- if(e.key==='Escape'){closeModal();document.querySelector('.layout').classList.remove('show-sidebar','show-right');}
+ if(e.key==='Escape'){
+  if(document.getElementById('modalBg').classList.contains('show')){e.preventDefault();closeModal();return;}
+  closeDrawers();
+ }
  if(e.key==='Tab'&&document.getElementById('modalBg').classList.contains('show')){
   const items=[...document.querySelectorAll('#modalContent button:not(:disabled),#modalContent input:not(:disabled),#modalContent select:not(:disabled),#modalContent a[href]')].filter(el=>el.getClientRects().length);
   const first=items[0],last=items.at(-1);
@@ -1246,6 +1391,7 @@ document.addEventListener('keydown',e=>{
  }
 });
 window.addEventListener('beforeunload',saveDraft);
+window.addEventListener('resize',syncPanelControls);
 window.addEventListener('unhandledrejection',e=>{showSendError(e.reason?.message||'Request failed');e.preventDefault();});
 hydrateIcons();
 

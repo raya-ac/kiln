@@ -9,7 +9,7 @@ struct CLIVersion: Comparable, Sendable {
 
     init?(_ value: String) {
         let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pattern = #"^(?:codex-cli |opencode |rust-v|v)?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$"#
+        let pattern = #"^(?:codex-cli |opencode )?(?:rust-v|v)?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let range = Range(match.range(at: 1), in: text) else { return nil }

@@ -54,6 +54,11 @@ struct CommandPaletteView: View {
             case .action(let a): return a.shortcut
             }
         }
+
+        var isEnabled: Bool {
+            if case .action(let action) = self { return action.isEnabled }
+            return true
+        }
     }
 
     struct PaletteAction: Identifiable, Hashable {
@@ -62,6 +67,7 @@ struct CommandPaletteView: View {
         let subtitle: String
         let icon: String
         let shortcut: String?
+        var isEnabled = true
         let perform: @MainActor () -> Void
 
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
@@ -71,7 +77,25 @@ struct CommandPaletteView: View {
     // MARK: - Data source
 
     private var actions: [PaletteAction] {
-        [
+        (store.activeSession?.kind == .code ? RightTab.allCases : []).map { panel in
+            PaletteAction(id: "panel-" + panel.rawValue, title: panel.label, subtitle: "Open workspace panel", icon: panel.icon, shortcut: nil) {
+                store.showCommandPalette = false; store.openWorkspacePanel(panel)
+            }
+        } + [
+            PaletteAction(id: "tools", title: "Tools", subtitle: "Workspace panels and recent tool calls", icon: "wrench.and.screwdriver", shortcut: "⌘⌥T") {
+                store.showCommandPalette = false; store.openTools()
+            },
+            PaletteAction(id: "computer", title: "Computer use", subtitle: "Selected window and per-action approvals", icon: "desktopcomputer", shortcut: nil) {
+                store.showCommandPalette = false; store.openTools(.computer)
+            },
+            PaletteAction(id: "tool-calls", title: "Recent tool calls", subtitle: "Search input, output, and failures", icon: "list.bullet.rectangle", shortcut: nil) {
+                store.showCommandPalette = false; store.openTools(.calls)
+            },
+            PaletteAction(id: "compact", title: "Compact context", subtitle: "Compact the current conversation context", icon: "arrow.triangle.2.circlepath", shortcut: nil,
+                          isEnabled: Self.canCompact(store.activeSession, busy: store.isBusy)) {
+                store.showCommandPalette = false
+                Task { await store.compactSession() }
+            },
             PaletteAction(id: "new-code", title: "New Code Session", subtitle: "Start a new code session", icon: "plus.square", shortcut: "⌘N") {
                 store.showNewSessionSheet = true
                 store.showCommandPalette = false
@@ -147,7 +171,6 @@ struct CommandPaletteView: View {
                     .foregroundStyle(Color.kilnText)
                     .focused($focused)
                     .onSubmit { activate(items[safe: selectedIndex]) }
-                    .onChange(of: query) { _, _ in selectedIndex = 0 }
                 if !query.isEmpty {
                     Button { query = "" } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -174,9 +197,13 @@ struct CommandPaletteView: View {
                                 .padding(.vertical, 40)
                         } else {
                             ForEach(Array(list.enumerated()), id: \.element.id) { idx, item in
-                                paletteRow(item: item, selected: idx == selectedIndex)
-                                    .id(idx)
-                                    .onTapGesture { activate(item) }
+                                Button { activate(item) } label: {
+                                    paletteRow(item: item, selected: idx == selectedIndex)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!item.isEnabled)
+                                .accessibilityIdentifier("palette." + item.id)
+                                .id(item.id)
                             }
                         }
                     }
@@ -185,8 +212,12 @@ struct CommandPaletteView: View {
                 .frame(maxHeight: 360)
                 .onChange(of: selectedIndex) { _, new in
                     withAnimation(.linear(duration: 0.08)) {
-                        proxy.scrollTo(new, anchor: .center)
+                        if let item = items[safe: new] { proxy.scrollTo(item.id, anchor: .center) }
                     }
+                }
+                .onChange(of: query) { _, _ in
+                    selectedIndex = 0
+                    if let item = items.first { proxy.scrollTo(item.id, anchor: .top) }
                 }
             }
 
@@ -210,6 +241,7 @@ struct CommandPaletteView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.kilnBorder, lineWidth: 1))
         .shadow(color: Color.black.opacity(0.5), radius: 30, y: 10)
         .onAppear { focused = true }
+        .onExitCommand { store.showCommandPalette = false }
         .onKeyPress(.upArrow) {
             if selectedIndex > 0 { selectedIndex -= 1 }
             return .handled
@@ -282,7 +314,7 @@ struct CommandPaletteView: View {
     }
 
     private func activate(_ item: PaletteItem?) {
-        guard let item = item else { return }
+        guard let item = item, item.isEnabled else { return }
         switch item {
         case .session(let s):
             store.activeSessionId = s.id
@@ -291,6 +323,11 @@ struct CommandPaletteView: View {
         case .action(let a):
             a.perform()
         }
+    }
+
+    static func canCompact(_ session: Session?, busy: Bool) -> Bool {
+        guard let session else { return false }
+        return !busy && !session.readOnly && !session.messages.isEmpty && session.model.provider != .grok
     }
 
     // Simple fuzzy match: every char of the needle appears in order in the haystack.

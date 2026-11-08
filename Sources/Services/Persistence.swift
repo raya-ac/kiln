@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Persists sessions and settings to ~/.kiln/
 enum Persistence {
@@ -66,8 +67,15 @@ enum Persistence {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let file = directory.appendingPathComponent(session.id + ".json")
         let json = try JSONEncoder().encode(SessionData(from: session))
-        try json.write(to: file, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let temporary = directory.appendingPathComponent("." + UUID().uuidString + ".tmp")
+        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close(); try? FileManager.default.removeItem(at: temporary) }
+        try handle.write(contentsOf: json)
+        try handle.synchronize()
+        try handle.close()
+        guard rename(temporary.path, file.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     static func deleteSession(_ id: String) {
@@ -121,6 +129,7 @@ struct SessionData: Codable {
     var isArchived: Bool = false
     var sessionInstructions: String = ""
     var wasInterrupted: Bool = false
+    var needsBackendReset: Bool = false
     var openAIFastMode: Bool = false
     var composerPreferences: ComposerPreferences?
     var tags: [String] = []
@@ -147,6 +156,7 @@ struct SessionData: Codable {
         isArchived = (try? c.decode(Bool.self, forKey: .isArchived)) ?? false
         sessionInstructions = (try? c.decode(String.self, forKey: .sessionInstructions)) ?? ""
         wasInterrupted = (try? c.decode(Bool.self, forKey: .wasInterrupted)) ?? false
+        needsBackendReset = (try? c.decode(Bool.self, forKey: .needsBackendReset)) ?? false
         openAIFastMode = (try? c.decode(Bool.self, forKey: .openAIFastMode)) ?? false
         composerPreferences = try c.decodeIfPresent(ComposerPreferences.self, forKey: .composerPreferences)
         tags = (try? c.decode([String].self, forKey: .tags)) ?? []
@@ -170,6 +180,7 @@ struct SessionData: Codable {
         self.isArchived = session.isArchived
         self.sessionInstructions = session.sessionInstructions
         self.wasInterrupted = session.wasInterrupted
+        self.needsBackendReset = session.needsBackendReset
         self.composerPreferences = session.composerPreferences
         self.openAIFastMode = session.openAIFastMode
         self.tags = session.tags
@@ -201,6 +212,7 @@ struct SessionData: Codable {
             createdAt: Date(timeIntervalSince1970: createdAt)
         )
         s.wasInterrupted = wasInterrupted
+        s.needsBackendReset = needsBackendReset
         s.messages = messages.map { $0.toChatMessage() }
         return s
     }

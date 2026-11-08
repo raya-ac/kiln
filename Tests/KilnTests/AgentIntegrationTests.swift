@@ -1,7 +1,148 @@
 import XCTest
+import Darwin
 @testable import Kiln
 
 final class AgentIntegrationTests: XCTestCase {
+    @MainActor func testStopDuringFailedVersionDiscoveryIsStillCancellation() async {
+        var resume: CheckedContinuation<Int, Error>?
+        let service = AgentService(backend: .opencode, executablePath: "/usr/bin/false", openCodeVersion: {
+            try await withCheckedThrowingContinuation { resume = $0 }
+        })
+        let id = UUID().uuidString
+        var cancelled = false, failed = false, started = false
+        let task = Task {
+            await service.sendMessage(sessionId: id, message: "fixture", model: AgentModel(rawValue: "opencode:openai/gpt-5.5")!, workDir: NSTemporaryDirectory()) {
+                switch $0 {
+                case .cancelled: cancelled = true
+                case .error: failed = true
+                case .started: started = true
+                default: break
+                }
+            }
+        }
+        while resume == nil { await Task.yield() }
+        service.interrupt(sessionId: id)
+        resume?.resume(throwing: CocoaError(.fileReadUnknown))
+        await task.value
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(failed)
+        XCTAssertFalse(started)
+    }
+
+    @MainActor
+    func testStopDuringVersionDiscoveryDoesNotLaunchOrCompleteSuccessfully() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let script = directory.appendingPathComponent("fixture")
+        try "#!/bin/sh\ntouch launched\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        var resume: CheckedContinuation<Int, Error>?
+        let service = AgentService(backend: .opencode, executablePath: script.path, openCodeVersion: {
+            try await withCheckedThrowingContinuation { resume = $0 }
+        })
+        let id = UUID().uuidString
+        var runtime = SessionRuntimeState()
+        var successHooks = 0
+        var completions = 0
+        let task = Task { @MainActor in
+            await service.sendMessage(sessionId: id, message: "test", model: AgentModel(rawValue: "opencode:openai/gpt-5.5")!, workDir: directory.path) {
+                switch $0 {
+                case .cancelled: runtime.wasCancelled = true
+                case .error(let error): runtime.lastError = error
+                case .done:
+                    completions += 1
+                    if runtime.completedSuccessfully { successHooks += 1 }
+                default: break
+                }
+            }
+        }
+        while resume == nil { await Task.yield() }
+        service.interrupt(sessionId: id)
+        resume?.resume(returning: 2)
+        await task.value
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(successHooks, 0)
+        XCTAssertTrue(runtime.wasCancelled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("launched").path))
+    }
+
+    func testRetryRevisionIsNonMutatingAndRejectsConcurrentChanges() throws {
+        let messages = [ChatMessage(role: .user, blocks: [.text("first")]),
+                        ChatMessage(role: .assistant, blocks: [.text("first answer")]),
+                        ChatMessage(role: .user, blocks: [.text("retry me")]),
+                        ChatMessage(role: .assistant, blocks: [.text("keep until accepted")])]
+        let retry = RetryRevision(messageIndex: 2, expectedMessageIDs: messages.map(\.id))
+        XCTAssertEqual(try XCTUnwrap(retry.prefix(of: messages)).map(\.id), Array(messages.prefix(2)).map(\.id))
+        XCTAssertEqual(messages.count, 4)
+        XCTAssertNil(retry.prefix(of: messages + [ChatMessage(role: .user, blocks: [.text("newer")])]))
+        XCTAssertNil(RetryRevision(messageIndex: 1, expectedMessageIDs: messages.map(\.id)).prefix(of: messages))
+    }
+
+    @MainActor
+    func testRejectedRetryKeepsBackendThreadMapping() async throws {
+        let id = "retry-test-" + UUID().uuidString
+        let defaults = UserDefaults.standard
+        let key = "kiln.opencodeSessionIds"
+        var mapping = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        mapping[id] = "original-thread"
+        defaults.set(mapping, forKey: key)
+        let service = AgentService(backend: .opencode, executablePath: "/usr/bin/false", openCodeVersion: { throw CocoaError(.fileReadUnknown) })
+        defer { service.forgetThread(for: id) }
+        var started = false
+        await service.sendMessage(sessionId: id, message: "retry", model: AgentModel(rawValue: "opencode:openai/gpt-5.5")!,
+                                  workDir: NSTemporaryDirectory(), resetThread: true) {
+            if case .started = $0 { started = true }
+        }
+        XCTAssertFalse(started)
+        XCTAssertEqual(service.threadID(for: id), "original-thread")
+    }
+
+    @MainActor
+    func testFailedLaunchCommitDoesNotTransmitPromptOrResetThread() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let script = directory.appendingPathComponent("fixture")
+        try "#!/bin/sh\ncat > received\ntouch completed\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let id = "commit-test-" + UUID().uuidString
+        let key = "kiln.codexThreadIds"
+        var mapping = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        mapping[id] = "original-thread"
+        UserDefaults.standard.set(mapping, forKey: key)
+        let service = AgentService(executablePath: script.path)
+        defer { service.forgetThread(for: id) }
+        var accepted = false
+        var hookPID: Int32?
+        await service.sendMessage(sessionId: id, message: "must not transmit", model: .gpt61Sol, workDir: directory.path,
+                                  resetThread: true, onLaunch: { pid in hookPID = pid; throw CocoaError(.fileWriteNoPermission) }) {
+            if case .started = $0 { accepted = true }
+        }
+        XCTAssertFalse(accepted)
+        let pid = try XCTUnwrap(hookPID, "The fixture must reach the launch commit hook")
+        XCTAssertEqual(kill(pid, 0), -1)
+        XCTAssertEqual(errno, ESRCH)
+        XCTAssertEqual(service.threadID(for: id), "original-thread")
+        let received = (try? Data(contentsOf: directory.appendingPathComponent("received"))) ?? Data()
+        XCTAssertTrue(received.isEmpty)
+    }
+
+    func testRetryRecoveryMarkerAndPrivateSessionPublication() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var session = Session(workDir: "/tmp", name: "retry fixture", model: .gpt61Sol)
+        session.messages = [ChatMessage(role: .user, blocks: [.text("request")])]
+        session.needsBackendReset = true
+        try Persistence.saveSessionChecked(session, directory: directory)
+        let file = directory.appendingPathComponent(session.id + ".json")
+        let reloaded = try JSONDecoder().decode(SessionData.self, from: Data(contentsOf: file)).toSession()
+        XCTAssertTrue(reloaded.needsBackendReset)
+        XCTAssertEqual(reloaded.messages.map(\.id), session.messages.map(\.id))
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int, 0o600)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+    }
+
     func testRepliesRetainTheirModelAcrossPersistence() throws {
         let message = ChatMessage(role: .assistant, blocks: [.text("answer")], model: .gpt55)
         let stored = MessageData(from: message)
@@ -27,7 +168,7 @@ final class AgentIntegrationTests: XCTestCase {
     func testGPTModelsUseBundledOfficialMarks() throws {
         XCTAssertTrue(ModelBrandAssets.white.isValid)
         XCTAssertTrue(ModelBrandAssets.black.isValid)
-        for model in [AgentModel.gpt6Astra, .gpt55, .gpt54, AgentModel(rawValue: "opencode:local/gpt-5.5")!] {
+        for model in [AgentModel.gpt61Sol, .gpt55, .gpt54, AgentModel(rawValue: "opencode:local/gpt-5.5")!] {
             if case .chatgpt = model.brand {} else { XCTFail("GPT model missing OpenAI branding") }
         }
         for color in ["white", "black"] {
@@ -39,9 +180,9 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testCatalogFiltersHiddenAndDuplicateModels() throws {
-        let data = Data(#"{"models":[{"slug":"gpt-6-astra","visibility":"list"},{"slug":"gpt-hidden","visibility":"hide"},{"slug":"gpt-6-astra","visibility":"list"},{"slug":"claude-test","visibility":"list"}]}"#.utf8)
+        let data = Data(#"{"models":[{"slug":"gpt-6.1-sol","visibility":"list"},{"slug":"gpt-hidden","visibility":"hide"},{"slug":"gpt-6.1-sol","visibility":"list"},{"slug":"claude-test","visibility":"list"}]}"#.utf8)
         let models = try XCTUnwrap(ModelCatalog.parse(data))
-        XCTAssertEqual(models.map(\.model.rawValue), ["gpt-6-astra"])
+        XCTAssertEqual(models.map(\.model.rawValue), ["gpt-6.1-sol"])
         XCTAssertNil(ModelCatalog.parse(Data("not JSON".utf8)))
     }
 

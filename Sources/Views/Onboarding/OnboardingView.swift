@@ -21,6 +21,8 @@ struct OnboardingView: View {
     @State private var codexPath: String?
     @State private var codexVersion: String?
     @State private var openCodeVersion: String?
+    @State private var grokStatus: CLIStatus = .checking
+    @State private var grokVersion: String?
     @State private var pickedWorkDir: String?
     @State private var engramStatus: EngramStatus = .checking
     @State private var engramPath: String?
@@ -58,8 +60,8 @@ struct OnboardingView: View {
             Group {
                 switch step {
                 case .welcome:  welcomePane
-                case .install:  installPane
-                case .login:    loginPane
+                case .install:  ScrollView { installPane }
+                case .login:    ScrollView { loginPane }
                 case .engram:   engramPane
                 case .workDir:  workDirPane
                 }
@@ -84,6 +86,7 @@ struct OnboardingView: View {
                 .padding(.trailing, 8)
 
                 Button(primaryLabel) { primaryAction() }
+                    .keyboardShortcut(.defaultAction)
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.kilnBg)
                     .padding(.horizontal, 16)
@@ -99,6 +102,7 @@ struct OnboardingView: View {
         .frame(width: 560, height: 460)
         .background(Color.kilnBg)
         .task { await probeCLIs() }
+        .onExitCommand { store.showOnboarding = false }
     }
 
     // MARK: - Panes
@@ -136,11 +140,16 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Codex and OpenCode, in one native workspace.")
+            Text("Codex, OpenCode, and Grok in one native workspace.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
 
             statusBadge
+
+            if grokStatus == .missing || grokStatus == .broken {
+                Link("Install Grok CLI", destination: URL(string: "https://docs.x.ai/build/cli/reference")!)
+                    .font(.system(size: 12))
+            }
 
             if needsCLIInstall {
                 VStack(alignment: .leading, spacing: 8) {
@@ -184,13 +193,14 @@ struct OnboardingView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Color.kilnText)
 
-            Text("Codex handles authentication. Sign in through Terminal to connect your account.")
+            Text("Each CLI keeps its own sign-in.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.kilnTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             CopyableCommand(command: "codex login")
             CopyableCommand(command: "opencode auth login")
+            CopyableCommand(command: "grok login")
 
             Button("Open Terminal") { openTerminal() }
                 .buttonStyle(.plain)
@@ -459,6 +469,7 @@ struct OnboardingView: View {
             Rectangle().fill(Color.kilnBorderSubtle).frame(height: 1)
             backendStatusRow(name: "Codex", command: "codex", status: codexStatus, version: codexVersion)
             backendStatusRow(name: "OpenCode", command: "opencode", status: openCodeVersion == nil ? .missing : .installed, version: openCodeVersion)
+            backendStatusRow(name: "Grok", command: "grok", status: grokStatus, version: grokVersion)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
@@ -584,6 +595,15 @@ struct OnboardingView: View {
     }
 
     private func probeCLIs() async {
+        grokStatus = .checking
+        grokVersion = nil
+        if let path = CLIUpdateInspector.executable(for: .grok) {
+            if let data = try? await CodexCLI.output(["--no-auto-update", "--version"], executable: path, command: "grok",
+                environment: ["GROK_DISABLE_AUTOUPDATER": "1"]) {
+                grokStatus = .installed
+                grokVersion = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else { grokStatus = .broken }
+        } else { grokStatus = .missing }
         await probeCodex()
         if let data = try? await CodexCLI.output(["--version"], executable: OpenCodeProtocol.executablePath, command: "opencode") {
             openCodeVersion = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
