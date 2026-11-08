@@ -26,6 +26,14 @@ credential responsiveness fixes and the requested Grok integration remain.
   segmented picker when it cannot fit, and long project paths have bounded
   wrapping. Rendered narrow/wide checks and the final installed-client
   check are separate from the helper-path parser regression.
+- CI95 (`95d3fc4`) passed hosted run `42535118748`: 217 tests, zero
+  failures, 14 opt-in skips. Both bundles passed strict deep signature
+  and architecture checks. Its installed-client check caught remaining
+  full-inspector clipping in the disconnected state that leaf tests missed.
+  A full-panel regression then reproduced the clipped header and picker.
+  Stacking the disconnected actions vertically removes their excessive
+  minimum width; full-panel renders cover 300, 350, and 420 points. This
+  follow-up still requires its own review, CI, and installed-client check.
 - Hosted run `42453359096` passed for `dcec629`: 210 tests, zero failures,
   13 opt-in skips, with arm64 and x86_64 candidate bundles. Both downloaded
   bundles passed strict deep signature checks and architecture inspection.

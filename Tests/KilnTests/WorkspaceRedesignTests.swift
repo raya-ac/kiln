@@ -4,6 +4,33 @@ import AppKit
 @testable import Kiln
 
 final class WorkspaceRedesignTests: XCTestCase {
+    @MainActor func testFullDisconnectedMemoryInspectorKeepsHeaderAndMenuInsets() throws {
+        _ = NSApplication.shared
+        let suite = "kiln-memory-layout-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let cognition = CognitiveStore(defaults: defaults)
+        for width in [300.0, 350.0, 420.0] {
+            let root = CognitivePanelView(session: nil, cognition: cognition).frame(width: width, height: 500).clipped()
+                .environment(\.colorScheme, .dark)
+            let renderer = ImageRenderer(content: root)
+            renderer.scale = 2
+            let image = try XCTUnwrap(renderer.cgImage)
+            let header = try XCTUnwrap(image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: 96)))
+            let foreground = try XCTUnwrap(foregroundBounds(header))
+            XCTAssertGreaterThanOrEqual(foreground.minX / 2, 12, "Full inspector header must retain its leading inset")
+            XCTAssertLessThanOrEqual(foreground.maxX / 2, width - 12, "Full inspector header must retain its trailing inset")
+            let menu = try XCTUnwrap(image.cropping(to: CGRect(x: 0, y: 96, width: image.width, height: 64)))
+            let menuBounds = try XCTUnwrap(foregroundBounds(menu))
+            XCTAssertGreaterThanOrEqual(menuBounds.minX / 2, 11)
+            XCTAssertLessThanOrEqual(menuBounds.maxX / 2, width - 11)
+            if let directory = ProcessInfo.processInfo.environment["KILN_VISUAL_OUTPUT"] {
+                let data = try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+                try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("memory-full-\(Int(width)).png"))
+            }
+        }
+    }
+
     @MainActor func testMemoryModePickerStaysInsideNarrowInspectors() throws {
         _ = NSApplication.shared
         for width in [240.0, 300.0, 420.0, 620.0] {
@@ -52,7 +79,7 @@ final class WorkspaceRedesignTests: XCTestCase {
         _ = NSApplication.shared
         let path = "/Users/test/" + String(repeating: "a-very-long-project-directory/", count: 12)
         for width in [240.0, 300.0, 420.0] {
-            let root = CognitiveView.projectPath(path).padding(.horizontal, 14)
+            let root = CognitivePanelView.projectPath(path).padding(.horizontal, 14)
                 .frame(width: width).background(Color.kilnBg)
             let renderer = ImageRenderer(content: root)
             renderer.scale = 2
