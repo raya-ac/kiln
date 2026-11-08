@@ -37,7 +37,8 @@ struct IndexedToolCall: Identifiable, Sendable {
     func matches(_ query: String, failuresOnly: Bool) -> Bool {
         if failuresOnly, presentation.status != .failure { return false }
         let words = query.lowercased().split(whereSeparator: \.isWhitespace)
-        let text = (tool.name + " " + presentation.summary + " " + String(tool.result?.prefix(4_000) ?? "") + " " + presentation.status.label).lowercased()
+        let output = tool.result.map { String($0.prefix(4_000)) } ?? ""
+        let text = [tool.name, presentation.summary, output, presentation.status.label].joined(separator: " ").lowercased()
         return words.allSatisfy { text.contains($0) }
     }
 }

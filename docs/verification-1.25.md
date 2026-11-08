@@ -69,6 +69,13 @@ review ID `01a1b9bb-0fce-74a1-8595-f9ffbaf519e8`. It followed fixes and
 re-review of the earlier overlap, isolation, cancellation, copy, and drawer
 findings. Earlier candidate evidence below is a separate checkpoint.
 
+The first hosted Xcode 26 build exposed compiler inference differences in
+tool-search concatenation and Grok's synthesized stream initializer. Both
+were made explicit without changing behavior; the 210-test suite passed
+again. Fresh focused Astra review also passed, review ID
+`01a1b9c1-f810-74e3-9513-525c6d3cf4cd`. The replacement hosted run remains
+the release-compiler verification.
+
 Studio.11 must not be used for computer-input acceptance: the subsequent
 publish-snapshot review found a pointer-targeting issue with overlapping
 same-process windows. Its source fix and regression are in this snapshot,

@@ -72,6 +72,10 @@ enum GrokProtocol {
         private var receiptRecorded = false
         private var costRecorded = false
 
+        init(newSessionID: String? = nil) {
+            self.newSessionID = newSessionID
+        }
+
         mutating func parse(_ json: [String: Any]) -> [AgentEvent] {
             guard let type = json["type"] as? String else { return [] }
             var events: [AgentEvent] = []
