@@ -17,6 +17,7 @@ YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 - Grok permission modes enforce chat-only or read-only tool restrictions and workspace sandboxing without changing global CLI settings. Unknown context limits remain unavailable rather than triggering guessed auto-compaction.
 
 ### Fixed
+- Shared turns tell the model to use Kiln's selected-window tools instead of unrelated desktop tools. Failed MCP startup aborts the turn. Status rechecks permission and window availability; routing guidance does not disable other independently configured tools.
 - Return submits valid account sign-in, registration, recovery, and password-change forms. Escape closes settings, model selection, session details, memory, release notes, and the expanded editor without discarding the draft. Studio avoids repeated tool/computer shortcuts when the navigation rail is visible.
 - Computer permissions refresh when Kiln becomes active. The panel identifies the running app copy and lists each missing permission, unsupported backend, mode, or sharing requirement instead of one generic disabled-button warning.
 - Concurrent computer turns share listener readiness. Stopping one chat cannot cancel another chat's pending start. Approval prompts show the originating chat name and stable identifier, including background requests.

@@ -6,10 +6,14 @@ import AppKit
 @MainActor private final class ComputerFixture {
     var target = ComputerTarget(id: 41, pid: 900, app: "Fixture", title: "A safe test window", frame: CGRect(x: 20, y: 30, width: 800, height: 600))
     var allowed = true
+    var targetAvailable = true
     var dispatched = 0
     var captureID = ""
     func driver() -> ComputerDriver {
-        ComputerDriver(allowed: { self.allowed }, current: { _ in self.target }, capture: { _ in
+        ComputerDriver(allowed: { self.allowed }, current: { _ in
+            guard self.targetAvailable else { throw ComputerUseError.targetGone }
+            return self.target
+        }, capture: { _ in
             let id = UUID().uuidString
             self.captureID = id
             return ComputerCapture(id: id, target: self.target, width: 800, height: 600, timestamp: .now, jpeg: Data("fixture-image".utf8))
@@ -30,6 +34,53 @@ import AppKit
 }
 
 final class ComputerUseTests: XCTestCase {
+    @MainActor func testStatusRechecksPermissionsAndWindowExistence() async throws {
+        let fixture = ComputerFixture()
+        let computer = ComputerUse(driver: fixture.driver())
+        defer { computer.stop() }
+        try computer.enable(sessionID: "status-fixture", target: fixture.target, model: .gpt61Sol)
+        let started = try await computer.startTurn(sessionID: "status-fixture", model: .gpt61Sol, options: SendOptions())
+        let turn = try XCTUnwrap(started)
+        let request = ComputerUse.encode(["name": "status"])
+        let initial = try decode(await computer.handle(request, token: turn.token))
+        XCTAssertNil(initial["isError"])
+        fixture.allowed = false
+        let denied = try decode(await computer.handle(request, token: turn.token))
+        XCTAssertEqual(denied["isError"] as? Bool, true)
+        fixture.allowed = true
+        fixture.targetAvailable = false
+        let closed = try decode(await computer.handle(request, token: turn.token))
+        XCTAssertEqual(closed["isError"] as? Bool, true)
+        XCTAssertEqual(fixture.dispatched, 0)
+    }
+
+    @MainActor func testAgentInjectsGuidanceOnlyWhileComputerTurnIsActive() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let script = directory.appendingPathComponent("fixture")
+        try "#!/bin/sh\n/bin/cat > received\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let fixture = ComputerFixture()
+        let computer = ComputerUse(driver: fixture.driver())
+        defer { computer.stop() }
+        let service = AgentService(executablePath: script.path, computer: computer)
+        let id = UUID().uuidString
+        try computer.enable(sessionID: id, target: fixture.target, model: .gpt61Sol)
+        await service.sendMessage(sessionId: id, message: "Can you see the shared window?", model: .gpt61Sol,
+                                  workDir: directory.path) { _ in }
+        let received = directory.appendingPathComponent("received")
+        let shared = try String(contentsOf: received, encoding: .utf8)
+        XCTAssertTrue(shared.contains(ComputerConnection.instructions))
+        computer.stop(sessionID: id)
+        await service.sendMessage(sessionId: id, message: "Sharing stopped.", model: .gpt61Sol,
+                                  workDir: directory.path) { _ in }
+        let unshared = try String(contentsOf: received, encoding: .utf8)
+        XCTAssertFalse(unshared.contains(ComputerConnection.instructions))
+        XCTAssertEqual(unshared, "Sharing stopped.")
+        XCTAssertEqual(fixture.dispatched, 0)
+    }
+
     @MainActor func testBusyRequestDoesNotInvalidateApprovalAlreadyOnScreen() async throws {
         let fixture = ComputerFixture()
         let computer = ComputerUse(driver: fixture.driver())
@@ -295,6 +346,7 @@ final class ComputerUseTests: XCTestCase {
         }
         let args = ComputerConnection.codexArguments(executable: "/tmp/a \"quoted\"/Kiln")
         XCTAssertTrue(args.contains { $0.contains("env_vars=") })
+        XCTAssertTrue(args.contains("mcp_servers.kiln_computer.required=true"))
         XCTAssertFalse(args.contains { $0.contains("Bearer") })
         let config = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(OpenCodeProtocol.configuration(SendOptions(), computerExecutable: "/app/Kiln", majorVersion: 2).utf8)) as? [String: Any])
         let servers = (config["mcp"] as? [String: Any])?["servers"] as? [String: Any]
@@ -352,6 +404,7 @@ final class ComputerUseTests: XCTestCase {
         let initReply = await ComputerMCP.response(["id": 1, "method": "initialize", "params": ["protocolVersion": "2025-11-25"]], environment: [:])
         let result = try XCTUnwrap(initReply?["result"] as? [String: Any])
         XCTAssertEqual(result["protocolVersion"] as? String, "2025-11-25")
+        XCTAssertEqual(result["instructions"] as? String, ComputerConnection.instructions)
         let list = await ComputerMCP.response(["id": 2, "method": "tools/list"], environment: [:])
         let tools = try XCTUnwrap((list?["result"] as? [String: Any])?["tools"] as? [[String: Any]])
         XCTAssertEqual(Set(tools.compactMap { $0["name"] as? String }), ["status", "observe", "click", "type_text", "press_key", "scroll"])
@@ -359,6 +412,22 @@ final class ComputerUseTests: XCTestCase {
         XCTAssertEqual((denied?["result"] as? [String: Any])?["isError"] as? Bool, true)
         let notification = await ComputerMCP.response(["method": "notifications/initialized"], environment: [:])
         XCTAssertNil(notification)
+    }
+
+    func testSharedWindowGuidanceOnlyAppearsInConnectedTurns() {
+        var options = SendOptions()
+        options.systemPrompt = "Keep the user's existing session instructions."
+        let message = "Can you see the thing I am sharing?"
+        let inactive = AgentService.buildPrompt(message: message, options: options)
+        XCTAssertFalse(inactive.contains(ComputerConnection.instructions))
+        let connected = AgentService.buildPrompt(message: message, options: options, computerConnected: true)
+        XCTAssertTrue(connected.contains(options.systemPrompt!))
+        XCTAssertTrue(connected.contains(ComputerConnection.instructions))
+        XCTAssertTrue(connected.hasSuffix(message))
+        let next = AgentService.buildPrompt(message: "Sharing stopped.", options: options)
+        XCTAssertFalse(next.contains(ComputerConnection.instructions))
+        XCTAssertTrue(ComputerConnection.instructions.hasPrefix("Kiln's selected-window tools"))
+        XCTAssertTrue(ComputerConnection.instructions.prefix(512).contains("status tool, then observe"))
     }
 
     @MainActor func testInputWaitsForApprovalAndCaptureCannotBeReplayed() async throws {

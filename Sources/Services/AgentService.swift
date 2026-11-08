@@ -78,7 +78,6 @@ final class AgentService: ObservableObject {
             onEvent(.done)
             return
         }
-        let prompt = Self.buildPrompt(message: message, options: options)
         let existingThread = resetThread ? nil : threadIds[sessionId]
         let grokNewSessionID = backend == .grok && existingThread == nil ? UUID().uuidString.lowercased() : nil
 
@@ -105,6 +104,7 @@ final class AgentService: ObservableObject {
         }
         defer { if let computerTurn { computer.endTurn(computerTurn) } }
         guard turnIDs[sessionId] == turnID, !Task.isCancelled else { onEvent(.cancelled); onEvent(.done); return }
+        let prompt = Self.buildPrompt(message: message, options: options, computerConnected: computerTurn != nil)
 
         var args: [String] = []
         if executablePath == "/usr/bin/env" {
@@ -338,7 +338,7 @@ final class AgentService: ObservableObject {
         runningProcesses.removeValue(forKey: sessionId)
     }
 
-    nonisolated private static func buildPrompt(message: String, options: SendOptions) -> String {
+    nonisolated static func buildPrompt(message: String, options: SendOptions, computerConnected: Bool = false) -> String {
         var parts: [String] = []
         if options.chatMode {
             parts.append("You are in chat-only mode. Do not modify files or run shell commands unless the user explicitly asks. Prefer plain text answers.")
@@ -349,6 +349,9 @@ final class AgentService: ObservableObject {
         }
         if let systemPrompt = options.systemPrompt, !systemPrompt.isEmpty {
             parts.append(systemPrompt)
+        }
+        if computerConnected {
+            parts.append(ComputerConnection.instructions)
         }
         parts.append(message)
         return parts.joined(separator: "\n\n")

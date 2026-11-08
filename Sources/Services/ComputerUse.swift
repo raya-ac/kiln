@@ -239,6 +239,8 @@ final class ComputerUse: ObservableObject {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let name = json["name"] as? String else { throw ComputerUseError.invalidAction }
             if name == "status" {
+                guard driver.allowed() else { throw ComputerUseError.permissions }
+                _ = try driver.current(grant.target)
                 return Self.result(["type": "text", "text": "Selected window: \(grant.target.label). Every input action requires approval in Kiln. Observe before acting."])
             }
             if name == "observe" {

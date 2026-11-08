@@ -11,6 +11,29 @@ credential responsiveness fixes and the requested Grok integration remain.
 
 ## Publish Snapshot Checks
 
+- Hosted run `42453359096` passed for `dcec629`: 210 tests, zero failures,
+  13 opt-in skips, with arm64 and x86_64 candidate bundles. Both downloaded
+  bundles passed strict deep signature checks and architecture inspection.
+  The arm64 candidate `1.25.0-ci.93` was installed at
+  `/Users/ari/Applications/Kiln.app`, after backing up the previous app and
+  Kiln data. Intel execution remains untested.
+- CI93 recognizes both macOS grants after the user re-added the installed
+  copy. The packaged MCP helper passed initialize, all six tools, inactive
+  observe denial, and EOF shutdown. A real Sol read-only discovery probe
+  found `mcp__kiln_computer__status` and received the expected inactive
+  result without sharing or input.
+- A user's shared-window request chose unrelated general desktop tools
+  despite Kiln's MCP launch configuration. The follow-up adds selected-window
+  guidance to active turns and MCP initialization. Its per-turn server is
+  required; a deliberately failing-server CLI probe exited before starting
+  a turn, confirming that startup cannot silently omit the connection.
+  The follow-up's local test attempt stopped before tests because the volume
+  was full. Hosted verification is required; no test pass is inferred.
+  Real selected-window observation and user-approved input remain pending.
+  Fresh focused Astra review passed after correcting stale status and an
+  overstated routing claim, review `01a1b9d2-e14c-79d0-a53f-6142cfc0dfb1`.
+  Its rollout metadata identifies `gpt-6-astra` at high effort. Changed Swift
+  files pass syntax parsing; this does not replace the pending full suite.
 - Default SwiftPM engine: 210 tests, zero failures, 13 opt-in skips. The
   isolated checkout uses the upstream pinned SwiftTerm 1.99.2 dependency.
 - Four opt-in live checks passed without skips: Sol image input on new and

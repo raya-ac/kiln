@@ -34,7 +34,8 @@ enum ComputerMCP {
             let versions = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
             let requested = (request["params"] as? [String: Any])?["protocolVersion"] as? String ?? ""
             result = ["protocolVersion": versions.contains(requested) ? requested : "2025-11-25",
-                      "serverInfo": ["name": "kiln-computer", "version": "1.0.0"], "capabilities": ["tools": [:]]]
+                      "serverInfo": ["name": "kiln-computer", "version": "1.0.0"], "capabilities": ["tools": [:]],
+                      "instructions": ComputerConnection.instructions]
         case "ping": result = [:]
         case "tools/list": result = ["tools": tools]
         case "tools/call":
