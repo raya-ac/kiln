@@ -140,7 +140,9 @@ enum ComputerConnection {
     }
     static func codexArguments(executable: String) -> [String] {
         func literal(_ value: Any) -> String {
-            String(decoding: (try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])) ?? Data(), as: UTF8.self)
+            // TOML rejects JSON's escaped slashes and unescaped DEL character.
+            String(decoding: (try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data(), as: UTF8.self)
+                .replacingOccurrences(of: "\u{007F}", with: "\\u007F")
         }
         return ["-c", "mcp_servers.kiln_computer.command=\(literal(executable))",
                 "-c", "mcp_servers.kiln_computer.args=[\"--computer-mcp\"]",

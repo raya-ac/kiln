@@ -34,6 +34,34 @@ import AppKit
 }
 
 final class ComputerUseTests: XCTestCase {
+    func testCodexComputerArgumentsDoNotEscapePathSeparators() throws {
+        let executable = #"/Applications/Kiln "test" \ workspace/Kiln.app/Contents/MacOS/Kiln"#
+        let prefix = "mcp_servers.kiln_computer.command="
+        let argument = try XCTUnwrap(ComputerConnection.codexArguments(executable: executable).first { $0.hasPrefix(prefix) })
+        XCTAssertFalse(argument.contains("\\/"))
+        let encoded = String(argument.dropFirst(prefix.count))
+        XCTAssertEqual(try JSONDecoder().decode(String.self, from: Data(encoded.utf8)), executable)
+    }
+
+    func testGeneratedComputerArgumentsWithInstalledCodexWhenRequested() async throws {
+        guard ProcessInfo.processInfo.environment["KILN_LIVE_COMPUTER_ARGUMENTS_CHECK"] == "1" else {
+            throw XCTSkip("Opt-in read-only Codex configuration parser check")
+        }
+        for executable in ["/Users/ari/Applications/Kiln.app/Contents/MacOS/Kiln",
+                           #"/tmp/Kiln "test" \ workspace/Kiln"#,
+                           "/tmp/Kiln-\u{007F}-\u{1F525}/Kiln"] {
+            let arguments = ComputerConnection.codexArguments(executable: executable)
+                + ["mcp", "get", ComputerConnection.serverName, "--json"]
+            let output = try await CodexCLI.output(arguments)
+            let configuration = try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? [String: Any])
+            let transport = try XCTUnwrap(configuration["transport"] as? [String: Any])
+            XCTAssertEqual(transport["command"] as? String, executable)
+            XCTAssertEqual(transport["args"] as? [String], ["--computer-mcp"])
+            XCTAssertEqual(transport["env_vars"] as? [String], ComputerConnection.environmentKeys)
+            XCTAssertEqual(configuration["tool_timeout_sec"] as? Int, 125)
+        }
+    }
+
     @MainActor func testStatusRechecksPermissionsAndWindowExistence() async throws {
         let fixture = ComputerFixture()
         let computer = ComputerUse(driver: fixture.driver())

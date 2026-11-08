@@ -11,6 +11,21 @@ credential responsiveness fixes and the requested Grok integration remain.
 
 ## Publish Snapshot Checks
 
+- Follow-up on 2026-11-09: the user enabled both CI94 grants and shared
+  TextEdit. Kiln displayed both permissions green and the correct window.
+  The actual observe-only turn still failed before MCP initialization:
+  `kiln_computer` reported `No such file or directory`. The generated
+  override encoded `/` as `\/`; Codex retained those backslashes in the
+  executable path. The earlier handwritten discovery probe did not exercise
+  this encoder and must not be counted as generated-argument startup proof.
+  A regression reproduced the defect against the installed CLI parser,
+  then passed after disabling slash escaping. Quotes, backslashes, Unicode,
+  and an escaped DEL character are also covered. Actual patched-client
+  helper startup and selected-window observation remain acceptance gates.
+- The follow-up also constrains the Memory inspector: a menu replaces its
+  segmented picker when it cannot fit, and long project paths have bounded
+  wrapping. Rendered narrow/wide checks and the final installed-client
+  check are separate from the helper-path parser regression.
 - Hosted run `42453359096` passed for `dcec629`: 210 tests, zero failures,
   13 opt-in skips, with arm64 and x86_64 candidate bundles. Both downloaded
   bundles passed strict deep signature checks and architecture inspection.

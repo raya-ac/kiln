@@ -11,7 +11,6 @@ struct CognitiveView: View {
     @State private var maxAge = 3600.0
     @State private var impact = 2
     @State private var showConnection = false
-    private let tabs = ["Context", "Search", "Dormant", "Assumptions"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,9 +24,8 @@ struct CognitiveView: View {
                 Button { Task { await cognition.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .disabled(!cognition.connected || cognition.busy).help("Refresh memory").accessibilityLabel("Refresh memory")
             }.buttonStyle(.plain).padding(14)
-            Picker("Memory view", selection: $tab) {
-                ForEach(tabs, id: \.self) { Text($0).tag($0) }
-            }.pickerStyle(.segmented).padding(.horizontal, 12).padding(.bottom, 12)
+            CognitiveModePicker(selection: $tab)
+                .padding(.horizontal, 12).padding(.bottom, 12)
             Divider()
             if let error = cognition.error {
                 Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 11))
@@ -56,6 +54,7 @@ struct CognitiveView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(Color.kilnText)
         .background(Color.kilnBg)
         .sheet(isPresented: $showConnection) {
@@ -76,8 +75,7 @@ struct CognitiveView: View {
 
     private var contextView: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(cognition.context["project_path"].string).font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.kilnTextSecondary).textSelection(.enabled)
+            Self.projectPath(cognition.context["project_path"].string)
             Text("Project context").font(.headline)
             if cognition.context["memories"].array.isEmpty { empty("No explicitly scoped memories") }
             ForEach(cognition.context["memories"].array, id: \.id) { memory in memoryRow(memory) }
@@ -93,6 +91,14 @@ struct CognitiveView: View {
             Button("Save checkpoint") { Task { await cognition.checkpoint(checkpoint); if cognition.error == nil { checkpoint = "" } } }
                 .disabled(checkpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || checkpoint.count > 4000 || cognition.busy)
         }.font(.system(size: 12))
+    }
+
+    static func projectPath(_ path: String) -> some View {
+        Text(path).font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(Color.kilnTextSecondary).textSelection(.enabled)
+            .lineLimit(2).truncationMode(.middle).help(path)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("memory.project-path")
     }
 
     private var searchView: some View {
@@ -199,6 +205,30 @@ struct CognitiveView: View {
             }.font(.caption)
             Divider()
         }
+    }
+}
+
+struct CognitiveModePicker: View {
+    @Binding var selection: String
+    static let modes = ["Context", "Search", "Dormant", "Assumptions"]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            picker.pickerStyle(.segmented).fixedSize()
+                .accessibilityIdentifier("memory.mode.segmented")
+            picker.pickerStyle(.menu)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("memory.mode.menu")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 28)
+    }
+
+    private var picker: some View {
+        Picker("Memory view", selection: $selection) {
+            ForEach(Self.modes, id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden()
     }
 }
 
