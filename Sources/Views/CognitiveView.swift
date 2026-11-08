@@ -73,15 +73,7 @@ struct CognitivePanelView: View {
         .foregroundStyle(Color.kilnText)
         .background(Color.kilnBg)
         .sheet(isPresented: $showConnection) {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Memory connections").font(.headline)
-                    Spacer()
-                    Button("Done") { showConnection = false }.keyboardShortcut(.cancelAction)
-                }.padding(16)
-                Divider()
-                CognitiveConnectionView()
-            }.onExitCommand { showConnection = false }
+            CognitiveConnectionView().onExitCommand { showConnection = false }
         }
         .task(id: (session?.id ?? "") + (session?.workDir ?? "")) {
             if let session { await cognition.select(project: session.workDir, session: session.id) }
@@ -290,10 +282,13 @@ private struct CognitiveAssumptionRow: View {
 
 struct CognitiveConnectionView: View {
     @ObservedObject var cognition = CognitiveStore.shared
+    var showsHeader = true
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack { Text("Local Cognitive Services").font(.headline); Spacer(); Button("Done") { dismiss() } }
+            if showsHeader {
+                HStack { Text("Local Cognitive Services").font(.headline); Spacer(); Button("Done") { dismiss() } }
+            }
             Form {
                 Section("Engram") {
                     TextField("Python executable", text: $cognition.configuration.engramPython)

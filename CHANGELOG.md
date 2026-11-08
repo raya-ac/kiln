@@ -18,7 +18,7 @@ YYYY-MM-DD, versions follow [SemVer](https://semver.org/).
 
 ### Fixed
 - Codex receives the exact computer-helper executable path, including spaces, quotes, backslashes, and Unicode, rather than JSON-escaped path separators in TOML overrides. An opt-in regression checks the generated arguments against the installed CLI parser.
-- Memory inspector modes switch to a compact menu when the segmented control cannot fit. Long project paths wrap or truncate, and disconnected-state actions stack vertically instead of forcing the panel beyond its bounds.
+- Memory inspector modes switch to a compact menu when the segmented control cannot fit. Long project paths wrap or truncate, and disconnected-state actions stack vertically instead of forcing the panel beyond its bounds. Connection settings use one header and close action.
 - Shared turns tell the model to use Kiln's selected-window tools instead of unrelated desktop tools. Failed MCP startup aborts the turn. Status rechecks permission and window availability; routing guidance does not disable other independently configured tools.
 - Return submits valid account sign-in, registration, recovery, and password-change forms. Escape closes settings, model selection, session details, memory, release notes, and the expanded editor without discarding the draft. Studio avoids repeated tool/computer shortcuts when the navigation rail is visible.
 - Computer permissions refresh when Kiln becomes active. The panel identifies the running app copy and lists each missing permission, unsupported backend, mode, or sharing requirement instead of one generic disabled-button warning.

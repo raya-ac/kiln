@@ -34,6 +34,12 @@ credential responsiveness fixes and the requested Grok integration remain.
   Stacking the disconnected actions vertically removes their excessive
   minimum width; full-panel renders cover 300, 350, and 420 points. This
   follow-up still requires its own review, CI, and installed-client check.
+- CI96 (`f2b9955`) passed hosted run `42536342375`: 218 tests, zero
+  failures, 14 opt-in skips. The installed disconnected pane fits and its
+  mode menu closes with Escape. The native connection-sheet check found
+  duplicate Done controls in nested headers; the redundant wrapper is
+  removed in the follow-up. Its single close action and Escape behavior
+  still require final installed-client verification.
 - Hosted run `42453359096` passed for `dcec629`: 210 tests, zero failures,
   13 opt-in skips, with arm64 and x86_64 candidate bundles. Both downloaded
   bundles passed strict deep signature checks and architecture inspection.

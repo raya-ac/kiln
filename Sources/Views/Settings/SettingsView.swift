@@ -94,7 +94,7 @@ struct SettingsView: View {
                 Divider()
                 if tab == .stats { StatsView() }
                 else if tab == .cliUpdates { CLIUpdatesView() }
-                else if tab == .cognitive { CognitiveConnectionView() }
+                else if tab == .cognitive { CognitiveConnectionView(showsHeader: false) }
                 else if tab == .account { AccountSettingsView(account: KilnAccountService.shared) }
                 else { settingsScroll }
             }
